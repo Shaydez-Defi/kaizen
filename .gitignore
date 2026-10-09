@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# Kaizen runtime state: node data dirs, downloaded binaries, SQLite db, logs
+.kaizen/
+
+# test artifacts
+coverage/
+/tmp/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# never commit secrets/keys
+*.pem
+*.key
+!packages/**/test/fixtures/**/*.key
+.env
+.env.*

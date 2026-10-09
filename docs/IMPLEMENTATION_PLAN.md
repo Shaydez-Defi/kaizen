@@ -17,15 +17,23 @@ Dependency notation: "→" means "depends on".
 
 | ID | Task | Deps | Pri | Acceptance criteria | Verification | Status |
 |----|------|------|-----|---------------------|--------------|--------|
-| T-1.1 | Scaffold npm-workspaces monorepo (TS strict, eslint, vitest, root scripts) | — | P0 | `npm install` + `npm run build` + `npm test` pass on empty-ish packages; layout matches ARCHITECTURE §11 | run commands; CI-ready output | NOT STARTED |
-| T-1.2 | Engine core types + StateStore (SQLite: networks, nodes, runs, history) | T-1.1 | P0 | typed models for NetworkDefinition/NodeConfig/OperationResult; migrations run; store unit-tested | vitest unit tests | NOT STARTED |
-| T-1.3 | BinaryManager: download `portaldot_dev`+`subkey`, cache in `.kaizen/bin`, SHA-256 TOFU record | T-1.2 | P0 | fresh env can fetch binary; hash recorded; `--version` runs from cache; idempotent re-run | integration test w/ real download (env-gated) | NOT STARTED |
-| T-1.4 | NodeProcessManager: argv-array spawn, per-node base-path, port allocation, log capture, SIGTERM→SIGKILL stop, restart, DB-wedge detection | T-1.3 | P0 | start dev node → reaches block production; stop within timeout; no orphan procs; SIGKILL+restart recovers DB; wedge detected | integration test vs real node | NOT STARTED |
-| T-1.5 | PortaldotRpcClient (@polkadot/api over WS): health/peers/sync/header/events; reconnect w/ backoff | T-1.3 | P0 | WS client connects to live node; returns typed snapshots; survives node restart (reconnects) | integration test vs real node | NOT STARTED |
-| T-1.6 | NetworkService: single + two-node presets via build-spec chain-spec generation; create/start/stop/inspect services | T-1.4, T-1.5 | P0 | one call creates a real 2-node network that peers and finalizes; inspect returns real peerIds/heights | integration test replicating Phase 0 experiment through the engine | NOT STARTED |
-| T-1.7 | CLI skeleton (`kaizen network create/start/stop/status`, `--json`) | T-1.6 | P0 | CLI drives the same services; `--json` output parseable; exit codes correct | shell-driven smoke test w/ real network | NOT STARTED |
-| T-1.8 | API skeleton (Fastify REST + Zod validation + WS event bus) | T-1.6 | P0 | REST endpoints mirror engine ops; invalid input → 400 with structured error; WS streams engine events | supertest + live smoke | NOT STARTED |
-| T-1.9 | Phase-1 test suite + docs update (PROGRESS/TESTING/RESEARCH status flips) | T-1.7, T-1.8 | P0 | suite green; evidence recorded | `npm test`; docs diff review | NOT STARTED |
+| T-1.1 | Scaffold npm-workspaces monorepo (TS strict, eslint, vitest, root scripts) | — | P0 | `npm install` + `npm run build` + `npm test` pass on empty-ish packages; layout matches ARCHITECTURE §11 | run commands; CI-ready output | VERIFIED |
+| T-1.2 | Engine core types + StateStore (SQLite: networks, nodes, runs, history) | T-1.1 | P0 | typed models for NetworkDefinition/NodeConfig/OperationResult; migrations run; store unit-tested | vitest unit tests | VERIFIED |
+| T-1.3 | BinaryManager: download `portaldot_dev`+`subkey`, cache in `.kaizen/bin`, SHA-256 TOFU record | T-1.2 | P0 | fresh env can fetch binary; hash recorded; `--version` runs from cache; idempotent re-run | integration test w/ real download (env-gated) | VERIFIED |
+| T-1.4 | NodeProcessManager: argv-array spawn, per-node base-path, port allocation, log capture, SIGTERM→SIGKILL stop, restart, DB-wedge detection | T-1.3 | P0 | start dev node → reaches block production; stop within timeout; no orphan procs; SIGKILL+restart recovers DB; wedge detected | integration test vs real node | VERIFIED (see note †) |
+| T-1.5 | PortaldotRpcClient (@polkadot/api over WS): health/peers/sync/header/events; reconnect w/ backoff | T-1.3 | P0 | WS client connects to live node; returns typed snapshots; survives node restart (reconnects) | integration test vs real node | VERIFIED |
+| T-1.6 | NetworkService: single + two-node presets via build-spec chain-spec generation; create/start/stop/inspect services | T-1.4, T-1.5 | P0 | one call creates a real 2-node network that peers and finalizes; inspect returns real peerIds/heights | integration test replicating Phase 0 experiment through the engine | VERIFIED |
+| T-1.7 | CLI skeleton (`kaizen network create/start/stop/status`, `--json`) | T-1.6 | P0 | CLI drives the same services; `--json` output parseable; exit codes correct | shell-driven smoke test w/ real network | VERIFIED |
+| T-1.8 | API skeleton (Fastify REST + Zod validation + WS event bus) | T-1.6 | P0 | REST endpoints mirror engine ops; invalid input → 400 with structured error; WS streams engine events | supertest + live smoke | VERIFIED |
+| T-1.9 | Phase-1 test suite + docs update (PROGRESS/TESTING/RESEARCH status flips) | T-1.7, T-1.8 | P0 | suite green; evidence recorded | `npm test`; docs diff review | VERIFIED |
+
+† T-1.4 "wedge detected" split: **crash/wedge *death* detection** (unexpected
+exit → `crashed` state + log tail; startup wedge → `STARTUP_FAILED`) and
+cross-process **adopted stop** (CLI short-lived processes vs daemon nodes) are
+implemented and live-verified in Phase 1. **Alive-but-stalled runtime
+detection** (process healthy, no blocks — the Phase 0 DB-wedge signature) is
+monitoring work and lives in **T-2.4** (MonitoringService state machine), as
+planned.
 
 ## Phase 2 — Multi-Node Networks, Monitoring & Web UI (P0)
 

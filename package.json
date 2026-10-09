@@ -1,0 +1,29 @@
+{
+  "name": "kaizen",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Portaldot node operations and infrastructure management platform",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run build -w @kaizen/engine && npm run build -w @kaizen/cli && npm run build -w @kaizen/api && npm run build -w @kaizen/web",
+    "test": "vitest run --config vitest.config.mts",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "lint": "eslint .",
+    "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/cli --noEmit && tsc -p apps/api --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^24.19.2",
+    "eslint": "^9.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^5.0.3"
+  }
+}

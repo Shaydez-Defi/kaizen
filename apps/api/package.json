@@ -1,0 +1,19 @@
+{
+  "name": "@kaizen/api",
+  "version": "0.1.0",
+  "description": "Kaizen backend API — REST + WebSocket over the shared operations engine",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node dist/index.js",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.3.4",
+    "@kaizen/engine": "*",
+    "fastify": "^5.12.5",
+    "zod": "^4.6.5"
+  }
+}

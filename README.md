@@ -25,23 +25,31 @@ history.
 
 ## Current Implementation Status
 
-**Phase 0 — Foundation & Technical Discovery: COMPLETE** (2026-10-09).
-No product features built yet; the ground is now verified and documented.
+**Phase 1 — Foundation & Node Lifecycle Core: COMPLETE** (2026-10-09).
+The monorepo is runnable: the shared engine manages **real Portaldot node
+processes**, and the CLI and API both drive those same engine services.
 
-What is already **verified against the real Portaldot binary** (see
-`docs/TECHNICAL_RESEARCH.md` for evidence and reproduction commands):
+What is verified against the real `portaldot_dev` binary (evidence in
+`docs/PROGRESS.md`, reproduction commands in `docs/TESTING.md`):
 
-- `portaldot_dev 2.0.0` runs on this machine; dev networks produce blocks (~6 s).
-- **A real 2-validator local network forms, peers, syncs, and finalizes**
-  (local chain spec + `--bootnodes` + well-known keys).
-- RPC surface works: health, peers (with roles/best blocks), sync state, peer
-  identity, headers, runtime version (spec 1002, metadata V13), Prometheus
-  metrics, chain-spec export, clean shutdown.
+- `kaizen setup` downloads the official artifact, verifies it (SHA-256 TOFU
+  manifest), and smoke-checks `--version`; re-runs are idempotent.
+- The engine starts/stops/restarts real nodes: argv-array spawn, per-node data
+  dirs and ports, log capture, SIGTERM→SIGKILL stop, duplicate/stale-process
+  protection, startup-failure detection — no orphan processes left behind.
+- The RPC client (`@polkadot/api` over WebSocket) reads real data: chain,
+  health, peers (with roles), sync state, block headers, runtime version
+  (`portaldot` spec 1002), and delivers live head subscriptions.
+- `NetworkService` creates, starts, health-gates, inspects, stops, and removes
+  real networks — including a **two-node network where both nodes peer
+  (`peers: 1` each, `AUTHORITY` roles) and converge on the same best block**.
+- The CLI (`kaizen network …`) and the Fastify API (REST + WS event stream)
+  invoke only shared engine services; inputs are validated and errors are
+  structured.
 
-What remains unverified (tracked, with exact experiments planned):
-`@polkadot/api` WS compatibility, 4-validator topologies, on-chain
-staking/session flows, Docker image build, and Kubernetes/Helm (tooling is
-installed; no cluster started yet — planned, not abandoned).
+What remains for later phases: monitoring/incident detection, Failure Lab,
+validator transactions, Docker/K8s deployment adapters, and the real web UI
+(Phase 1 ships only a scaffold page).
 
 ## Verified Prerequisites (host)
 
@@ -57,25 +65,42 @@ checksums are published — see RSK-07).
 
 ## Installation & Development
 
-> ⚠️ Under active construction — Phase 0 delivered documentation and verified
-> research only; there is no runnable `kaizen` command yet. These commands
-> become valid at the Phase 1 gate (see `docs/IMPLEMENTATION_PLAN.md`).
-
 ```bash
 git clone https://github.com/Shaydez-Defi/kaizen
 cd kaizen
 npm install
-npm run build
-npm test                 # unit tests
-KAIZEN_TEST_LIVE=1 npm run test:integration   # real-node integration tests
+npm run build               # engine → cli → api → web
+npm test                    # fast unit tests (no network, no binary)
 ```
 
-Planned quickstart (Phase 2 gate):
+Real-node integration tests (downloads the ~30 MB node binary on first run
+into a temp cache, spawns real nodes, cleans up):
 
 ```bash
-kaizen network create --preset two-node --name demo
-kaizen network status demo --watch
+KAIZEN_TEST_LIVE=1 npm run test:integration
 ```
+
+Without `KAIZEN_TEST_LIVE=1` the live suites are **skipped** (never reported
+as passing). `npm run lint` and `npm run typecheck` complete the gates.
+
+## CLI Quickstart (Phase 1 surface)
+
+The CLI runs the engine in-process; the API exposes the same services over
+REST/WS (`npm run build && node apps/api/dist/index.js` → `http://127.0.0.1:4310`).
+
+```bash
+node packages/cli/dist/index.js setup        # explicit binary download + verify
+node packages/cli/dist/index.js status       # binary availability (never downloads)
+node packages/cli/dist/index.js network create demo --preset single-node
+node packages/cli/dist/index.js network start demo
+node packages/cli/dist/index.js network status demo        # real RPC: height, peers, spec
+node packages/cli/dist/index.js --json network list        # machine-readable everywhere
+node packages/cli/dist/index.js network stop demo
+node packages/cli/dist/index.js network remove demo
+```
+
+Runtime state (SQLite db, node data dirs, logs, binary cache) lives in
+`./.kaizen/` (gitignored) or `$KAIZEN_DATA_DIR`.
 
 ## Documentation
 

@@ -1,0 +1,14 @@
+{
+  "name": "@kaizen/engine",
+  "version": "0.1.0",
+  "description": "Kaizen shared operations engine: binary management, node process orchestration, Portaldot RPC, network services",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@polkadot/api": "^17.0.2"
+  }
+}

@@ -101,6 +101,13 @@ Reproduce:
   connected within seconds: each reported `peers: 1` with `roles: "AUTHORITY"`,
   imported identical blocks (same best hash at #7), and finality progressed
   (`finalized #5` on both).
+  **Re-verified through the Kaizen engine (Phase 1, T-1.6)**:
+  `NetworkService.create('two-node')` builds the spec, pre-generates node
+  keys (`key generate-node-key --file`), wires the bootnode from the real
+  peer id, and starts both nodes; the live test converges on `peers ≥ 1` on
+  both nodes, bidirectional peer-id cross-check, identical best hash, and
+  equal progressing finalized heights — all read via `@polkadot/api` over WS
+  (`test/integration/network.int.test.ts`).
 - **Status**: VERIFIED (2-node, explicit bootnode wiring, same host).
 - **Implications**: Two-, four-validator and validator+fullnode presets are
   buildable with the same mechanism. Peer state is observable via
@@ -142,13 +149,18 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
   generation defaults: HTTP 9933, WS 9944. Log line "Listening for new
   connections on 127.0.0.1:<ws-port>" observed. HTTP JSON-RPC verified live
   (see R-07). Prometheus at 9615 default (`--prometheus-port` overrides).
-- **Status**: PARTIALLY VERIFIED (HTTP RPC proven live; WS server confirmed
-  listening but no WS client call was made).
+  **WS proven with a real client (Phase 1, T-1.5)**: `@polkadot/api` 17.0.2
+  `WsProvider` connects to `ws://127.0.0.1:<ws-port>` on the real binary;
+  typed snapshot reads (`system_*`, `chain_getHeader`, `state_getRuntimeVersion`),
+  `chain_subscribeNewHeads` delivering advancing blocks, raw
+  `provider.send('system_localPeerId')`, and auto-reconnect after the node is
+  stopped and restarted all verified in `test/integration/rpc.int.test.ts`.
+- **Status**: VERIFIED (HTTP + WS both exercised by live tests).
 - **Implications**: Kaizen must allocate 3+ ports per node (p2p, HTTP, WS) plus
   Prometheus — port management is a core engine responsibility.
-- **Uncertainties**: WS RPC payload behavior under `@polkadot/api`.
-- **Next step**: T-1.5 connects `@polkadot/api` over WS to a live node and
-  reads metadata + subscriptions.
+- **Uncertainties**: None material for the local-node use case.
+- **Next step**: none required (Phase 2 may add WS subscriptions for the
+  monitoring sampler).
 
 ## R-07 — Which RPC methods are available; what do responses contain?
 
@@ -387,7 +399,7 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 | R-03 | Single-node dev network | VERIFIED |
 | R-04 | Multi-node network (2 nodes, bootnodes) | VERIFIED |
 | R-05 | 4-validator & custom topologies | PARTIALLY VERIFIED |
-| R-06 | Ports / RPC / WS endpoints | PARTIALLY VERIFIED |
+| R-06 | Ports / RPC / WS endpoints | VERIFIED (WS via @polkadot/api, Phase 1) |
 | R-07 | RPC methods & responses | VERIFIED (core set) |
 | R-08 | Identity/health/sync/peer inspection | VERIFIED |
 | R-09 | Metrics / graceful shutdown | PARTIALLY VERIFIED |

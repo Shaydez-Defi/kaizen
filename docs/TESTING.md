@@ -56,14 +56,97 @@ Negative/edge findings recorded honestly:
 - `pkill -f <pattern-that-matches-own-shell>` footgun during probes — noted for
   test-harness design (use exact-name kills).
 
-## 4. Known Limitations (current)
+## 4. Tests Executed in Phase 1 (unit + live suite + CLI smoke)
 
-- WS RPC not yet exercised by a real client (T-1.5 will flip R-06).
+Run 2026-10-09 on the machine described above. Gates before any commit:
+`npm run typecheck`, `npm run lint`, `npm test` (unit), `npm run build`, and
+`KAIZEN_TEST_LIVE=1 npm run test:integration` (live suite). The live suites
+**skip** (never report passing) without the env var.
+
+### 4.1 Unit suite — `npm test` (no network, no binary, fast)
+
+32 tests / 6 files in `packages/engine/test/` and `packages/cli/test/`:
+`buildNodeArgs` + `assertSafeArgs` (forbidden `--tmp`/external-RPC flags),
+StateStore (migrations, networks/nodes/operations CRUD, operation→network
+linking), PortAllocator (probe-bind, range/stride behavior, exhaustion),
+event bus (subscribe/unsubscribe), BinaryManager (TOFU manifest logic with
+injected fetch/spawn — no real download), `isPidAlive` guard (pid ≤ 0 never
+alive — 0/-1 have process-group kill semantics), log tail, pid file path.
+
+### 4.2 Live suite — `KAIZEN_TEST_LIVE=1 npm run test:integration`
+
+Real `portaldot_dev` processes; isolated temp dirs per suite
+(`os.tmpdir()/kaizen-it/…`); ports from the engine allocator; shared binary
+cache in `os.tmpdir()/kaizen-test-bin` (downloaded once per machine);
+240 s per-test timeouts; `fileParallelism: false` to avoid port/CPU races.
+
+| File | Tests | What it proves against the real binary |
+|---|---|---|
+| `binary.int.test.ts` | 1 | fresh download → SHA-256 verify → `--version` smoke; re-run idempotent (cached tarball re-verified) |
+| `process.int.test.ts` | 4 | start → RPC-healthy → duplicate refused → SIGTERM stop, no orphans; invalid flag → `STARTUP_FAILED` + log tail; **cross-process adopted stop** (second manager instance stops the daemon via persisted pid); **external SIGKILL → `crashed` state + restart recovers chain DB (height not lost)** |
+| `rpc.int.test.ts` | 5 | typed snapshot (chain `Development`, spec `portaldot@1002`, real libp2p peer id, finalized head); head subscription delivers advancing blocks; dead port → structured `RPC_CONNECTION_FAILED`; `readSnapshot` one-shot; **node stop+restart → same client reconnects and reads resume** |
+| `network.int.test.ts` | 2 | single-node full lifecycle (create→start→real RPC inspect incl. finalized→stop→remove, history recorded, no orphans); **two-node: both `peers≥1` with AUTHORITY roles, cross-checked peer ids, identical best hash, finality progressing equally on both** |
+| `api.int.test.ts` | 4 | `/api/health`; Zod validation → structured 400; network create/list delegates to the real engine; WS `/api/events` streams a hello + engine events |
+
+Result: **16/16 live tests pass**; `pgrep -ax portaldot_dev` after the suite
+→ no orphans.
+
+### 4.3 CLI smoke (T-1.7, scripted shell)
+
+`setup` (fresh 30 MB download + verify) → `status` → `network create` →
+duplicate create → structured `NETWORK_ALREADY_EXISTS`, exit 1 → invalid
+name → `--json` INVALID_INPUT envelope, exit 1 → `list` → `start` (health-
+gated) → `status` (real RPC height/peers/spec via the API-inspect path) →
+`--json status` parsed by a JSON consumer → `stop` (cross-process adopted
+stop) → `remove` → `list` empty. **13/13 steps pass.**
+
+### 4.4 Bugs the live suite caught (fixed; regression-tested)
+
+Honesty demands recording these — the live layer earned its keep:
+
+1. `withTimeout()` resolved `void`, so "graceful stop" checks were always
+   falsy → every successful stop escalated to SIGKILL *and* reported
+   `STOP_TIMEOUT`. Fixed + manager unit tests.
+2. `new WsProvider(url, false)` disables auto-connect — `ApiPromise.create`
+   hangs forever. Fixed (numeric retry delay).
+3. `key generate-node-key` prints the peer id to **STDERR**; the engine
+   parsed stdout only → two-node create failed. Fixed (parse both streams;
+   never log the key file content).
+4. `api.provider` is `undefined` on @polkadot/api v17 — raw
+   `system_localPeerId` always failed (surfaced as a `null` peer id with a
+   warning). Fixed (client holds the `WsProvider` reference).
+5. `isPidAlive(0)` → `kill(2)` pid 0 signals the whole process **group**;
+   the pid ≤ 0 guard was missing. Fixed + unit test.
+6. `@fastify/websocket` routes registered synchronously on the root instance
+   *before* the plugin loads never get the `onRoute` hook → `websocket: true`
+   silently ignored (handshake → 500). Fixed (routes in a plugin scope).
+7. Cross-process gap: CLI processes are short-lived while nodes are daemons,
+   but `stop()` refused nodes it didn't start — and the failed stop nulled
+   the pid, letting `remove()` delete a **running** node's data dir. Fixed
+   (adopted stop via persisted pid/pidfile; stop failure keeps the record
+   intact) + live test.
+8. Crash state (`crashed` vs `stopped`) incorrectly depended on an `onExit`
+   notification hook being wired. Fixed (crash detection is intrinsic).
+9. `network.create` operations weren't linked to the created network id
+   (history filter missed them). Fixed (`attachOperationToNetwork`) + test.
+
+### 4.5 Skipped-on-purpose (never reported as passing)
+
+Without `KAIZEN_TEST_LIVE=1` the entire 4.2 table is skipped. `subkey` is
+not exercised (bundled binary, no Kaizen feature needs it yet). PromQL
+scrapes of Prometheus are not part of the suite (Phase 2 monitoring uses
+RPC-first signals).
+
+## 5. Known Limitations (current)
+
 - No image built for Docker (T-6.1), no cluster started (T-6.3).
 - Validator staking flows unexercised on-chain (Phase 5).
+- Alive-but-stalled node detection (Phase 0 DB-wedge signature) belongs to
+  T-2.4 monitoring, not yet built.
 - Single-host partition fidelity depends on mechanism chosen (T-3.1, RSK-09).
+- Live suite verified on linux-x64 only (macOS/WSL per R-20).
 
-## 5. Reproduction Instructions for Phase 0 Probes
+## 6. Reproduction Instructions for Phase 0 Probes
 
 ```bash
 mkdir -p /tmp/portaldot-probe && cd /tmp/portaldot-probe
@@ -89,7 +172,7 @@ curl -s -H 'Content-Type: application/json' \
 # then: system_peers / chain_getHeader on both ports; kill both when done
 ```
 
-## 6. Future Test Requirements (by phase)
+## 7. Future Test Requirements (by phase)
 
 - Phase 1: process-manager failure matrix (SIGTERM, SIGKILL, crash-on-start,
   port-in-use, disk-full base-path), RPC reconnect on node restart.
