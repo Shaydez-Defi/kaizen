@@ -110,4 +110,155 @@ describe.runIf(LIVE)('API (live, real engine)', () => {
       ws.close();
     }
   }, 30_000);
+
+  // -------------------------------------------------------------------------
+  // Phase 2A surface: custom topologies, node ops, monitoring, purge, events
+
+  it('validates custom topologies and exposes node/monitor/purge endpoints', async () => {
+    // invalid custom topology → structured 400 with per-problem details
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/networks',
+      payload: {
+        name: 'api-bad',
+        preset: 'custom',
+        custom: {
+          nodes: [
+            { name: 'v1', role: 'validator', wellKnownKey: 'alice' },
+            { name: 'v2', role: 'validator', wellKnownKey: 'alice' },
+          ],
+        },
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const invalidBody = invalid.json() as { error: { code: string; details: { problems: string[] } } };
+    expect(invalidBody.error.code).toBe('INVALID_INPUT');
+    expect(invalidBody.error.details.problems.join(' ')).toMatch(/duplicate wellKnownKey/);
+
+    // valid custom creation → persisted node configs
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/networks',
+      payload: {
+        name: 'api-custom',
+        preset: 'custom',
+        custom: {
+          nodes: [
+            { name: 'a', role: 'validator', wellKnownKey: 'alice' },
+            { name: 'b', role: 'validator', wellKnownKey: 'bob' },
+            { name: 'observer', role: 'full' },
+          ],
+        },
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const { network } = create.json() as { network: { id: string } };
+
+    const detail = await app.inject({ method: 'GET', url: `/api/networks/${network.id}` });
+    const nodes = (detail.json() as { nodes: Array<{ id: string; role: string }> }).nodes;
+    expect(nodes).toHaveLength(3);
+    const fullNode = nodes.find((n) => n.role === 'full')!;
+
+    // node detail: record present, no sample/health yet (nothing running)
+    const nodeDetail = await app.inject({
+      method: 'GET',
+      url: `/api/networks/${network.id}/nodes/${fullNode.id}`,
+    });
+    expect(nodeDetail.statusCode).toBe(200);
+    const nodeBody = nodeDetail.json() as {
+      node: { id: string; role: string };
+      sample: unknown;
+      health: unknown;
+    };
+    expect(nodeBody.node.role).toBe('full');
+    expect(nodeBody.sample).toBeNull();
+    expect(nodeBody.health).toBeNull();
+
+    // unknown node → 404 NODE_NOT_FOUND
+    const missingNode = await app.inject({
+      method: 'GET',
+      url: `/api/networks/${network.id}/nodes/net_x-nope`,
+    });
+    expect(missingNode.statusCode).toBe(404);
+    expect((missingNode.json() as { error: { code: string } }).error.code).toBe('NODE_NOT_FOUND');
+
+    // stopping a non-running node → 409 NODE_NOT_RUNNING
+    const stopDead = await app.inject({
+      method: 'POST',
+      url: `/api/networks/${network.id}/nodes/${fullNode.id}/stop`,
+    });
+    expect(stopDead.statusCode).toBe(409);
+    expect((stopDead.json() as { error: { code: string } }).error.code).toBe('NODE_NOT_RUNNING');
+
+    // monitoring snapshot on a non-running network: honest unreachable data
+    const monitor = await app.inject({ method: 'GET', url: `/api/networks/${network.id}/monitor` });
+    expect(monitor.statusCode).toBe(200);
+    const snapshot = (monitor.json() as {
+      snapshot: { samples: Array<{ rpc: { reachable: boolean } }>; health: Array<{ state: string }> };
+    }).snapshot;
+    expect(snapshot.samples).toHaveLength(3);
+    expect(snapshot.samples.every((s) => !s.rpc.reachable)).toBe(true);
+    expect(snapshot.health.every((h) => h.state === 'unhealthy')).toBe(true);
+
+    // purge on a stopped network → ok
+    const purge = await app.inject({ method: 'POST', url: `/api/networks/${network.id}/purge` });
+    expect(purge.statusCode).toBe(200);
+    expect((purge.json() as { ok: boolean }).ok).toBe(true);
+
+    const del = await app.inject({ method: 'DELETE', url: `/api/networks/${network.id}` });
+    expect(del.statusCode).toBe(200);
+  }, 180_000);
+
+  it('streams typed events for real operations (network.created + network.status)', async () => {
+    const addr = app.server.address();
+    if (!addr || typeof addr === 'string') throw new Error('no tcp address');
+    const ws = new WebSocket(`ws://127.0.0.1:${addr.port}/api/events`);
+    const received: Array<{ type: string; name?: string; payload?: unknown }> = [];
+    try {
+      ws.addEventListener('message', (ev) => {
+        received.push(JSON.parse(String(ev.data)) as { type: string; name?: string; payload?: unknown });
+      });
+      // wait for hello so the subscription is definitely live
+      await new Promise((r) => setTimeout(r, 300));
+
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/networks',
+        payload: {
+          name: 'api-ws',
+          preset: 'custom',
+          custom: { nodes: [{ name: 'solo', role: 'validator', wellKnownKey: 'alice' }] },
+        },
+      });
+      expect(create.statusCode).toBe(201);
+      const { network } = create.json() as { network: { id: string } };
+
+      // typed events carry timestamps + identifiers
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline && !received.some((m) => m.name === 'network.created')) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const created = received.find((m) => m.name === 'network.created')?.payload as {
+        networkId: string;
+        preset: string;
+        nodeCount: number;
+        at: string;
+      };
+      expect(created.networkId).toBe(network.id);
+      expect(created.preset).toBe('custom');
+      expect(created.nodeCount).toBe(1);
+      expect(new Date(created.at).getTime()).toBeGreaterThan(0);
+
+      const status = received
+        .filter((m) => m.name === 'network.status')
+        .map((m) => m.payload as { networkId: string; status: string; at: string })
+        .find((p) => p.networkId === network.id && p.status === 'created');
+      expect(status).toBeDefined();
+      expect(new Date(status!.at).getTime()).toBeGreaterThan(0);
+
+      await app.inject({ method: 'DELETE', url: `/api/networks/${network.id}` });
+    } finally {
+      ws.close();
+    }
+  }, 60_000);
 });

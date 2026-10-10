@@ -25,7 +25,12 @@ export type NetworkStatus =
   | 'stopped'
   | 'error';
 
-export type NetworkPreset = 'single-node' | 'two-node';
+export type NetworkPreset =
+  | 'single-node'
+  | 'two-node'
+  | 'four-validator'
+  | 'validator-fullnode'
+  | 'custom';
 
 /** Port set assigned to one node process. */
 export interface NodePorts {
@@ -60,6 +65,27 @@ export interface NodeConfig {
   nodeKeyFile: string;
   logFile: string;
   ports: NodePorts;
+  /**
+   * Peer count this node is expected to reach once the whole network is up
+   * (full mesh: nodeCount − 1). Used by monitoring to detect peer shortfall;
+   * a running process alone is not health evidence.
+   */
+  expectedPeers?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Custom topology input (validated at the system boundary before anything runs)
+
+export interface CustomTopologyNodeInput {
+  /** Node name suffix (unique within the network), e.g. "alice", "full-1". */
+  name: string;
+  role: NodeRole;
+  /** Required for validators (alice…ferdie); must be absent for full nodes. */
+  wellKnownKey?: string;
+}
+
+export interface CustomTopologyInput {
+  nodes: CustomTopologyNodeInput[];
 }
 
 export type WellKnownKey =
@@ -92,6 +118,8 @@ export interface NetworkRecord {
 export interface NodeRecord extends NodeConfig {
   status: NodeStatus;
   pid?: number;
+  /** When the current process instance was started (for uptime). */
+  startedAt?: string;
 }
 
 /** Result of a mutating engine operation. Never thrown across the API — returned. */
@@ -179,4 +207,72 @@ export interface NetworkInspection {
   status: NetworkStatus;
   nodes: NodeInspection[];
   inspectedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring (T-2.4) — real RPC-derived observations only. States distinguish
+// unhealthy / unknown / unavailable / stale: a running process alone never
+// proves health.
+
+export type NodeHealthState =
+  /** No sample has been collected yet. */
+  | 'unknown'
+  /** Process running, RPC fresh, chain progressing, peers within expectation. */
+  | 'healthy'
+  /**
+   * Process dead/crashed, OR chain stalled (RPC answers but head stopped
+   * advancing past the stall threshold), OR peer shortfall beyond grace.
+   */
+  | 'unhealthy'
+  /** Process claims to run but RPC has failed repeatedly. */
+  | 'unavailable'
+  /** Monitoring data is too old to judge health (sampling degraded). */
+  | 'stale';
+
+/** One real observation of a node, gathered over HTTP JSON-RPC. */
+export interface NodeMonitorSample {
+  networkId: string;
+  nodeId: string;
+  name: string;
+  at: string;
+  process: { status: NodeStatus; pid?: number; startedAt?: string };
+  /** HTTP JSON-RPC reachability for THIS sample. */
+  rpc: { reachable: boolean; error?: string };
+  /** system_health (null when unreachable). */
+  health: { isSyncing: boolean; peers: number; shouldHavePeers: boolean } | null;
+  /** Peer details + expected count (null when unreachable). */
+  peers: { count: number; expected: number; list: RpcPeerInfo[] } | null;
+  /** chain_getHeader of the current best block. */
+  head: { number: number; hash: string } | null;
+  /** chain_getFinalizedHead + header (best effort). */
+  finalized: { number: number; hash: string } | null;
+  /** Cached genesis hash (chain identity check). */
+  genesisHash: string | null;
+  sync: { startingBlock: number; currentBlock: number; highestBlock: number | null } | null;
+  uptimeMs: number | null;
+  /** Per-method read problems from this sample (never fabricated data). */
+  warnings: string[];
+}
+
+/** Interpreted health of one node. */
+export interface NodeHealthReport {
+  nodeId: string;
+  state: NodeHealthState;
+  /** Human-readable, evidence-based explanations of the state. */
+  reasons: string[];
+  /** When the current state was entered. */
+  since: string;
+  lastSampleAt: string | null;
+  lastHealthyAt: string | null;
+  /** Consecutive failed RPC checks (0 when the last one succeeded). */
+  rpcFailures: number;
+}
+
+export interface NetworkMonitorSnapshot {
+  networkId: string;
+  name: string;
+  at: string;
+  intervalMs: number;
+  samples: NodeMonitorSample[];
+  health: NodeHealthReport[];
 }

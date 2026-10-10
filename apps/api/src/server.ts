@@ -30,20 +30,41 @@ const createNetworkBody = z.object({
   name: z
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/, 'name must match ^[a-z0-9][a-z0-9_-]{0,31}$'),
-  preset: z.enum(['single-node', 'two-node']).default('single-node'),
+  preset: z
+    .enum(['single-node', 'two-node', 'four-validator', 'validator-fullnode', 'custom'])
+    .default('single-node'),
+  /** Required (and only allowed) for preset === 'custom'. */
+  custom: z
+    .object({
+      nodes: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(32),
+            role: z.enum(['validator', 'full']),
+            wellKnownKey: z
+              .enum(['alice', 'bob', 'charlie', 'dave', 'eve', 'ferdie'])
+              .optional(),
+          }),
+        )
+        .min(1),
+    })
+    .optional(),
 });
 
 const idParam = z.object({ id: z.string().min(1) });
+const nodeParam = z.object({ id: z.string().min(1), nodeId: z.string().min(1) });
 
 function statusFor(code: string): number {
   switch (code) {
     case 'INVALID_INPUT':
       return 400;
     case 'NETWORK_NOT_FOUND':
+    case 'NODE_NOT_FOUND':
       return 404;
     case 'NETWORK_ALREADY_EXISTS':
     case 'NETWORK_ALREADY_RUNNING':
     case 'NODE_ALREADY_RUNNING':
+    case 'NODE_NOT_RUNNING':
     case 'BINARY_NOT_AVAILABLE':
       return 409;
     default:
@@ -51,16 +72,17 @@ function statusFor(code: string): number {
   }
 }
 
-function requireId(
+function requireParam<T>(
+  schema: z.ZodType<T>,
   raw: unknown,
   reply: { status: (code: number) => { send: (body: unknown) => void } },
-): string | null {
-  const params = idParam.safeParse(raw);
-  if (!params.success) {
+): T | null {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
     reply.status(400).send({ ok: false, error: { code: 'INVALID_INPUT', message: 'bad id' } });
     return null;
   }
-  return params.data.id;
+  return parsed.data;
 }
 
 export function createServer(engine: KaizenEngine): FastifyInstance {
@@ -120,38 +142,88 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
     });
 
     scope.get('/api/networks/:id', async (req, reply) => {
-      const id = requireId(req.params, reply);
+      const id = requireParam(idParam, req.params, reply);
       if (!id) return;
-      const { network, nodes } = engine.networks.getNetwork(id);
+      const { network, nodes } = engine.networks.getNetwork(id.id);
       reply.send({ ok: true, network, nodes });
     });
 
     scope.post('/api/networks/:id/start', async (req, reply) => {
-      const id = requireId(req.params, reply);
+      const id = requireParam(idParam, req.params, reply);
       if (!id) return;
-      const result = await engine.networks.start(id);
+      const result = await engine.networks.start(id.id);
       reply.send({ ok: result.ok, result });
     });
 
     scope.post('/api/networks/:id/stop', async (req, reply) => {
-      const id = requireId(req.params, reply);
+      const id = requireParam(idParam, req.params, reply);
       if (!id) return;
-      const result = await engine.networks.stop(id);
+      const result = await engine.networks.stop(id.id);
       reply.send({ ok: result.ok, result });
     });
 
     scope.get('/api/networks/:id/status', async (req, reply) => {
-      const id = requireId(req.params, reply);
+      const id = requireParam(idParam, req.params, reply);
       if (!id) return;
-      const inspection = await engine.networks.inspect(id);
+      const inspection = await engine.networks.inspect(id.id);
       reply.send({ ok: true, inspection });
     });
 
     scope.delete('/api/networks/:id', async (req, reply) => {
-      const id = requireId(req.params, reply);
+      const id = requireParam(idParam, req.params, reply);
       if (!id) return;
-      await engine.networks.remove(id);
-      reply.send({ ok: true, removed: id });
+      await engine.networks.remove(id.id);
+      reply.send({ ok: true, removed: id.id });
+    });
+
+    scope.post('/api/networks/:id/purge', async (req, reply) => {
+      const id = requireParam(idParam, req.params, reply);
+      if (!id) return;
+      const result = await engine.networks.purgeChain(id.id);
+      reply.send({ ok: result.ok, result });
+    });
+
+    // ---- monitoring --------------------------------------------------------
+    scope.get('/api/networks/:id/monitor', async (req, reply) => {
+      const id = requireParam(idParam, req.params, reply);
+      if (!id) return;
+      // Prefer the live polling loop's snapshot; sample on demand otherwise.
+      const snapshot =
+        engine.monitoring.getLatest(id.id) ?? (await engine.monitoring.snapshotNow(id.id));
+      reply.send({ ok: true, snapshot });
+    });
+
+    // ---- nodes -------------------------------------------------------------
+    scope.get('/api/networks/:id/nodes/:nodeId', async (req, reply) => {
+      const params = requireParam(nodeParam, req.params, reply);
+      if (!params) return;
+      const { network, nodes } = engine.networks.getNetwork(params.id);
+      const node = nodes.find((n) => n.id === params.nodeId);
+      if (!node) {
+        reply.status(404).send({
+          ok: false,
+          error: { code: 'NODE_NOT_FOUND', message: `No node ${params.nodeId} in ${network.name}` },
+        });
+        return;
+      }
+      const snapshot = engine.monitoring.getLatest(params.id);
+      const sample = snapshot?.samples.find((s) => s.nodeId === node.id) ?? null;
+      const health = snapshot?.health.find((h) => h.nodeId === node.id) ?? null;
+      reply.send({ ok: true, node, sample, health });
+    });
+
+    scope.post('/api/networks/:id/nodes/:nodeId/start', async (req, reply) => {
+      const params = requireParam(nodeParam, req.params, reply);
+      if (!params) return;
+      const result = await engine.networks.startNode(params.nodeId);
+      reply.send({ ok: result.ok, result });
+    });
+
+    scope.post('/api/networks/:id/nodes/:nodeId/stop', async (req, reply) => {
+      const params = requireParam(nodeParam, req.params, reply);
+      if (!params) return;
+      const result = await engine.networks.stopNode(params.nodeId);
+      reply.send({ ok: result.ok, result });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an

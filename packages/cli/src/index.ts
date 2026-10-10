@@ -15,10 +15,13 @@ import path from 'node:path';
 import { Command } from 'commander';
 import {
   createEngine,
+  KaizenError,
   KAIZEN_VERSION,
   toErrorJson,
+  type CustomTopologyInput,
   type KaizenEngine,
   type NetworkPreset,
+  type NodeRole,
   type OperationResult,
 } from '@kaizen/engine';
 
@@ -125,15 +128,52 @@ program
 
 const network = program.command('network').description('Network operations');
 
+/**
+ * Parse a custom topology spec string into typed input:
+ *   "alice:validator,backup:validator:ferdie,full-1:full"
+ *   → name:role[:wellKnownKey]. Validation happens in the engine; the CLI
+ *   only translates syntax and reports parse errors as INVALID_INPUT.
+ */
+function parseCustomNodes(spec: string): CustomTopologyInput {
+  const nodes = spec.split(',').map((chunk) => {
+    const parts = chunk.trim().split(':');
+    const [name, role, key] = parts;
+    if (!name || (role !== 'validator' && role !== 'full')) {
+      throw new Error(
+        `Invalid node "${chunk}" — expected name:role[:wellKnownKey] with role validator|full`,
+      );
+    }
+    return { name: name.trim(), role: role as NodeRole, wellKnownKey: key?.trim() };
+  });
+  return { nodes };
+}
+
 network
   .command('create <name>')
   .description('Create a network definition (does not start it)')
-  .option('-p, --preset <preset>', 'single-node | two-node', 'single-node')
-  .action(async (name: string, cmdOpts: { preset: string }) => {
+  .option(
+    '-p, --preset <preset>',
+    'single-node | two-node | four-validator | validator-fullnode | custom',
+    'single-node',
+  )
+  .option(
+    '--nodes <spec>',
+    'custom topology: "name:role[:wellKnownKey],…" (e.g. "alice:validator,full-1:full")',
+  )
+  .action(async (name: string, cmdOpts: { preset: string; nodes?: string }) => {
     await run(async (engine, opts) => {
+      let custom: CustomTopologyInput | undefined;
+      if (cmdOpts.nodes) {
+        try {
+          custom = parseCustomNodes(cmdOpts.nodes);
+        } catch (e) {
+          throw new KaizenError('INVALID_INPUT', e instanceof Error ? e.message : String(e));
+        }
+      }
       const record = await engine.networks.create({
         name,
         preset: cmdOpts.preset as NetworkPreset,
+        custom,
       });
       if (opts.json) {
         printJson({ ok: true, network: record });
@@ -144,6 +184,12 @@ network
       console.log(`  chain   : ${record.chain}`);
       console.log(`  baseDir : ${record.baseDir}`);
       console.log(`  test net: ${record.designatedTest ? 'yes' : 'no'}`);
+      const { nodes } = engine.networks.getNetwork(record.id);
+      for (const node of nodes) {
+        console.log(
+          `  node ${node.id}  ${node.name.padEnd(20)} role=${node.role.padEnd(9)} ${node.wellKnownKey ? `key=${node.wellKnownKey.padEnd(8)}` : 'key=-'} ports=${node.ports.p2p}/${node.ports.rpc}/${node.ports.ws}/${node.ports.prometheus}`,
+        );
+      }
     });
   });
 
@@ -228,6 +274,118 @@ network
       await engine.networks.remove(idOrName);
       if (opts.json) printJson({ ok: true, removed: idOrName });
       else console.log(`Removed network ${idOrName}`);
+    });
+  });
+
+network
+  .command('purge <idOrName>')
+  .description('Delete all node chain databases (keeps identities, ports, spec) so the next start boots from genesis')
+  .action(async (idOrName: string) => {
+    await run(async (engine, opts) => {
+      const result = await engine.networks.purgeChain(idOrName);
+      if (opts.json) printJson({ ok: result.ok, result });
+      else printResult(result);
+      if (!result.ok) process.exitCode = 1;
+    });
+  });
+
+network
+  .command('monitor <idOrName>')
+  .description('Sample every node now via real HTTP RPC and show health, peers, head/finalized')
+  .action(async (idOrName: string) => {
+    await run(async (engine, opts) => {
+      const snapshot = await engine.monitoring.snapshotNow(idOrName);
+      if (opts.json) {
+        printJson({ ok: true, snapshot });
+        return;
+      }
+      console.log(`Monitoring ${snapshot.name} (${snapshot.networkId}) at ${snapshot.at}`);
+      for (const sample of snapshot.samples) {
+        const health = snapshot.health.find((h) => h.nodeId === sample.nodeId);
+        const proc = `process=${sample.process.status}${sample.process.pid ? ` pid=${sample.process.pid}` : ''}`;
+        const chain = sample.rpc.reachable
+          ? `head=#${sample.head?.number ?? '?'} finalized=#${sample.finalized?.number ?? '?'} peers=${sample.peers?.count ?? '?'}/${sample.peers?.expected ?? '?'}${sample.health?.isSyncing ? ' syncing' : ''}`
+          : `RPC unreachable: ${sample.rpc.error ?? 'unknown'}`;
+        console.log(`  ${sample.name.padEnd(24)} [${health?.state ?? 'unknown'}] ${proc}  ${chain}`);
+        for (const reason of health?.reasons ?? []) console.log(`      - ${reason}`);
+      }
+    });
+  });
+
+// ---------------------------------------------------------------------------
+// node (per-node lifecycle)
+
+const node = program.command('node').description('Single-node operations');
+
+node
+  .command('list <network>')
+  .description('List the nodes of a network with persisted configuration')
+  .action(async (networkIdOrName: string) => {
+    await run(async (engine, opts) => {
+      const { network, nodes } = engine.networks.getNetwork(networkIdOrName);
+      if (opts.json) {
+        printJson({ ok: true, networkId: network.id, nodes });
+        return;
+      }
+      for (const n of nodes) {
+        console.log(
+          `${n.id}  ${n.name.padEnd(20)} role=${n.role.padEnd(9)} status=${n.status.padEnd(8)} ${n.wellKnownKey ? `key=${n.wellKnownKey}` : ''} expectedPeers=${n.expectedPeers ?? 0}`,
+        );
+      }
+    });
+  });
+
+node
+  .command('get <nodeId>')
+  .description('Show one node: persisted config + latest monitoring sample/health if any')
+  .action(async (nodeId: string) => {
+    await run(async (engine, opts) => {
+      const record = engine.store.tryGetNode(nodeId);
+      if (!record) throw new KaizenError('NODE_NOT_FOUND', `No node with id "${nodeId}"`, { nodeId });
+      const snapshot = engine.monitoring.getLatest(record.networkId);
+      const sample = snapshot?.samples.find((s) => s.nodeId === nodeId) ?? null;
+      const health = snapshot?.health.find((h) => h.nodeId === nodeId) ?? null;
+      if (opts.json) {
+        printJson({ ok: true, node: record, sample, health });
+        return;
+      }
+      console.log(`${record.id} — ${record.name} (${record.networkId})`);
+      console.log(`  role    : ${record.role}${record.wellKnownKey ? ` (key ${record.wellKnownKey})` : ''}`);
+      console.log(`  status  : ${record.status}${record.pid ? ` pid=${record.pid}` : ''}`);
+      console.log(`  ports   : p2p=${record.ports.p2p} rpc=${record.ports.rpc} ws=${record.ports.ws} prom=${record.ports.prometheus}`);
+      console.log(`  expected peers: ${record.expectedPeers ?? 0}`);
+      if (sample) {
+        console.log(
+          `  sample  : head=#${sample.head?.number ?? '?'} finalized=#${sample.finalized?.number ?? '?'} peers=${sample.peers?.count ?? '?'} rpc=${sample.rpc.reachable ? 'ok' : 'unreachable'}`,
+        );
+        console.log(`  health  : ${health?.state ?? 'unknown'} — ${(health?.reasons ?? []).join('; ')}`);
+      } else {
+        console.log('  sample  : none yet (start the network or run kaizen network monitor)');
+      }
+    });
+  });
+
+node
+  .command('start <nodeId>')
+  .description('Start a single node of a network')
+  .action(async (nodeId: string) => {
+    await run(async (engine, opts) => {
+      const result = await engine.networks.startNode(nodeId);
+      if (opts.json) printJson({ ok: result.ok, result });
+      else printResult(result);
+      if (!result.ok) process.exitCode = 1;
+    });
+  });
+
+node
+  .command('stop <nodeId>')
+  .description('Stop a single node of a network (keeps its chain data)')
+  .action(async (nodeId: string) => {
+    await run(async (engine, opts) => {
+      const result = await engine.networks.stopNode(nodeId);
+      if (opts.json) printJson({ ok: result.ok, result });
+      else printResult(result);
+      if (!result.ok) process.exitCode = 1;
     });
   });
 

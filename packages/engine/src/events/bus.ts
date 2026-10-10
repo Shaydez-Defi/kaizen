@@ -8,13 +8,23 @@
  */
 
 import type {
+  NetworkMonitorSnapshot,
+  NetworkPreset,
   NetworkStatus,
+  NodeHealthState,
   NodeStatus,
   OperationResult,
   RpcSnapshot,
 } from '../types';
 
 export interface KaizenEventMap {
+  'network.created': {
+    networkId: string;
+    name: string;
+    preset: NetworkPreset;
+    nodeCount: number;
+    at: string;
+  };
   'network.status': {
     networkId: string;
     name: string;
@@ -36,12 +46,46 @@ export interface KaizenEventMap {
     ok: boolean;
     durationMs: number;
     networkId?: string;
+    nodeId?: string;
     at: string;
   };
   'rpc.sample': {
     networkId: string;
     nodeId: string;
     snapshot: RpcSnapshot;
+  };
+  /** Full monitoring snapshot, emitted once per polling tick per network. */
+  'monitor.sample': {
+    networkId: string;
+    at: string;
+    snapshot: NetworkMonitorSnapshot;
+  };
+  /** A node's interpreted health state changed (with evidence-based reasons). */
+  'monitor.health': {
+    networkId: string;
+    nodeId: string;
+    name: string;
+    from: NodeHealthState;
+    to: NodeHealthState;
+    reasons: string[];
+    at: string;
+  };
+  /** A node's peer count changed (observed via system_peers/system_health). */
+  'monitor.peers': {
+    networkId: string;
+    nodeId: string;
+    name: string;
+    from: number;
+    to: number;
+    expected: number;
+    at: string;
+  };
+  /** Monitoring itself failed (sampler/evaluation error — not routine RPC failure). */
+  'monitor.error': {
+    networkId: string;
+    nodeId?: string;
+    message: string;
+    at: string;
   };
 }
 

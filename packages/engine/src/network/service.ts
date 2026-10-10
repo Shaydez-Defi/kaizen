@@ -1,16 +1,16 @@
 /**
- * NetworkService — the first real network lifecycle service (T-1.6).
+ * NetworkService — network + node lifecycle over real Portaldot processes.
  *
- * Owns: network creation (topology → node configs, chain spec, keys, ports),
- * start (ordered spawn + RPC health gating, with rollback), stop (ordered,
- * SIGTERM→SIGKILL via NodeProcessManager), inspect (real RPC snapshots), and
- * removal. All state and operation history is persisted.
+ * Owns: creation (topology plan → chain spec → node keys → ports, with
+ * rollback of partial creations), start (ordered spawn + RPC health gating,
+ * with rollback), stop (ordered SIGTERM→SIGKILL via NodeProcessManager),
+ * per-node start/stop, chain purge, inspect (real RPC snapshots), and removal.
+ * All state and operation history is persisted.
  *
- * Presets (Phase 1):
- *  - single-node: `--dev --alice` development chain, one validator node.
- *  - two-node: generated Local Testnet raw chain spec; `--alice` seed node +
- *    `--bob` node wired to the seed via a static bootnode multiaddr derived
- *    from a pre-generated node key (peer connectivity proven in Phase 0 R-04).
+ * Topology presets are data (see topologies.ts): single-node (--dev), two-node
+ * (Local Testnet, alice+bob genesis authorities), four-validator and
+ * validator-fullnode (patched Local Testnet specs — the base spec seeds only
+ * two authorities, verified live), and custom (user-defined node list).
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -25,19 +25,21 @@ import { PortAllocator } from '../process/ports';
 import { readSnapshot } from '../rpc/client';
 import type { StateStore } from '../state/store';
 import type {
+  CustomTopologyInput,
   NetworkInspection,
   NetworkPreset,
   NetworkRecord,
   NodeConfig,
   NodeInspection,
+  NodePorts,
   NodeRecord,
   OperationResult,
   WellKnownKey,
 } from '../types';
 import type { BinaryManager } from '../binary/manager';
+import { ChainSpecService } from './chainspec';
+import { NETWORK_PRESETS, NAME_PATTERN, resolveTopology, type TopologyPlan } from './topologies';
 
-const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-const PRESETS: NetworkPreset[] = ['single-node', 'two-node'];
 const DEFAULT_HEALTH_TIMEOUT_MS = 90_000;
 
 export interface NetworkServiceOptions {
@@ -50,11 +52,14 @@ export interface NetworkServiceOptions {
   dataDir: string;
   healthTimeoutMs?: number;
   spawnImpl?: typeof spawn;
+  chainSpecs?: ChainSpecService;
 }
 
 export interface CreateNetworkInput {
   name: string;
   preset: NetworkPreset;
+  /** Required when preset === 'custom'. */
+  custom?: CustomTopologyInput;
 }
 
 export class NetworkService {
@@ -66,6 +71,7 @@ export class NetworkService {
   private readonly dataDir: string;
   private readonly healthTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
+  private readonly chainSpecs: ChainSpecService;
 
   constructor(options: NetworkServiceOptions) {
     this.store = options.store;
@@ -76,6 +82,8 @@ export class NetworkService {
     this.dataDir = options.dataDir;
     this.healthTimeoutMs = options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
     this.spawnImpl = options.spawnImpl ?? spawn;
+    this.chainSpecs =
+      options.chainSpecs ?? new ChainSpecService({ binaries: options.binaries, spawnImpl: this.spawnImpl });
   }
 
   private get networksDir(): string {
@@ -88,6 +96,8 @@ export class NetworkService {
   async create(input: CreateNetworkInput): Promise<NetworkRecord> {
     const opId = this.store.startOperation('network.create');
     const startedAt = new Date().toISOString();
+    const allocations: NodePorts[] = [];
+    let baseDir: string | null = null;
     try {
       if (!NAME_PATTERN.test(input.name)) {
         throw new KaizenError(
@@ -96,13 +106,16 @@ export class NetworkService {
           { name: input.name },
         );
       }
-      if (!PRESETS.includes(input.preset)) {
+      if (!NETWORK_PRESETS.includes(input.preset)) {
         throw new KaizenError(
           'INVALID_INPUT',
-          `Unknown preset "${input.preset}" — supported: ${PRESETS.join(', ')}`,
+          `Unknown preset "${input.preset}" — supported: ${NETWORK_PRESETS.join(', ')}`,
           { preset: input.preset },
         );
       }
+      // Pure topology validation — runs before any fs/process/port side effect.
+      const plan = resolveTopology(input.preset, input.custom);
+
       if (this.store.tryGetNetwork(input.name)) {
         throw new KaizenError(
           'NETWORK_ALREADY_EXISTS',
@@ -121,11 +134,15 @@ export class NetworkService {
       }
 
       const networkId = `net_${randomBytes(4).toString('hex')}`;
-      const baseDir = path.join(this.networksDir, networkId);
+      baseDir = path.join(this.networksDir, networkId);
+      if (fs.existsSync(baseDir)) {
+        // Never reuse an existing directory as chain data (stale-data guard).
+        throw new KaizenError('INTERNAL', `Network base dir already exists: ${baseDir}`);
+      }
       fs.mkdirSync(baseDir, { recursive: true });
       const createdAt = new Date().toISOString();
 
-      const nodeSpecs = await this.buildNodeSpecs(networkId, input, baseDir);
+      const { nodes, chainSpecPath } = await this.buildNodes(networkId, input.name, plan, baseDir, allocations);
 
       const network = this.store.insertNetwork({
         id: networkId,
@@ -133,8 +150,8 @@ export class NetworkService {
         preset: input.preset,
         status: 'created',
         designatedTest: true, // local/development chains only (DEC-008)
-        chain: input.preset === 'single-node' ? 'dev' : 'local-spec',
-        chainSpecPath: nodeSpecs.chainSpecPath,
+        chain: plan.chain,
+        chainSpecPath,
         baseDir,
         createdAt,
       });
@@ -142,11 +159,18 @@ export class NetworkService {
       // history is complete.
       this.store.attachOperationToNetwork(opId, networkId);
 
-      for (const node of nodeSpecs.nodes) {
+      for (const node of nodes) {
         this.store.insertNode({ config: node, status: 'created', createdAt });
       }
 
       this.store.finishOperation(opId, { status: 'ok' });
+      this.events.emit('network.created', {
+        networkId,
+        name: input.name,
+        preset: input.preset,
+        nodeCount: nodes.length,
+        at: createdAt,
+      });
       this.events.emit('network.status', {
         networkId,
         name: input.name,
@@ -159,84 +183,64 @@ export class NetworkService {
       );
       return network;
     } catch (e) {
+      // Partial-creation cleanup: remove the half-built network dir and give
+      // back any ports we allocated. Never leave debris behind a failed create.
+      if (baseDir) fs.rmSync(baseDir, { recursive: true, force: true });
+      try {
+        // Drop the now-empty parent too (fails harmlessly if others exist).
+        fs.rmdirSync(this.networksDir);
+      } catch {
+        /* not empty / missing — ignore */
+      }
+      allocations.forEach((p) => this.ports.release(p));
       this.failOperation(opId, 'network.create', startedAt, e);
       throw e;
     }
   }
 
-  /** Build per-node configurations (ports, keys, chain spec) for a preset. */
-  private async buildNodeSpecs(
+  /**
+   * Build node configurations from a topology plan: chain spec (patched when
+   * the authority set requires it), one node key + peer id per node, unique
+   * ports and data dirs, seed-first bootnode wiring, full-mesh peer
+   * expectations.
+   */
+  private async buildNodes(
     networkId: string,
-    input: CreateNetworkInput,
+    networkName: string,
+    plan: TopologyPlan,
     baseDir: string,
+    allocations: NodePorts[],
   ): Promise<{ nodes: NodeConfig[]; chainSpecPath?: string }> {
+    const spec = await this.chainSpecs.generate(baseDir, plan);
+    const expectedPeers = Math.max(0, plan.nodes.length - 1);
     const nodes: NodeConfig[] = [];
+    let seedBootnode: string | undefined;
 
-    if (input.preset === 'single-node') {
+    for (const [i, template] of plan.nodes.entries()) {
       const ports = await this.ports.allocate();
-      const nodeKeyFile = path.join(baseDir, 'node-a.nodekey');
-      await this.generateNodeKey(nodeKeyFile);
+      allocations.push(ports);
+      const nodeKeyFile = path.join(baseDir, `node-${template.suffix}.nodekey`);
+      const peerId = await this.generateNodeKey(nodeKeyFile);
+      if (i === 0) {
+        seedBootnode = `/ip4/127.0.0.1/tcp/${ports.p2p}/p2p/${peerId}`;
+      }
       nodes.push({
-        id: `${networkId}-a`,
+        id: `${networkId}-${template.suffix}`,
         networkId,
-        name: `${input.name}-alice`,
-        role: 'validator',
-        chain: 'dev',
-        wellKnownKey: 'alice',
-        bootnodes: [],
-        baseDir: path.join(baseDir, 'node-a'),
+        name: `${networkName}-${template.nameSuffix}`,
+        role: template.role,
+        chain: plan.chain,
+        chainSpecPath: spec.specPath ?? undefined,
+        wellKnownKey: template.wellKnownKey,
+        bootnodes: i === 0 ? [] : [seedBootnode as string],
+        baseDir: path.join(baseDir, `node-${template.suffix}`),
         nodeKeyFile,
-        logFile: path.join(baseDir, 'logs', 'node-a.log'),
+        logFile: path.join(baseDir, 'logs', `node-${template.suffix}.log`),
         ports,
+        expectedPeers,
       });
-      return { nodes };
     }
-
-    // two-node: generate the shared raw chain spec from the embedded Local Testnet.
-    const chainSpecPath = path.join(baseDir, 'chain-spec.json');
-    await this.runBinaryCapture(
-      ['build-spec', '--chain', 'local', '--raw', '--disable-default-bootnode'],
-      chainSpecPath,
-    );
-
-    const aliceKeyFile = path.join(baseDir, 'node-a.nodekey');
-    const bobKeyFile = path.join(baseDir, 'node-b.nodekey');
-    const alicePeerId = await this.generateNodeKey(aliceKeyFile);
-    await this.generateNodeKey(bobKeyFile);
-
-    const alicePorts = await this.ports.allocate();
-    const bobPorts = await this.ports.allocate();
-    const aliceBootnode = `/ip4/127.0.0.1/tcp/${alicePorts.p2p}/p2p/${alicePeerId}`;
-
-    nodes.push({
-      id: `${networkId}-a`,
-      networkId,
-      name: `${input.name}-alice`,
-      role: 'validator',
-      chain: 'local-spec',
-      chainSpecPath,
-      wellKnownKey: 'alice',
-      bootnodes: [],
-      baseDir: path.join(baseDir, 'node-a'),
-      nodeKeyFile: aliceKeyFile,
-      logFile: path.join(baseDir, 'logs', 'node-a.log'),
-      ports: alicePorts,
-    });
-    nodes.push({
-      id: `${networkId}-b`,
-      networkId,
-      name: `${input.name}-bob`,
-      role: 'validator',
-      chain: 'local-spec',
-      chainSpecPath,
-      wellKnownKey: 'bob',
-      bootnodes: [aliceBootnode],
-      baseDir: path.join(baseDir, 'node-b'),
-      nodeKeyFile: bobKeyFile,
-      logFile: path.join(baseDir, 'logs', 'node-b.log'),
-      ports: bobPorts,
-    });
-    return { nodes, chainSpecPath };
+    return { nodes, chainSpecPath: spec.specPath ?? undefined };
   }
 
   /** `key generate-node-key --file <path>` → returns the libp2p peer id. */
@@ -276,10 +280,16 @@ export class NetworkService {
       child.stdout?.on('data', (d: Buffer) => (stdout += d.toString()));
       child.stderr?.on('data', (d: Buffer) => (stderr += d.toString()));
       child.on('error', reject);
-      child.on('exit', (code) => {
+      // 'close' (not 'exit'): the peer id line can arrive on stderr after the
+      // process exits — 'close' fires once all stdio streams are drained.
+      // Caught live: concurrent key generations lost the id line (empty parse).
+      child.on('close', (code, signal) => {
         if (code !== 0) {
           reject(
-            new KaizenError('INTERNAL', `portaldot_dev ${args.join(' ')} failed (code ${code}): ${stderr.slice(0, 500)}`),
+            new KaizenError(
+              'INTERNAL',
+              `portaldot_dev ${args.join(' ')} failed (code ${code ?? `signal ${signal}`}): ${stderr.slice(0, 500)}`,
+            ),
           );
           return;
         }
@@ -325,7 +335,7 @@ export class NetworkService {
           logFile: node.logFile,
           baseDir: node.baseDir,
         });
-        this.store.updateNodeStatus(node.id, 'running', status.pid ?? null);
+        this.store.updateNodeStatus(node.id, 'running', status.pid ?? null, new Date().toISOString());
         started.push(node);
         this.events.emit('node.status', {
           networkId: network.id,
@@ -465,6 +475,143 @@ export class NetworkService {
   }
 
   // -------------------------------------------------------------------------
+  // PER-NODE LIFECYCLE
+
+  /** Start a single node of an existing network (with RPC health gating). */
+  async startNode(nodeId: string): Promise<OperationResult> {
+    const node = this.requireNode(nodeId);
+    const network = this.store.getNetwork(node.networkId);
+    if (this.processes.isRunning(node.id) || NodeProcessManager.isExternalPidAlive(node.pid)) {
+      throw new KaizenError('NODE_ALREADY_RUNNING', `Node ${node.name} is already running`, {
+        nodeId: node.id,
+      });
+    }
+    const opId = this.store.startOperation('node.start', network.id, node.id);
+    const startedAt = new Date().toISOString();
+    try {
+      const status = await this.processes.start({
+        nodeId: node.id,
+        binaryPath: this.binaries.nodePath(),
+        args: this.argsFor(node),
+        logFile: node.logFile,
+        baseDir: node.baseDir,
+      });
+      this.store.updateNodeStatus(node.id, 'running', status.pid ?? null, new Date().toISOString());
+      this.events.emit('node.status', {
+        networkId: network.id,
+        nodeId: node.id,
+        name: node.name,
+        status: 'running',
+        pid: status.pid,
+        at: new Date().toISOString(),
+      });
+      const minPeers = node.bootnodes.length > 0 ? 1 : 0;
+      await this.waitUntilHealthy(node, minPeers);
+
+      // The network becomes 'running' again when any node runs.
+      if (network.status !== 'running') this.setStatus(network.id, 'running');
+
+      const result = this.finalizeResult(opId, 'node.start', startedAt, true, network.id);
+      this.store.finishOperation(opId, { status: 'ok' });
+      this.events.emit('operation.completed', { ...operationEventFrom(result), nodeId: node.id });
+      return result;
+    } catch (e) {
+      try {
+        await this.processes.stop(node.id);
+        this.store.updateNodeStatus(node.id, 'stopped', null);
+      } catch (stopErr) {
+        console.error(`[networks] rollback: failed to stop ${node.id}:`, stopErr);
+      }
+      this.refreshNetworkStatus(network.id);
+      this.failOperation(opId, 'node.start', startedAt, e, network.id, node.id);
+      throw e;
+    }
+  }
+
+  /** Stop a single node (SIGTERM → SIGKILL). Keeps its chain data. */
+  async stopNode(nodeId: string): Promise<OperationResult> {
+    const node = this.requireNode(nodeId);
+    const network = this.store.getNetwork(node.networkId);
+    if (!this.processes.isRunning(node.id) && !NodeProcessManager.isExternalPidAlive(node.pid)) {
+      throw new KaizenError('NODE_NOT_RUNNING', `Node ${node.name} is not running`, {
+        nodeId: node.id,
+      });
+    }
+    const opId = this.store.startOperation('node.stop', network.id, node.id);
+    const startedAt = new Date().toISOString();
+    try {
+      await this.processes.stop(node.id, { pid: node.pid, baseDir: node.baseDir });
+      this.store.updateNodeStatus(node.id, 'stopped', null);
+      this.events.emit('node.status', {
+        networkId: network.id,
+        nodeId: node.id,
+        name: node.name,
+        status: 'stopped',
+        at: new Date().toISOString(),
+      });
+      this.refreshNetworkStatus(network.id);
+      const result = this.finalizeResult(opId, 'node.stop', startedAt, true, network.id);
+      this.store.finishOperation(opId, { status: 'ok' });
+      this.events.emit('operation.completed', { ...operationEventFrom(result), nodeId: node.id });
+      return result;
+    } catch (e) {
+      this.failOperation(opId, 'node.stop', startedAt, e, network.id, node.id);
+      throw e;
+    }
+  }
+
+  /**
+   * Delete all node chain databases while keeping the network definition,
+   * node identities (peer ids), ports, and chain spec. The next start begins
+   * from a fresh genesis. Refuses while any node is alive.
+   */
+  async purgeChain(networkIdOrName: string): Promise<OperationResult> {
+    const network = this.requireNetwork(networkIdOrName);
+    const opId = this.store.startOperation('network.purge', network.id);
+    const startedAt = new Date().toISOString();
+    try {
+      const nodes = this.store.listNodes(network.id);
+      for (const node of nodes) {
+        if (this.processes.isRunning(node.id) || NodeProcessManager.isExternalPidAlive(node.pid)) {
+          throw new KaizenError(
+            'NODE_ALREADY_RUNNING',
+            `Node ${node.name} is still running — stop the network before purging chain data`,
+            { nodeId: node.id },
+          );
+        }
+      }
+      for (const node of nodes) {
+        fs.rmSync(node.baseDir, { recursive: true, force: true });
+        // Clear crashed/stale bookkeeping too: after purge every node is a
+        // clean slate that will boot from genesis on next start.
+        this.store.updateNodeStatus(node.id, 'stopped', null);
+      }
+      if (network.status === 'error') this.setStatus(network.id, 'stopped');
+      const result = this.finalizeResult(opId, 'network.purge', startedAt, true, network.id);
+      this.store.finishOperation(opId, { status: 'ok' });
+      this.events.emit('operation.completed', operationEventFrom(result));
+      return result;
+    } catch (e) {
+      this.failOperation(opId, 'network.purge', startedAt, e, network.id);
+      throw e;
+    }
+  }
+
+  /** Recompute network status from real node liveness (any node running). */
+  private refreshNetworkStatus(networkId: string): void {
+    const nodes = this.store.listNodes(networkId);
+    const anyRunning = nodes.some(
+      (n) => this.processes.isRunning(n.id) || NodeProcessManager.isExternalPidAlive(n.pid),
+    );
+    const status = this.store.getNetwork(networkId).status;
+    if (anyRunning && status !== 'running' && status !== 'starting') {
+      this.setStatus(networkId, 'running');
+    } else if (!anyRunning && (status === 'running' || status === 'degraded')) {
+      this.setStatus(networkId, 'stopped');
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // INSPECT
 
   async inspect(networkIdOrName: string): Promise<NetworkInspection> {
@@ -571,6 +718,14 @@ export class NetworkService {
     return network;
   }
 
+  private requireNode(nodeId: string): NodeRecord {
+    const node = this.store.tryGetNode(nodeId);
+    if (!node) {
+      throw new KaizenError('NODE_NOT_FOUND', `No node with id "${nodeId}"`, { nodeId });
+    }
+    return node;
+  }
+
   private setStatus(networkId: string, status: NetworkRecord['status']): void {
     this.store.updateNetworkStatus(networkId, status);
     const network = this.store.getNetwork(networkId);
@@ -608,12 +763,17 @@ export class NetworkService {
     kind: string,
     startedAt: string,
     e: unknown,
+    networkId?: string,
+    nodeId?: string,
   ): void {
     const err = toErrorJson(e);
     this.store.finishOperation(opId, { status: 'error', errorCode: err.code, errorMessage: err.message });
     this.events.emit(
       'operation.completed',
-      operationEventFrom(this.finalizeResult(opId, kind, startedAt, false, undefined, err)),
+      operationEventFrom({
+        ...this.finalizeResult(opId, kind, startedAt, false, networkId, err),
+        nodeId,
+      }),
     );
   }
 }

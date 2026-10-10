@@ -9,6 +9,7 @@
 import path from 'node:path';
 import { BinaryManager } from './binary/manager';
 import { EventBus } from './events/bus';
+import { MonitoringService } from './monitor/service';
 import { NetworkService } from './network/service';
 import { NodeProcessManager } from './process/manager';
 import { PortAllocator } from './process/ports';
@@ -28,6 +29,8 @@ export interface EngineOptions {
    */
   binaryCacheDir?: string;
   healthTimeoutMs?: number;
+  /** Monitoring poll cadence per network (default 2000ms). */
+  monitorIntervalMs?: number;
 }
 
 export interface KaizenEngine {
@@ -38,6 +41,8 @@ export interface KaizenEngine {
   ports: PortAllocator;
   events: EventBus;
   networks: NetworkService;
+  /** Real-RPC monitoring of running networks (auto-starts on 'running'). */
+  monitoring: MonitoringService;
   /** WS RPC url of a node in a network (by node id). */
   wsUrlForNode(nodeId: string): string;
   /** Release engine resources. Managed node processes are NOT killed —
@@ -95,6 +100,12 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     dataDir,
     healthTimeoutMs: options.healthTimeoutMs,
   });
+  const monitoring = new MonitoringService({
+    store,
+    processes,
+    events,
+    intervalMs: options.monitorIntervalMs,
+  });
 
   return {
     dataDir,
@@ -104,11 +115,13 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     ports,
     events,
     networks,
+    monitoring,
     wsUrlForNode(nodeId: string): string {
       const node = store.getNode(nodeId);
       return `ws://127.0.0.1:${node.ports.ws}`;
     },
     async close(): Promise<void> {
+      monitoring.stopAll();
       store.close();
     },
   };

@@ -34,7 +34,7 @@ function makeNode(networkId: string): NodeConfig {
 describe('StateStore', () => {
   it('runs migrations idempotently', () => {
     const store = new StateStore(':memory:');
-    expect(store.schemaVersion).toBe(3);
+    expect(store.schemaVersion).toBe(5);
     // re-opening an in-memory store re-runs migrate() on a fresh db — verify
     // the persisted path also tolerates repeat migration:
     store.close();
@@ -91,6 +91,29 @@ describe('StateStore', () => {
 
     store.updateNodeStatus('net_3-a', 'stopped', null);
     expect(store.getNode('net_3-a').pid).toBeUndefined();
+    store.close();
+  });
+
+  it('persists expectedPeers, startedAt, and tryGetNode lookups (Phase 2A)', () => {
+    const store = new StateStore(':memory:');
+    store.insertNetwork(makeNetwork('net_7', 'mon'));
+    const config = { ...makeNode('net_7'), expectedPeers: 3 };
+    store.insertNode({ config, status: 'created', createdAt: new Date().toISOString() });
+
+    const created = store.tryGetNode('net_7-a');
+    expect(created?.expectedPeers).toBe(3);
+    expect(created?.startedAt).toBeUndefined();
+    expect(store.tryGetNode('net_7-zzz')).toBeUndefined();
+
+    const startedAt = '2026-10-10T12:00:00.000Z';
+    store.updateNodeStatus('net_7-a', 'running', 7777, startedAt);
+    const running = store.getNode('net_7-a');
+    expect(running.startedAt).toBe(startedAt);
+
+    // startedAt is sticky: a later status update without it must not clear it.
+    store.updateNodeStatus('net_7-a', 'stopped', null);
+    expect(store.getNode('net_7-a').startedAt).toBe(startedAt);
+    expect(store.getNode('net_7-a').pid).toBeUndefined();
     store.close();
   });
 

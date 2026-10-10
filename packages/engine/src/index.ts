@@ -43,6 +43,40 @@ export type { RpcClientOptions } from './rpc/client';
 export { NetworkService } from './network/service';
 export type { CreateNetworkInput, NetworkServiceOptions } from './network/service';
 
+export {
+  resolveTopology,
+  needsAuthorityPatch,
+  NETWORK_PRESETS,
+  AUTHORITY_KEYS,
+  GENESIS_AUTHORITIES,
+  NAME_PATTERN,
+  MAX_CUSTOM_NODES,
+  MAX_VALIDATORS,
+} from './network/topologies';
+export type { TopologyPlan, TopologyNodeTemplate } from './network/topologies';
+
+export {
+  ChainSpecService,
+  patchPlainSpec,
+  parsePlainAuthorities,
+  parseSs58,
+  keyUri,
+} from './network/chainspec';
+export type {
+  AuthorityKeyMaterial,
+  ChainSpecResult,
+  ChainSpecServiceOptions,
+} from './network/chainspec';
+
+export { MonitoringService } from './monitor/service';
+export type { MonitoringServiceOptions } from './monitor/service';
+
+export { createHttpSampler } from './monitor/sampler';
+export type { NodeSampler, RpcNodeObservation, HttpSamplerOptions } from './monitor/sampler';
+
+export { evaluateNodeHealth, DEFAULT_HEALTH_OPTIONS } from './monitor/health';
+export type { HealthEvalInput, HealthEvalOutput, HealthEvalOptions } from './monitor/health';
+
 export type {
   NodeRole,
   NodeStatus,
@@ -50,6 +84,8 @@ export type {
   NetworkPreset,
   NodePorts,
   NodeConfig,
+  CustomTopologyInput,
+  CustomTopologyNodeInput,
   WellKnownKey,
   NetworkRecord,
   NodeRecord,
@@ -60,4 +96,8 @@ export type {
   NodeRuntimeStatus,
   NodeInspection,
   NetworkInspection,
+  NodeHealthState,
+  NodeHealthReport,
+  NodeMonitorSample,
+  NetworkMonitorSnapshot,
 } from './types';

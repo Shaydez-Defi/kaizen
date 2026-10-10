@@ -69,6 +69,9 @@ const MIGRATIONS: string[] = [
      error_message TEXT,
      detail TEXT
    );`,
+  // 4: node uptime + peer expectations (monitoring, T-2.4)
+  `ALTER TABLE nodes ADD COLUMN started_at TEXT;`,
+  `ALTER TABLE nodes ADD COLUMN expected_peers INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 interface NetworkRow {
@@ -102,6 +105,8 @@ interface NodeRow {
   prom_port: number;
   status: string;
   pid: number | null;
+  started_at: string | null;
+  expected_peers: number;
 }
 
 export interface OperationRow {
@@ -242,8 +247,8 @@ export class StateStore {
         `INSERT INTO nodes
          (id, network_id, name, role, chain, chain_spec_path, well_known_key, bootnodes,
           base_dir, node_key_file, log_file, p2p_port, rpc_port, ws_port, prom_port,
-          status, pid, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          status, pid, started_at, expected_peers, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
       )
       .run(
         c.id,
@@ -262,6 +267,7 @@ export class StateStore {
         c.ports.ws,
         c.ports.prometheus,
         input.status,
+        c.expectedPeers ?? 0,
         input.createdAt,
         input.createdAt,
       );
@@ -276,6 +282,13 @@ export class StateStore {
     return mapNode(row);
   }
 
+  tryGetNode(id: string): NodeRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as
+      | NodeRow
+      | undefined;
+    return row ? mapNode(row) : undefined;
+  }
+
   listNodes(networkId: string): NodeRecord[] {
     const rows = this.db
       .prepare('SELECT * FROM nodes WHERE network_id = ? ORDER BY id')
@@ -283,10 +296,17 @@ export class StateStore {
     return rows.map(mapNode);
   }
 
-  updateNodeStatus(id: string, status: NodeStatus, pid?: number | null): void {
+  updateNodeStatus(
+    id: string,
+    status: NodeStatus,
+    pid?: number | null,
+    startedAt?: string | null,
+  ): void {
     this.db
-      .prepare('UPDATE nodes SET status = ?, pid = ?, updated_at = ? WHERE id = ?')
-      .run(status, pid ?? null, new Date().toISOString(), id);
+      .prepare(
+        'UPDATE nodes SET status = ?, pid = ?, started_at = COALESCE(?, started_at), updated_at = ? WHERE id = ?',
+      )
+      .run(status, pid ?? null, startedAt ?? null, new Date().toISOString(), id);
   }
 
   deleteNodes(networkId: string): void {
@@ -362,7 +382,11 @@ export class StateStore {
     this.db.prepare('DELETE FROM networks WHERE id = ?').run(id);
   }
 
+  private closed = false;
+
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 }
@@ -404,5 +428,7 @@ function mapNode(row: NodeRow): NodeRecord {
     ports,
     status: row.status as NodeStatus,
     pid: row.pid ?? undefined,
+    startedAt: row.started_at ?? undefined,
+    expectedPeers: row.expected_peers ?? 0,
   };
 }

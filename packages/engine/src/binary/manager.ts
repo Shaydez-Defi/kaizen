@@ -295,7 +295,7 @@ export class BinaryManager {
       let stderr = '';
       child.stderr?.on('data', (d: Buffer) => (stderr += d.toString()));
       child.on('error', reject);
-      child.on('exit', (code) =>
+      child.on('close', (code) =>
         code === 0
           ? resolve()
           : reject(
@@ -325,7 +325,8 @@ export class BinaryManager {
         clearTimeout(timer);
         reject(new KaizenError('INVALID_ARTIFACT', `portaldot_dev failed to execute: ${e.message}`));
       });
-      child.on('exit', (code) => {
+      // 'close' (not 'exit'): version output may arrive after process exit.
+      child.on('close', (code) => {
         clearTimeout(timer);
         if (code === 0 && out.trim()) resolve(out.trim());
         else
