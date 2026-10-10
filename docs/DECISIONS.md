@@ -135,3 +135,120 @@ Format: context → decision → alternatives → consequences. Newest entries a
   AGENTS.md binds future sessions to this process.
 - **Consequences**: progress is auditable; scope drift is detectable; chat-only
   claims are not acceptable evidence.
+
+## DEC-011 — Genesis authority patching derives keys from the binary (no hardcoded chain data)
+
+- **Date**: 2026-10-10 (Phase 2A, T-2.1/T-2.2)
+- **Context**: The embedded Local Testnet spec seeds exactly TWO genesis
+  authorities (Alice, Bob; `staking.validatorCount=2`, verified live — R-05).
+  Launching four validator processes does NOT make a four-validator network:
+  Charlie/Dave would never author or vote. A genuine N-validator network
+  requires editing the plain spec (session.keys, staking.stakers,
+  staking.invulnerables, validatorCount) and rebuilding the raw spec.
+- **Decision**: ChainSpecService generates every network's spec at create time.
+  Authority key material is derived from the real binary at creation time
+  (`key inspect //X` for the sr25519 account, `key inspect --scheme ed25519 //X`
+  for the grandpa key — the derivation was verified by reproducing the genesis
+  entries of Alice and Bob). The patched plain spec is written to the network
+  dir, converted with `build-spec --chain <file> --raw --disable-default-bootnode`,
+  and a `chain-spec.genesis.json` audit sidecar records which authorities were
+  baked in. The two-node preset keeps the UNMODIFIED spec (proven in Phase 1).
+- **Alternatives**: hardcoded Charlie/Dave keys in source — rejected (fabricated
+  chain data, breaks if the binary's dev keys ever change); running non-authority
+  "validators" — rejected (four processes ≠ four authorities; would be dishonest
+  labeling); per-network ad-hoc keystore injection — rejected (spec surgery is
+  the chain-correct mechanism and was proven live).
+- **Consequences**: networks are self-contained artifacts (spec + sidecar in the
+  network dir); creation costs a few extra binary invocations; validator
+  custom topologies are capped at six (alice…ferdie) — the only keys with
+  verifiable derivations from this binary.
+
+## DEC-012 — Monitoring = periodic HTTP JSON-RPC sampling + a pure health state machine
+
+- **Date**: 2026-10-10 (Phase 2A, T-2.4)
+- **Context**: Live monitoring must distinguish unhealthy / unknown /
+  unavailable / stale, never fabricate values, and never overlap polls. The
+  node serves HTTP JSON-RPC and its legacy WS surface; @polkadot/api adds heavy
+  subscriptions per sample.
+- **Decision**: MonitoringService polls each node every 2s with lightweight
+  parallel HTTP POSTs (system_health, chain_getHeader, system_peers,
+  system_syncState, chain_getFinalizedHead, genesis hash cached per node). A
+  pure `evaluateNodeHealth()` function maps (sample, process liveness,
+  previous state) → one of `unknown | healthy | unhealthy | unavailable |
+  stale` with evidence-based reasons: process dead/crashed, RPC failures ≥3,
+  chain stalled (head frozen while RPC answers), peer shortfall past a 60s
+  startup grace, stale sample gaps. One job per network with an in-flight
+  guard (a slow tick skips rather than overlaps); jobs stop automatically on
+  network stopping/stopped/error events and unref'd timers never hold the
+  process open.
+- **Alternatives**: WS subscription per sample — rejected for polling (heavier,
+  reconnect storms corrupt state machines); DB-persisted samples — rejected
+  (write amplification for observational data); trusting `process status`
+  alone as health — rejected by design (a running process is not evidence of a
+  functioning node, Phase 0 DB-wedge lesson).
+- **Consequences**: monitoring data is in-memory (latest snapshot per network
+  retrievable via API/CLI while the engine runs); the health machine is fully
+  unit-testable without nodes; per-method RPC failures degrade one sample's
+  field to null + warning instead of failing the node's health instantly.
+
+## DEC-013 — Node identity, uptime, and peer expectations are persisted; chain data stays disposable
+
+- **Date**: 2026-10-10 (Phase 2A, T-2.3/T-2.4)
+- **Context**: Monitoring needs uptime and expected peer counts; purge must
+  reset chains without destroying the network definition; node-level
+  start/stop must work across short-lived CLI runs (adopted processes).
+- **Decision**: schema migration adds `nodes.started_at` (sticky: set on
+  start, preserved across later status updates) and `nodes.expected_peers`
+  (full-mesh expectation = nodeCount − 1, computed from the topology at
+  create). `purgeChain()` refuses while any node process is alive, then
+  deletes each node's base dir (chain DB, keystore, peers cache) while keeping
+  node keys, ports, chain spec, and records — the next start boots from
+  genesis with the same peer ids. Node records that are crashed/stale are
+  reset to `stopped` during purge.
+- **Alternatives**: store health/samples in SQLite — see DEC-012; recreate the
+  network on purge — rejected (destroys audited spec + identity history).
+- **Consequences**: restart-after-purge is deterministic and cheap; a network's
+  lifecycle (define → start → stop → purge → start) is fully repeatable from
+  CLI/API; uptime math survives CLI restarts because started_at lives in the
+  store, not in process memory.
+
+## DEC-014 — Validator custom topologies require well-known keys; full nodes take none
+
+- **Date**: 2026-10-10 (Phase 2A, T-2.1)
+- **Context**: Custom topologies must be validated before anything is
+  created; arbitrary key material cannot be invented (DEC-011).
+- **Decision**: a custom topology is an ordered node list; every `validator`
+  node must carry a unique well-known key from {alice…ferdie} (those become
+  genesis authorities via the patched spec), every `full` node must carry
+  none, at least one validator is required, and node names must be unique and
+  well-formed. Validation is a pure function (`resolveTopology`) that runs
+  before any directory, port, or process is touched; failures carry
+  per-problem details. The first node in the list is the bootnode seed.
+- **Alternatives**: generate fresh keypairs per validator — rejected (would
+  require the binary to insert session keys pre-genesis; not verifiable here);
+  allow validators without keys — rejected (a keyless "validator" cannot be a
+  genesis authority and would be a misleading label).
+- **Consequences**: topology validation is unit-testable in isolation; the
+  6-validator ceiling is explicit and produces an actionable error instead of
+  a broken network.
+
+## DEC-015 — Monitoring auto-lifecycle is event-driven; CLI/API can also sample on demand
+
+- **Date**: 2026-10-10 (Phase 2A, T-2.4/T-2.8)
+- **Context**: Polling must start when a network runs and stop when it stops,
+  without every caller wiring it manually; short-lived CLI runs must still be
+  able to show a real snapshot.
+- **Decision**: MonitoringService subscribes to `network.status` events:
+  `running` → start polling that network; `stopping`/`stopped`/`error` → stop
+  and drop transient state. `snapshotNow()` performs a one-shot sample +
+  health evaluation on demand (used by `kaizen network monitor` and the API
+  `GET /api/networks/:id/monitor` when no job is live). WS clients receive
+  typed `monitor.sample` / `monitor.health` / `monitor.peers` / `monitor.error`
+  events with timestamps and node ids; REST exposes the latest or on-demand
+  snapshot. Both surfaces only ever show engine-produced data (DEC-009).
+- **Alternatives**: manual start/stop only — rejected (UI would have to wire
+  it and the CLI could never observe); persistent daemon requirement —
+  rejected (breaks DEC-002's CLI-without-daemon model).
+- **Consequences**: any surface that can start a network automatically gets
+  monitoring; the event stream is the single source of realtime truth for the
+  future web UI (Phase 2B).

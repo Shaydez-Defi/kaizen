@@ -131,14 +131,38 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 - **Question**: Do four-validator and validator+fullnode topologies work?
 - **Source**: Inference from R-04 + `--help` (`--charlie`…`--ferdie` shortcuts)
   and the exported spec (Local Testnet authorities).
-- **Evidence**: Mechanism proven for 2 nodes; well-known keys for up to 6
-  named validators exist. Genesis authority list not yet inspected.
-- **Status**: PARTIALLY VERIFIED.
-- **Implications**: Presets should be data-driven from the chain spec's
-  genesis authority set.
-- **Uncertainties**: Whether the Local Testnet spec seeds 2 or 4+ authorities;
-  finality quorum behavior with partially-online authority sets.
-- **Next step**: T-2.1 inspects genesis authorities; T-2.3 runs a 4-node test.
+- **Evidence**:
+  - **Phase 0/1**: mechanism proven for 2 nodes; well-known keys for up to 6
+    named validators exist.
+  - **Phase 2A (2026-10-10, live spike)**: the Local Testnet plain spec seeds
+    exactly **TWO** genesis authorities — Alice `5GrwvaEF…` and Bob
+    `5FHneW46x…` — with `staking.validatorCount=2`,
+    `minimumValidatorCount=2`, matching `session.keys`, `staking.stakers`
+    (3e18 bond each) and `staking.invulnerables`. Charlie/Dave/Eve are NOT
+    genesis authorities but ARE funded in genesis balances (5 UNITS each).
+  - Session key derivation confirmed against the binary: babe/imOnline/
+    authorityDiscovery = sr25519(//X) = the dev account; **grandpa =
+    ed25519(//X)** (`key inspect --scheme ed25519 //Alice` reproduced Alice's
+    genesis grandpa key `5FA9nQ…`, and Bob's likewise).
+  - **Genesis surgery works**: patching the plain spec (add Charlie/Dave to
+    `session.keys`/`staking.stakers`/`staking.invulnerables`, set
+    `validatorCount=4`) and rebuilding with `build-spec --chain <file> --raw
+    --disable-default-bootnode` produced a 4-authority network that ran live:
+    4 processes, **full mesh (peers=3 on every node)**, identical genesis hash
+    on all four, **all four authorities authored blocks** (log counts
+    alice=36, bob=58, charlie=50, dave=42 after ~8 min), and GRANDPA finality
+    advancing (finalized 12 vs best 14 at sample time).
+  - **Full node works**: a 5th keyless node (no `--validator`, no well-known
+    key) bootnode-connected to the mesh reached peers=4, synced to the exact
+    network best (95=95), `isSyncing=false`, and authored **0** blocks.
+- **Status**: VERIFIED.
+- **Implications**: Presets ARE data-driven from the topology plan; any
+  network whose validator keys exceed {alice, bob} gets a patched per-network
+  spec (DEC-011). Four running processes alone never count as four
+  authorities — validation and labeling must reflect that.
+- **Uncertainties**: finality quorum with a *partially* offline authority set
+  (e.g. 3-of-4 online) — relevant to Phase 3/4 failure work, not tested here.
+- **Next step**: none for Phase 2A (topologies live-verified end-to-end).
 
 ## R-06 — Ports, RPC endpoints, WebSocket endpoints
 
@@ -223,16 +247,25 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 
 - **Question**: Can Kaizen generate/modify chain specs for topologies?
 - **Source**: Direct execution.
-- **Evidence**: `build-spec --chain local --raw --disable-default-bootnode`
-  → valid 1.49 MB raw JSON; non-raw mode shows `name: Local Testnet`,
-  `id: local_testnet`, `chainType: Local`, one default bootnode
-  (`/ip4/127.0.0.1/tcp/30333/p2p/12D3KooWGjDD5sBKxrScFWdGK8Kv72CH1XbxKD6okKVN5y2yZQHo`).
-- **Status**: VERIFIED.
-- **Implications**: Topology presets = generate spec once per network +
-  wire bootnodes per node. Custom presets feasible via spec templating.
-- **Uncertainties**: Editing raw genesis storage directly (JSON surgery) is
-  untested.
-- **Next step**: T-2.2.
+- **Evidence**:
+  - `build-spec --chain local --raw --disable-default-bootnode`
+    → valid 1.49 MB raw JSON; non-raw mode shows `name: Local Testnet`,
+    `id: local_testnet`, `chainType: Local`, one default bootnode
+    (`/ip4/127.0.0.1/tcp/30333/p2p/12D3KooWGjDD5sBKxrScFWdGK8Kv72CH1XbxKD6okKVN5y2yZQHo`).
+  - **Phase 2A (2026-10-10)**: plain-spec JSON surgery (extended
+    `session.keys` with 4 authorities, `staking.stakers`,
+    `staking.invulnerables`, `validatorCount`) was accepted by
+    `build-spec --chain <patched-plain-file> --raw
+    --disable-default-bootnode` (output 1,495,379 bytes) and the resulting
+    raw spec ran a functioning 4-authority network (see R-05).
+- **Status**: VERIFIED (generation + plain-spec surgery + raw rebuild; the
+  raw-rebuild step regenerates genesis storage from the runtime genesis
+  config — no direct raw-storage editing is needed or attempted).
+- **Implications**: ChainSpecService = plain spec → typed patch → raw spec,
+  per network, with an audit sidecar (DEC-011).
+- **Uncertainties**: editing RAW genesis storage directly (hand-written
+  storage keys) remains untested — deliberately out of scope.
+- **Next step**: none for Phase 2A.
 
 ## R-11 — Validator operation requirements (keys, funding, privileges)
 
@@ -388,6 +421,37 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 - **Implications**: Kaizen targets Linux/macOS hosts for local operations;
   documented WSL caveat for Windows.
 
+## R-21 — HTTP JSON-RPC for monitoring (batch/parallel reads, degraded methods)
+
+- **Question**: Can the monitoring loop sample all needed fields over plain
+  HTTP JSON-RPC (no WS subscriptions), and how do partial failures behave?
+- **Source**: Phase 2A live spike + integration tests against real nodes.
+- **Evidence**:
+  - `system_peers`, `system_health`, `system_syncState`, `chain_getHeader`,
+    `chain_getFinalizedHead`, `chain_getBlockHash` all answer over HTTP POST
+    on this build (verified during the 4-validator spike: peers=3/4 read from
+    `system_peers` on every node; `system_health` returned
+    `{"isSyncing":false,"peers":4,"shouldHavePeers":true}` on the full node).
+  - Hex quantity fields (`number`, `bestNumber`, `currentBlock`, …) decode
+    with `parseInt(x, 16)`; `system_peers` items carry
+    `{peerId, bestHash, bestNumber, roles}`.
+  - Disabled/absent methods return a JSON-RPC error object
+    (`Method not found`) that is individually tolerated per call — the sample
+    degrades that field to null with a warning instead of failing the whole
+    node read. Transport-level failure (connection refused) marks the sample
+    `reachable:false`.
+  - Digest logs from HTTP `chain_getHeader` come back as SCALE-encoded hex
+    (no metadata decoration) — BABE authorship is therefore read from node
+    logs ("Prepared block for proposing"), not header digests, in tests.
+- **Status**: VERIFIED (method set + degraded behavior exercised live).
+- **Implications**: The monitoring sampler needs no WS per sample; a parallel
+  fan-out of single-method POSTs with per-method tolerance satisfies DEC-012
+  and keeps the sample honest when a node disables a method.
+- **Uncertainties**: behavior under heavy load (many samples/sec) not
+  characterized; `system_peers` on very large peer counts untested (local
+  networks are ≤8 nodes).
+- **Next step**: none for Phase 2A.
+
 ---
 
 ## Summary Matrix
@@ -398,12 +462,12 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 | R-02 | Startup command / flags / subcommands | VERIFIED |
 | R-03 | Single-node dev network | VERIFIED |
 | R-04 | Multi-node network (2 nodes, bootnodes) | VERIFIED |
-| R-05 | 4-validator & custom topologies | PARTIALLY VERIFIED |
+| R-05 | 4-validator & custom topologies | VERIFIED (Phase 2A: patched-spec 4-authority net + full node live) |
 | R-06 | Ports / RPC / WS endpoints | VERIFIED (WS via @polkadot/api, Phase 1) |
 | R-07 | RPC methods & responses | VERIFIED (core set) |
 | R-08 | Identity/health/sync/peer inspection | VERIFIED |
 | R-09 | Metrics / graceful shutdown | PARTIALLY VERIFIED |
-| R-10 | Chain spec build/export | VERIFIED |
+| R-10 | Chain spec build/export | VERIFIED (Phase 2A: plain-spec surgery + raw rebuild live) |
 | R-11 | Validator operation (genesis authorities) | PARTIALLY VERIFIED |
 | R-12 | Staking extrinsics | PARTIALLY VERIFIED |
 | R-13 | Session-key operations | PARTIALLY VERIFIED |

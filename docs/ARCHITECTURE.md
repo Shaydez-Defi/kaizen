@@ -68,7 +68,9 @@ flowchart TB
 | **CLI (`kaizen`)** | Scriptable surface (human + `--json` output). Thin argument parsing → engine calls. Exit codes for automation. |
 | **API Layer** | HTTP for commands/queries; WebSocket for engine event stream. Input validation (Zod), auth-less by design for localhost-first (see §8). |
 | **Operations Engine** | The single source of operational truth. Application services with typed inputs/outputs; emits events; persists history. |
-| **NetworkService** | Topology presets → concrete network definitions (chain spec generation, per-node config: base-path, ports, keys, roles, bootnodes). |
+| **NetworkService** | Topology presets (data-driven: single/two/four-validator/validator-fullnode + validated custom) → concrete network definitions: chain spec generation, per-node config (base-path, ports, keys, roles, bootnodes), ordered start/stop, per-node start/stop, purge, partial-create rollback. |
+| **ChainSpecService** | Per-network spec artifacts: plain spec → typed authority patch (keys derived from the real binary, DEC-011) → `build-spec --raw` rebuild; audit sidecar (`chain-spec.genesis.json`); no-op for topologies whose authorities are already in the stock spec. |
+| **MonitoringService** | Polls running networks (one job per network, 2s cadence, in-flight guard): HTTP JSON-RPC sampler → pure health state machine (`unknown/healthy/unhealthy/unavailable/stale`) → typed `monitor.*` events; auto-starts/stops from `network.status` bus events; `snapshotNow()` for on-demand reads (DEC-012/DEC-015). |
 | **NodeProcessManager** | Spawns/kills node processes via **argv arrays** (never shell strings), per-node workdirs, log capture, port allocation, health polling, restart policies. |
 | **PortaldotRpcClient** | Typed wrapper over `@polkadot/api`: health, peers, sync, headers, events, storage reads. Reconnect/backoff logic. |
 | **ScenarioEngine** | Loads scenario definitions (ordered actions + delays), executes with recording (action, ts, result, error), supports replay of the action sequence. |
@@ -79,11 +81,19 @@ flowchart TB
 
 ## 4. Interfaces & Communication
 
-- **Web ↔ API**: REST for commands (`POST /api/networks`, `POST /api/nodes/{id}/stop`, …)
-  and queries; WebSocket `/api/events` for the engine event bus (node status
-  changes, block/peer samples, scenario progress, incident lifecycle).
+- **Web ↔ API**: REST for commands (`POST /api/networks`,
+  `POST /api/networks/{id}/purge`, `POST /api/nodes/{id}/start|stop`,
+  `POST /api/networks/{id}/start|stop|remove`, …) and queries
+  (`GET /api/networks/{id}/nodes/{nodeId}`, `GET /api/networks/{id}/monitor`);
+  WebSocket `/api/events` for the engine event bus (network lifecycle,
+  node lifecycle, typed `monitor.sample` / `monitor.health` / `monitor.peers`
+  / `monitor.error`, operation results — every payload carries timestamps and
+  ids). Validation via Zod; failures are structured errors with stable codes
+  (`INVALID_INPUT` 400, `NETWORK_NOT_FOUND`/`NODE_NOT_FOUND` 404,
+  `NETWORK_ALREADY_EXISTS` 409, `NODE_NOT_RUNNING` 409, …).
 - **CLI ↔ Engine**: direct in-process imports of `packages/engine` (same
-  service objects the API uses). Rationale in DEC-002.
+  service objects the API uses). Rationale in DEC-002. Both surfaces call the
+  shared engine only — no operation logic is duplicated at either edge.
 - **Engine ↔ Nodes**: child processes (local adapter), container control
   (Docker adapter), K8s API + Helm CLI (K8s adapter); node data via RPC.
 
@@ -127,17 +137,27 @@ sequenceDiagram
 ## 6. Process & Network Lifecycle
 
 ```
-NetworkDefinition (preset + overrides)
-   → ChainSpec generated (build-spec --raw, bootnodes stripped)
-   → NodeConfig[] (base-path, p2p/rpc/ws/prom ports, role, keys, bootnodes)
-   → spawn order: seed/authority nodes first, then dependents
+NetworkDefinition (preset or validated custom topology)
+   → topology validation FIRST (duplicate names/keys, port/path safety,
+     stale chain data) — before any dir, port, or process is touched
+   → ChainSpec per network (plain spec → authority patch with binary-derived
+     keys when authorities ⊄ {alice, bob} → build-spec --raw;
+     audit sidecar records baked-in authorities)
+   → NodeConfig[] (base-path, p2p/rpc/ws/prom ports, role, keys, bootnodes,
+     expected_peers = nodeCount − 1)
+   → partial-create rollback on any failure (dirs + ports returned, no debris)
+   → spawn order: seed/authority node first, then the rest (bootnodes wired)
    → health-gate: each node must reach "synced + peers expected" (with timeout)
-   → RUNNING (monitor loop) → STOP (reverse order, SIGTERM→SIGKILL) → STOPPED
+   → RUNNING + monitoring auto-attach (bus event) → per-node or full STOP
+     (reverse order, SIGTERM→SIGKILL) → STOPPED
+   → optional PURGE: refuses while any node is alive, then wipes chain DBs
+     (keeps identity/ports/spec) → next start boots from genesis again
 ```
 
 Failure states are first-class: `DEGRADED` (some nodes down), `UNREACHABLE`
-(all RPC lost), `STALLED` (no new blocks > threshold). Cleanup always releases
-ports and records final state.
+(all RPC lost), `STALLED` (no new blocks > threshold) — implemented as the
+per-node health machine (`unknown/healthy/unhealthy/unavailable/stale`,
+DEC-012). Cleanup always releases ports and records final state.
 
 ## 7. Data & Event Flow (monitoring)
 

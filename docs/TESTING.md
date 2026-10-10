@@ -137,16 +137,82 @@ not exercised (bundled binary, no Kaizen feature needs it yet). PromQL
 scrapes of Prometheus are not part of the suite (Phase 2 monitoring uses
 RPC-first signals).
 
-## 5. Known Limitations (current)
+## 5. Tests Executed in Phase 2A (topologies, monitoring, API/WS, CLI)
+
+Run 2026-10-10 on the same host. Gates before commit: `npm run typecheck`,
+`npm run lint`, `npm test` (unit), `npm run build`, and
+`KAIZEN_TEST_LIVE=1 npm run test:integration`.
+
+### 5.1 Unit suite — `npm test`: 81 tests / 10 files (Phase 1: 32)
+
+New coverage: topology presets + custom validation (duplicate names/keys,
+keyless validators, >6 validators, missing validators, invalid input
+rejected before side effects); ChainSpecService against a fake binary
+(plain → patch → raw pipeline, authority parsing, key-derivation URIs,
+genesis audit sidecar, key material never logged); health state machine
+(process-death precedence over RPC failures, unavailability threshold,
+stall, stale-data, peer grace); HTTP sampler against a live local stub RPC
+server (parallel fan-out, per-method degradation to null + warning);
+MonitoringService (in-flight overlap guard, `monitor.*` event payloads,
+auto-stop on network stop events, `snapshotNow`); NetworkService with the
+fake binary (four-validator build, unique ports, bootnode wiring,
+partial-create rollback leaves no debris, purge semantics, recovery after
+a failed create); store migrations v4/v5 (sticky `started_at`,
+`expected_peers`, idempotent `close`).
+
+### 5.2 Live suite — `KAIZEN_TEST_LIVE=1 npm run test:integration`
+
+Real `portaldot_dev` processes; isolated temp dirs; engine-allocated ports;
+shared verified binary cache; sequential files. Final run: **25/25 tests /
+7 files in 213 s; `pgrep -ax portaldot_dev` → no orphans.**
+
+| File | Tests | What it proves against the real binary |
+|---|---|---|
+| `topology.int.test.ts` | 6 | 4-validator: patched spec built from the binary, full mesh (peers=3), identical genesis hash on all four, blocks produced, GRANDPA finality; validator+fullnode: keyless node reaches network head, syncs, authors nothing; custom 3-node topology; invalid topology → structured error with zero debris (no dirs, no ports, no DB rows); purge → restart boots from genesis with the same peer ids; concurrent creates → unique identities/ports/specs |
+| `monitor.int.test.ts` | 1 | auto-attach on `running`; real samples (heads, peers, genesis hash, uptime, expected peers); connectivity observed over RPC; external SIGKILL → `unhealthy` with crash evidence; survivor observes the 1→0 peer transition; polling stops with the network; on-demand snapshot honest for stopped nodes (`unhealthy`, never "healthy") |
+| `api.int.test.ts` | 6 | custom-topology validation → structured 400 with per-problem details; node detail/list semantics; node ops on a non-running node → 409 `NODE_NOT_RUNNING`, unknown node → 404 `NODE_NOT_FOUND`; monitor endpoint honest on a stopped network; purge; WS streams typed `network.created` + `network.status` with timestamps and ids |
+| `binary.int`, `process.int`, `rpc.int`, `network.int` (Phase 1) | 12 | Phase 1 coverage re-run green (unchanged) |
+
+### 5.3 CLI smoke (scripted shell over the Phase 2A surface)
+
+**21/21 steps** on a real four-validator network (script under
+`/tmp/opencode/cli-smoke.sh`, data dir outside the repo, verified binary
+cache reused): `status`; `network create --preset four-validator` (4 nodes
+persisted + genesis audit sidecar present); health-gated `start`;
+`network monitor` → all 4 reachable with real heads; second snapshot →
+**full mesh observed over RPC (peers ≥ 3 on all four)**; `node list` all
+running; `node stop`/`node start` on one validator; `purge` correctly
+**refuses while nodes run**; `stop`; `purge`; restart → boots from genesis
+(best #4 < 30); `remove`; list empty; `pgrep` → no orphans.
+
+### 5.4 Bugs the Phase 2A tests caught (fixed; details in PROGRESS §4)
+
+1. Health precedence: a dead/never-started node was mislabeled
+   `unavailable`/`unknown` because RPC-failure counting ran before the
+   process-liveness check. Fixed + unit test.
+2. Stdio drain race: capturing subprocess output on `'exit'` instead of
+   `'close'` occasionally lost the peer-id line under concurrent key
+   generation (caught by the live concurrent-create test). Fixed in every
+   capture path, with signal-aware error text.
+3. Unit-level catches during development: head-advance closure bug,
+   promise-result shape misuse, non-idempotent store `close`.
+
+## 6. Known Limitations (current)
 
 - No image built for Docker (T-6.1), no cluster started (T-6.3).
 - Validator staking flows unexercised on-chain (Phase 5).
-- Alive-but-stalled node detection (Phase 0 DB-wedge signature) belongs to
-  T-2.4 monitoring, not yet built.
+- Stall ("alive but wedged") detection is implemented in the health machine
+  (chain-stalled reason, unit-tested) but was not induced against a real
+  wedged node — that belongs to Phase 3 failure work.
+- The `unavailable` state is unit-tested; the live suite exercises the
+  stronger process-dead → `unhealthy` path (by design, process evidence
+  takes precedence).
+- Partial authority-set finality (e.g. 3-of-4 online) deliberately untested
+  (Phase 3; RSK-12).
 - Single-host partition fidelity depends on mechanism chosen (T-3.1, RSK-09).
 - Live suite verified on linux-x64 only (macOS/WSL per R-20).
 
-## 6. Reproduction Instructions for Phase 0 Probes
+## 7. Reproduction Instructions for Phase 0 Probes
 
 ```bash
 mkdir -p /tmp/portaldot-probe && cd /tmp/portaldot-probe
@@ -172,13 +238,15 @@ curl -s -H 'Content-Type: application/json' \
 # then: system_peers / chain_getHeader on both ports; kill both when done
 ```
 
-## 7. Future Test Requirements (by phase)
+## 8. Future Test Requirements (by phase)
 
 - Phase 1: process-manager failure matrix (SIGTERM, SIGKILL, crash-on-start,
   port-in-use, disk-full base-path), RPC reconnect on node restart.
-- Phase 2: 4-node topology test, peer-drop detection, monitor state machine.
+- Phase 2B: UI e2e — dashboard renders live WS data from a real network;
+  no-mock-data assertion.
 - Phase 3: each fault mechanism positive+negative test; scenario replay
-  determinism check (same action sequence, recorded, not outcome-claimed).
+  determinism check (same action sequence, recorded, not outcome-claimed);
+  induced wedge → stall detection; partial-authority finality characterization.
 - Phase 4: every signal collector induced-fire test; recovery outcome recorded.
 - Phase 5: staking/session happy-path + permission-denied paths.
 - Phase 6: image build, container network, helm install/upgrade/destroy on

@@ -248,3 +248,113 @@ install/CLI quickstart).
 exported spec (flip R-05), define topology presets as data — then T-2.2
 ChainSpec service + T-2.3 4-validator/validator+fullnode presets, T-2.4
 MonitoringService, T-2.5 web app scaffold over the existing WS event API.
+
+## 2026-10-10 — PHASE 2A: Topology Engine & Live Monitoring (T-2.1…T-2.4, T-2.8, T-2.9)
+
+**Phase/Task IDs**: Phase 2A (split from Phase 2; UI tasks T-2.5…T-2.7 stay
+NOT STARTED as Phase 2B — stopped here per instruction).
+**Files created/modified**: engine `src/types.ts`, `src/errors.ts`,
+`src/index.ts`, `src/engine.ts`, `src/events/bus.ts`, `src/state/store.ts`,
+`src/network/service.ts`, NEW `src/network/topologies.ts`, NEW
+`src/network/chainspec.ts`, NEW `src/monitor/{sampler,health,service}.ts`;
+tests NEW `test/{topologies,chainspec,monitor,service}.test.ts` +
+`test/store.test.ts`; API `apps/api/src/server.ts`; CLI
+`packages/cli/src/index.ts`; live tests NEW
+`test/integration/{topology,monitor}.int.test.ts` + extended
+`test/integration/api.int.test.ts`; docs PLAN/RESEARCH/DECISIONS/RISKS/
+ARCHITECTURE/TESTING/README + this entry + NEW `docs/PHASE_REPORT.md`.
+
+### 1. T-2.1/T-2.2 live spike (before implementation; artifacts /tmp/opencode/t21)
+
+- Local Testnet plain spec seeds exactly **two** genesis authorities (Alice
+  `5GrwvaEF…`, Bob `5FHneW46x…`, `staking.validatorCount=2`); Charlie/Dave/Eve
+  are funded in genesis balances but are NOT authorities.
+- Key derivation verified by reproducing Alice's/Bob's genesis entries with
+  `key inspect`: babe/imOnline/authDiscovery = sr25519(//X); **grandpa =
+  ed25519(//X)**.
+- Patched plain spec (4 authorities in session.keys/stakers/invulnerables,
+  validatorCount=4) → `build-spec --chain <file> --raw` → live 4-node
+  network: **full mesh (peers=3 on every node)**, identical genesis hash
+  `0x2b9bd419…`, **all four authored blocks** (alice=36, bob=58, charlie=50,
+  dave=42 after ~8 min), GRANDPA finality advancing (finalized 12 vs best 14).
+- 5th keyless full node: peers=4, synced to network best (95=95),
+  `isSyncing=false`, 0 blocks authored.
+- R-05 and R-10 flipped to VERIFIED with this evidence.
+
+### 2. Implementation (engine owns everything; CLI/API stay thin)
+
+- `topologies.ts`: 5 presets as data (single/two-node/four-validator/
+  validator-fullnode custom) + pure `resolveTopology()` custom validation
+  (unique names, unique well-known keys for validators only, ≥1 validator,
+  ≤8 nodes) — runs before any dir/port/process side effect.
+- `chainspec.ts`: ChainSpecService — plain spec → typed authority patch with
+  keys derived from the binary at create time (DEC-011) → raw rebuild →
+  `chain-spec.genesis.json` audit sidecar; unpatched spec for topologies
+  whose authorities are already in stock (alice+bob).
+- `service.ts`: topology-driven create with **partial-create rollback**
+  (dirs removed, ports released, no debris), ordered start/stop, per-node
+  `startNode/stopNode`, `purgeChain` (refuses while any node alive; wipes
+  chain DBs; keeps identity/ports/spec), expected-peers wiring.
+- `monitor/`: HTTP JSON-RPC sampler (parallel single-method POSTs,
+  per-method tolerance), pure `evaluateNodeHealth()` (states
+  unknown/healthy/unhealthy/unavailable/stale; process liveness checked
+  first — see §4.1), MonitoringService (one job per network, in-flight
+  guard, unref'd timers, auto-attach/detach via `network.status` events,
+  `snapshotNow()` on demand).
+- `state/store.ts`: migration v4/v5 — `nodes.started_at` (sticky via
+  COALESCE) and `nodes.expected_peers`; idempotent `close()`.
+- `events/bus.ts`: `network.created`, `monitor.sample/health/peers/error`,
+  `operation.completed` gains nodeId.
+- API: custom topology body, purge/monitor/node-detail/node-start/node-stop
+  routes, structured codes (404 NODE_NOT_FOUND, 409 NODE_NOT_RUNNING, …).
+- CLI: `--preset` (all 5), `--nodes` custom spec, `network purge`,
+  `network monitor`, `node list/get/start/stop`.
+
+### 3. Gates (commands + actual results)
+
+- `npm run typecheck` → clean; `npm run lint` → clean; `npm run build` → ok.
+- Unit `npm test`: **81/81 pass (10 files)** (Phase 1 had 32).
+- Live `KAIZEN_TEST_LIVE=1 npm run test:integration`:
+  - first full run: 23/25 — two failures, both real findings (§4);
+  - after fixes: api 6/6, monitor 1/1 re-run green;
+  - final full run: **25/25 pass (7 files), 213 s** — topology (4-validator,
+    validator+fullnode, custom, invalid-topology-no-debris,
+    purge+restart-from-genesis, concurrent creation), monitor (real samples,
+    crash → unhealthy, peers 1→0 transition, cleanup on stop, on-demand
+    snapshot honesty), api (validation 400s, node ops, monitor honesty on a
+    stopped network, purge refusal, WS typed events), plus Phase 1's
+    binary/process/rpc/network suites;
+  - `pgrep -ax portaldot_dev` after the suite → no orphans.
+- Secret scan of `git diff` (keys/mnemonics/64-hex) → no matches; new files
+  carry no key material; `.kaizen/` remains gitignored.
+
+### 4. Bugs the new tests caught (fixed; regression-tested)
+
+1. **Health precedence**: the process-death check ran AFTER the RPC-failure
+   branch, so a never-started or dead node reported `unknown`/`unavailable`
+   instead of `unhealthy` (a dead process can never answer RPC — process
+   evidence must win). Fixed + unit test; live API test now sees
+   `unhealthy` for non-running nodes.
+2. **Stdio drain race**: `runBinaryCapture`/chainspec `run`/version smoke
+   resolved on `child.on('exit')`, which can precede stdio drain — under
+   concurrent key generation the peer-id line (stderr) was occasionally
+   lost (`Could not parse peer id …: <empty>`). Fixed everywhere: `close`
+   event + signal-aware error text. Caught by the concurrent-creation live
+   test (a previously green test).
+3. Earlier in-phase unit-test fixes: `lastHeadAdvanceAt` closure bug
+   (health), `PromiseFulfilledResult.value` misuse (sampler), non-idempotent
+   `StateStore.close()`.
+
+### 5. Decisions made (new; DEC-001…DEC-010 unchanged)
+
+DEC-011 (authority patching derives keys from the binary — never hardcoded
+chain data), DEC-012 (monitoring = HTTP RPC sampling + pure health machine),
+DEC-013 (uptime/expected-peers persisted; chain data disposable via purge),
+DEC-014 (custom topology validation rules), DEC-015 (event-driven monitor
+lifecycle + on-demand snapshots).
+
+### 6. Remaining work / exact next step
+
+Phase 2B web UI (T-2.5 scaffold → T-2.6 dashboard over the typed WS stream →
+T-2.7 log tail) — deliberately NOT started; this phase stops at the engine/
+API/CLI boundary per instruction. Next session begins T-2.5.

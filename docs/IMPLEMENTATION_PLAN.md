@@ -35,15 +35,25 @@ detection** (process healthy, no blocks — the Phase 0 DB-wedge signature) is
 monitoring work and lives in **T-2.4** (MonitoringService state machine), as
 planned.
 
-## Phase 2 — Multi-Node Networks, Monitoring & Web UI (P0)
+## Phase 2A — Topology Engine & Live Monitoring (P0)
+
+Split from Phase 2 (2026-10-10): engine-side topology/monitoring/API work is
+completed and verified BEFORE any UI work starts (T-2.5…T-2.7 remain Phase 2B).
 
 | ID | Task | Deps | Pri | Acceptance criteria | Verification | Status |
 |----|------|------|-----|---------------------|--------------|--------|
-| T-2.1 | Inspect Local Testnet genesis authorities; finalize topology preset model (incl. validator+fullnode, custom) | T-1.6 | P0 | authority set documented in RESEARCH (R-05 flip); presets defined as data | script reads spec; doc update | NOT STARTED |
-| T-2.2 | ChainSpec service: per-network spec generation, bootnode wiring, purge/reset support | T-2.1 | P0 | network of N nodes each with correct `--bootnodes`; reset supported | integration test (4-node) | NOT STARTED |
-| T-2.3 | Four-validator + validator+fullnode presets; ordered start/stop; expected-peer verification | T-2.2 | P0 | 4 nodes peer fully; fullnode follows chain; stop/start cycle clean | integration test | NOT STARTED |
-| T-2.4 | MonitoringService: periodic RPC sampling → event bus; stall/health state machine (RUNNING/DEGRADED/UNREACHABLE/STALLED) | T-1.5 | P0 | samples emitted ≥1/2s; killing a node flips state correctly | integration test | NOT STARTED |
-| T-2.5 | Web app scaffold (Vite+React): layout, API/WS client, network list/create view | T-1.8 | P0 | UI creates and lists real networks; no mock data anywhere | manual + component tests | NOT STARTED |
+| T-2.1 | Inspect Local Testnet genesis authorities; topology preset model as data (single/two/four-validator/validator-fullnode/custom) with pure validation | T-1.6 | P0 | authority set documented in RESEARCH (R-05 flip); presets+custom validation pure and unit-tested; invalid topologies rejected before any side effect | unit tests + live spike evidence in PROGRESS | VERIFIED |
+| T-2.2 | ChainSpecService: per-network spec generation (plain → authority patch with binary-derived keys → raw), audit sidecar, purge/reset support | T-2.1 | P0 | 4-authority patched spec generated from the real binary; sidecar records baked-in authorities; purge resets chain data but keeps identity | unit tests (fake binary) + live 4-validator test | VERIFIED |
+| T-2.3 | Four-validator + validator+fullnode + custom presets; ordered start/stop; per-node start/stop; expected-peer verification | T-2.2 | P0 | 4 validators full-mesh with all four authoring + finality; full node syncs and authors nothing; node-level ops work; stop/start cycles clean | live integration tests | VERIFIED |
+| T-2.4 | MonitoringService: HTTP RPC sampling loop, health state machine (unknown/healthy/unhealthy/unavailable/stale), overlap prevention, typed monitor events, auto-cleanup on network stop | T-1.5, T-2.3 | P0 | samples ≥1/2s cadence; crash → unhealthy with reason; unreachable → unavailable; loop never overlaps; polling stops with the network | unit tests + live monitoring test | VERIFIED |
+| T-2.8 | API/WS surface extension: network CRUD + lifecycle + purge, node detail/start/stop, monitoring snapshots, typed events (network.created, monitor.*) with validation and structured errors | T-2.4, T-1.8 | P0 | REST endpoints mirror engine services only; invalid input → structured 400/404/409; WS streams typed monitor/network events with timestamps+ids | live API integration tests (REST + WS) | VERIFIED |
+| T-2.9 | Phase 2A test suite + docs (PROGRESS/PLAN/RESEARCH/DECISIONS/TESTING/RISKS/ARCHITECTURE/README) + phase report | T-2.3, T-2.4, T-2.8 | P0 | suite green; evidence recorded; IMPLEMENTED vs VERIFIED distinguished; report written | `npm test`, live suite, docs diff review | VERIFIED |
+
+## Phase 2B — Web UI (P0, not started)
+
+| ID | Task | Deps | Pri | Acceptance criteria | Verification | Status |
+|----|------|------|-----|---------------------|--------------|--------|
+| T-2.5 | Web app scaffold (Vite+React): layout, API/WS client, network list/create view | T-1.8, T-2.8 | P0 | UI creates and lists real networks; no mock data anywhere | manual + component tests | NOT STARTED |
 | T-2.6 | Live network dashboard (nodes table: height/finalized/peers/health/roles, logs pane) | T-2.4, T-2.5 | P0 | dashboard shows live values updating over WS from a real network | e2e smoke (real nodes) | NOT STARTED |
 | T-2.7 | Log capture & tail API/UI (per node, since timestamp, follow mode) | T-2.2, T-2.5 | P1 | tail + follow works for any managed node | e2e smoke | NOT STARTED |
 
