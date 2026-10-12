@@ -546,6 +546,29 @@ authorization (DEC-018) and verify firewall/netns state before and after.
   mechanism inside the injector's own lifecycle (with unit tests for the
   DEC-008 gate and integration evidence for at least one fault + recovery).
 
+### T-3.2 implementation status (2026-10-12, FailureInjector)
+
+Implemented in `packages/engine/src/fault/` and re-verified through the
+injector's own lifecycle against a real `portaldot_dev` two-node network
+(`test/integration/faults.int.test.ts`, live run 2026-10-12 — dry-run first,
+then execution with the TEST's own RPC polling as the independent
+observation):
+
+| # | Mechanism | Injector status | Live evidence (T-3.2) |
+|---|-----------|-----------------|------------------------|
+| A | pause (SIGSTOP/SIGCONT) | **IMPLEMENTED — VERIFIED**: baseline+effect+recovery all independently observed; same pid before/after; chain resumes; distinct claims (applied/observed/removed/recovered) | pause run: victim RPC unreachable for ≥5 s observed by the test's own 500 ms polling, reachable again, pid unchanged, `chain_getHeader` advanced past the pre-fault head; `result.outcome=verified` |
+| D | terminate (engine stop/start) | **IMPLEMENTED — VERIFIED**: exit proven (old pid dead + RPC down), restore proven with a NEW pid, peers reconverged on both nodes, chain resumed | terminate run: old pid dead, new pid serving RPC, `system_health.peers>=1` on both nodes, head advanced |
+| B2 | peer-disconnect (reserved-peer RPC) | **BLOCKED (registered adapter, typed unsupported result)**: no engine topology produces `--reserved-only` nodes and spawn mode is not persisted on NodeConfig, so the reservation-bound precondition cannot be verified for any managed target; unblock path names the required topology wiring + `t31-b3.log` | live REST `POST …/execute` → HTTP 409 `FAULT_NOT_SUPPORTED`; victim unaffected |
+| C2/C4/C5 | partition | **BLOCKED (registered adapter, typed unsupported result)**: unprivileged route needs the same reserved-only wiring; privileged route needs DEC-018 operator authorization + a privileged execution path that T-2/T-3.2 deliberately does not implement | live REST execute → 409 `FAULT_NOT_SUPPORTED`; no firewall/netns state touched |
+
+Injector-level facts worth keeping: `system_health` answers within the
+adapter's 3 s bound on this build when resumed (R-22 A's <3 s recovery
+holds through the injector); pause health reads `unavailable` (never
+`unhealthy`) so it stays distinguishable from terminate; a dry-run record
+rests at `ready` and is NOT a terminal lifecycle state (previews are never
+executed); adapter-internal polling bounds need a wrap backstop ABOVE them
+(+3 s) or the two timers race.
+
 ---
 
 ## Summary Matrix
@@ -573,4 +596,4 @@ authorization (DEC-018) and verify firewall/netns state before and after.
 | R-19 | Mainnet endpoint | UNVERIFIED (out of scope) |
 | R-20 | Platform coverage (macOS/WSL) | VERIFIED |
 | R-21 | HTTP JSON-RPC for monitoring | VERIFIED (Phase 2A) |
-| R-22 | Fault mechanisms: pause/disconnect/partition/terminate (T-3.1) | PARTIALLY VERIFIED — A/B2/C2/C4/C5/D VERIFIED; B1/C1/C3 negative results proven (see matrix) |
+| R-22 | Fault mechanisms: pause/disconnect/partition/terminate (T-3.1) | PARTIALLY VERIFIED — A/B2/C2/C4/C5/D VERIFIED; B1/C1/C3 negative results proven (see matrix). T-3.2: pause + terminate IMPLEMENTED and re-verified live through the injector; peer-disconnect + partition registered as typed-blocked (see T-3.2 status table) |

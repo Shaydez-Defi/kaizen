@@ -379,3 +379,60 @@ after.
   faults is claimed.
 - Not covered: windows >90 s, partial-authority finality under isolation
   (RSK-12), real-browser anything (unchanged boundary, §9.3).
+
+---
+
+## 11. Tests Executed in Phase 3B — FailureInjector (T-3.2)
+
+### 11.1 Unit layer (no portaldot; real stand-in processes)
+
+`packages/engine/test/fault.test.ts` — **23 tests**. The stand-in "node" is
+a tiny local HTTP RPC server run by `node -e`, so SIGSTOP/SIGCONT, TCP
+reachability, pid files, and restart semantics are REAL — only the
+blockchain is absent (that part is §11.2). Covered: lifecycle-machine
+truth table; safety-gate rejection (unknown network/node, non-designated,
+non-local chain, stopped node, ambiguous pid file, identity drift between
+preflight and execution); dry-run default (plan + zero side effects);
+verified pause and terminate flows with distinct claims; concurrent-fault
+conflict; cancellation during hold; shutdown rollback (no paused process
+leaks); cleanup-failure → quarantine → reconcile-on-proof; blocked adapters
+(peer-disconnect/partition typed unsupported + unblock paths); scripted
+adapter paths (apply timeout, unobserved effect, cleanup throw); secret
+redaction (string + deep-by-key); event ordering and payload shape;
+idempotent status queries.
+
+### 11.2 Live integration (real `portaldot_dev`, disposable networks)
+
+`test/integration/faults.int.test.ts` — **5 tests** against a Kaizen-created
+two-node network (`designatedTest === true` asserted at creation — the
+DEC-008 basis). Every live fault claim pairs the injector's result with an
+INDEPENDENT observation from the test itself:
+
+| Test | Claim | Independent evidence |
+|------|-------|----------------------|
+| pause | dry-run applies nothing; execute verified end-to-end | test's own 500 ms RPC polling saw the victim unreachable ≥5 s and reachable again; pid unchanged; `chain_getHeader` advanced past the pre-fault head |
+| terminate | exit + restore verified | old pid dead, NEW pid serving RPC, `peers >= 1` on both nodes, head advanced |
+| REST surface | dry-run default; execute needs `mode:"execute"`; blocked mechanisms → 409 `FAULT_NOT_SUPPORTED`; cancel of terminal → 409; unknown fault → 404 | `app.inject` against the real engine; `fault.state` events observed on the bus |
+| escape-proof | node of another network → `NODE_NOT_FOUND`; that node untouched | other network's node status stayed `created` |
+| audit hygiene | every record terminal; none stuck `cleanup-failed`; no key material in records | `engine.faults.list()` + serialized scan |
+
+### 11.3 Commands and actual results (2026-10-12)
+
+```bash
+npm run typecheck        # pass (engine, cli, api, web)
+npm run lint             # pass
+npm run build            # pass
+npm test                 # 136/136 passed (18 files, 68 s) — 113 prior + 23 new
+TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
+  KAIZEN_TEST_LIVE=1 npm run test:integration
+                         # 35/35 passed (9 files, 268 s) — 30 prior + 5 new
+```
+
+- **CLI smoke**: no new CLI surface in T-3.2 (CLI/UI for faults is T-3.6);
+  the CLI is unchanged and covered by the existing suites.
+- **Harness**: the Phase 3A spike harness (`test/experiments/t31-spike.mjs`)
+  was NOT duplicated — it remains the mechanism-research tool; the injector
+  is the production path and shares no experiment code.
+- Prerequisites: `npm run build` first (API typecheck consumes engine dist);
+  the live suites need a binary cache (`KAIZEN_TEST_BIN_DIR`) and skip
+  honestly without `KAIZEN_TEST_LIVE=1`.

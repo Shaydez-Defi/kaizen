@@ -10,6 +10,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { FaultEvidence, FaultExecutionResult, FaultPlanStep, FaultPreflight, FaultRecord, FaultState } from '../fault/types';
+import type {
+  KaizenErrorJson,
+} from '../errors';
 import type {
   NetworkPreset,
   NetworkRecord,
@@ -72,6 +76,30 @@ const MIGRATIONS: string[] = [
   // 4: node uptime + peer expectations (monitoring, T-2.4)
   `ALTER TABLE nodes ADD COLUMN started_at TEXT;`,
   `ALTER TABLE nodes ADD COLUMN expected_peers INTEGER NOT NULL DEFAULT 0;`,
+  // 6-8: fault records (FailureInjector audit trail, T-3.2) — deliberately no
+  // FK to networks: the audit must survive network removal (like operations).
+  `CREATE TABLE IF NOT EXISTS faults (
+     id TEXT PRIMARY KEY,
+     network_id TEXT NOT NULL,
+     node_id TEXT NOT NULL,
+     node_name TEXT NOT NULL DEFAULT '',
+     type TEXT NOT NULL,
+     mode TEXT NOT NULL,
+     state TEXT NOT NULL,
+     requested_by TEXT NOT NULL,
+     hold_duration_ms INTEGER,
+     requested_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL,
+     finished_at TEXT,
+     preflight TEXT,
+     plan TEXT,
+     evidence TEXT,
+     result TEXT,
+     error TEXT,
+     reconciled INTEGER NOT NULL DEFAULT 0
+   );`,
+  `CREATE INDEX IF NOT EXISTS faults_network_idx ON faults(network_id);`,
+  `CREATE INDEX IF NOT EXISTS faults_node_idx ON faults(node_id);`,
 ];
 
 interface NetworkRow {
@@ -120,6 +148,27 @@ export interface OperationRow {
   error_code: string | null;
   error_message: string | null;
   detail: string | null;
+}
+
+interface FaultRow {
+  id: string;
+  network_id: string;
+  node_id: string;
+  node_name: string;
+  type: string;
+  mode: string;
+  state: string;
+  requested_by: string;
+  hold_duration_ms: number | null;
+  requested_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  preflight: string | null;
+  plan: string | null;
+  evidence: string | null;
+  result: string | null;
+  error: string | null;
+  reconciled: number;
 }
 
 export interface InsertNetworkInput {
@@ -382,6 +431,128 @@ export class StateStore {
     this.db.prepare('DELETE FROM networks WHERE id = ?').run(id);
   }
 
+  // -------------------------------------------------------------------------
+  // Faults (FailureInjector audit trail, T-3.2)
+
+  insertFault(record: FaultRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO faults
+         (id, network_id, node_id, node_name, type, mode, state, requested_by, hold_duration_ms,
+          requested_at, updated_at, finished_at, preflight, plan, evidence, result, error, reconciled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.networkId,
+        record.nodeId,
+        record.nodeName,
+        record.type,
+        record.mode,
+        record.state,
+        record.requestedBy,
+        record.holdDurationMs ?? null,
+        record.requestedAt,
+        record.updatedAt,
+        record.finishedAt ?? null,
+        record.preflight ? JSON.stringify(record.preflight) : null,
+        record.plan ? JSON.stringify(record.plan) : null,
+        record.evidence ? JSON.stringify(record.evidence) : null,
+        record.result ? JSON.stringify(record.result) : null,
+        record.error ? JSON.stringify(record.error) : null,
+        record.reconciled ? 1 : 0,
+      );
+  }
+
+  updateFault(id: string, patch: {
+    state?: FaultState;
+    holdDurationMs?: number;
+    finishedAt?: string;
+    updatedAt: string;
+    preflight?: FaultPreflight;
+    plan?: FaultPlanStep[];
+    evidence?: FaultEvidence;
+    result?: FaultExecutionResult;
+    error?: KaizenErrorJson;
+    reconciled?: boolean;
+  }): void {
+    this.db
+      .prepare(
+        `UPDATE faults SET
+           state = COALESCE(?, state),
+           hold_duration_ms = COALESCE(?, hold_duration_ms),
+           finished_at = COALESCE(?, finished_at),
+           preflight = COALESCE(?, preflight),
+           plan = COALESCE(?, plan),
+           evidence = COALESCE(?, evidence),
+           result = COALESCE(?, result),
+           error = COALESCE(?, error),
+           reconciled = COALESCE(?, reconciled),
+           updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        patch.state ?? null,
+        patch.holdDurationMs ?? null,
+        patch.finishedAt ?? null,
+        patch.preflight ? JSON.stringify(patch.preflight) : null,
+        patch.plan ? JSON.stringify(patch.plan) : null,
+        patch.evidence ? JSON.stringify(patch.evidence) : null,
+        patch.result ? JSON.stringify(patch.result) : null,
+        patch.error ? JSON.stringify(patch.error) : null,
+        patch.reconciled === undefined ? null : patch.reconciled ? 1 : 0,
+        patch.updatedAt,
+        id,
+      );
+  }
+
+  getFault(id: string): FaultRecord {
+    const row = this.db.prepare('SELECT * FROM faults WHERE id = ?').get(id) as
+      | FaultRow
+      | undefined;
+    if (!row) throw new Error(`fault not found: ${id}`);
+    return mapFault(row);
+  }
+
+  tryGetFault(id: string): FaultRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM faults WHERE id = ?').get(id) as
+      | FaultRow
+      | undefined;
+    return row ? mapFault(row) : undefined;
+  }
+
+  listFaults(filter: { networkId?: string; nodeId?: string; limit?: number } = {}): FaultRecord[] {
+    const limit = filter.limit ?? 100;
+    if (filter.networkId && filter.nodeId) {
+      return (
+        this.db
+          .prepare(
+            'SELECT * FROM faults WHERE network_id = ? AND node_id = ? ORDER BY requested_at DESC, id DESC LIMIT ?',
+          )
+          .all(filter.networkId, filter.nodeId, limit) as unknown as FaultRow[]
+      ).map(mapFault);
+    }
+    if (filter.networkId) {
+      return (
+        this.db
+          .prepare('SELECT * FROM faults WHERE network_id = ? ORDER BY requested_at DESC, id DESC LIMIT ?')
+          .all(filter.networkId, limit) as unknown as FaultRow[]
+      ).map(mapFault);
+    }
+    if (filter.nodeId) {
+      return (
+        this.db
+          .prepare('SELECT * FROM faults WHERE node_id = ? ORDER BY requested_at DESC, id DESC LIMIT ?')
+          .all(filter.nodeId, limit) as unknown as FaultRow[]
+      ).map(mapFault);
+    }
+    return (
+      this.db
+        .prepare('SELECT * FROM faults ORDER BY requested_at DESC, id DESC LIMIT ?')
+        .all(limit) as unknown as FaultRow[]
+    ).map(mapFault);
+  }
+
   private closed = false;
 
   close(): void {
@@ -403,6 +574,29 @@ function mapNetwork(row: NetworkRow): NetworkRecord {
     baseDir: row.base_dir,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function mapFault(row: FaultRow): FaultRecord {
+  return {
+    id: row.id,
+    networkId: row.network_id,
+    nodeId: row.node_id,
+    nodeName: row.node_name,
+    type: row.type as FaultRecord['type'],
+    mode: row.mode as FaultRecord['mode'],
+    state: row.state as FaultState,
+    requestedBy: row.requested_by,
+    requestedAt: row.requested_at,
+    updatedAt: row.updated_at,
+    finishedAt: row.finished_at ?? undefined,
+    holdDurationMs: row.hold_duration_ms ?? undefined,
+    preflight: row.preflight ? (JSON.parse(row.preflight) as FaultPreflight) : undefined,
+    plan: row.plan ? (JSON.parse(row.plan) as FaultPlanStep[]) : undefined,
+    evidence: row.evidence ? (JSON.parse(row.evidence) as FaultEvidence) : undefined,
+    result: row.result ? (JSON.parse(row.result) as FaultExecutionResult) : undefined,
+    error: row.error ? (JSON.parse(row.error) as KaizenErrorJson) : undefined,
+    reconciled: row.reconciled === 1,
   };
 }
 

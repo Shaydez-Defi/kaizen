@@ -71,6 +71,43 @@ export type {
 export { MonitoringService } from './monitor/service';
 export type { MonitoringServiceOptions } from './monitor/service';
 
+export { FailureInjector } from './fault/injector';
+export type { FailureInjectorOptions } from './fault/injector';
+export type {
+  FaultAdapter,
+  FaultAdapterContext,
+  FaultNetworkOps,
+  AdapterPreflight,
+  AdapterTimeouts,
+  FaultApplyResult,
+  FaultRemoveResult,
+} from './fault/adapter';
+export { FAULT_TYPES, FAULT_STATES } from './fault/types';
+export type {
+  FaultType,
+  FaultState,
+  FaultMode,
+  FaultRequest,
+  FaultOptions,
+  FaultCheck,
+  FaultPreflight,
+  FaultPlanStep,
+  FaultPreview,
+  FaultObservation,
+  FaultEffectObservation,
+  FaultRecoveryObservation,
+  FaultEvidence,
+  FaultRunClaims,
+  FaultOutcome,
+  FaultExecutionResult,
+  FaultRecord,
+  FaultTargetIdentity,
+} from './fault/types';
+export { canTransition, isTerminalFaultState, TERMINAL_FAULT_STATES } from './fault/lifecycle';
+export { createRpcObserver } from './fault/observer';
+export type { FaultObserver, RpcObserverOptions } from './fault/observer';
+export { redactSecrets as redactFaultSecrets, redactDeep as redactFaultDeep } from './fault/redact';
+
 export { createHttpSampler } from './monitor/sampler';
 export type { NodeSampler, RpcNodeObservation, HttpSamplerOptions } from './monitor/sampler';
 

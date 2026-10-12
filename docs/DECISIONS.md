@@ -331,3 +331,42 @@ Format: context → decision → alternatives → consequences. Newest entries a
   and auditable; evidence of isolation always includes unaffected-node
   checks (peers/head on non-targets) so a "partition" claim is never made
   from the target's silence alone.
+
+## DEC-019 — FailureInjector boundary: engine-internal, dry-run default, loopback-trust execution
+
+- **Date**: 2026-10-12 (Phase 3B, T-3.2)
+- **Context**: The injector must be callable programmatically (and via the
+  API for the future Failure Lab UI) while keeping fault injection far
+  narrower than the engine's raw power: no generic shell/signal/executable
+  surface, no privilege escalation, no production targets. The API has no
+  authentication beyond binding to 127.0.0.1 (ARCHITECTURE §8) — the same
+  trust model under which `stop`/`purge` lifecycle endpoints already run.
+- **Decision**:
+  1. Faults are engine operations (`engine.faults`), gated on DEC-008 and
+     revalidated with fresh reads at execution time; the REST layer is a
+     thin typed transport (Zod + engine calls) with the same gate — there
+     is no remote-execution endpoint.
+  2. Dry-run is the default surface (`dryRun()`/`POST …/faults/dry-run`);
+     execution is a separate explicit action (`execute()` / `POST …
+     /faults/execute` with a literal `mode:"execute"` body marker) that
+     re-runs the entire safety boundary.
+  3. Only unprivileged adapters (pause, terminate) can execute. Privileged
+     fault execution (DEC-018 kernel-level mechanisms) is deliberately NOT
+     implemented in the engine or API: it requires an operator-
+     authorization model that does not exist yet, and the engine must never
+     escalate privileges on its own.
+  4. REST fault execution is consistent with the existing loopback-trust
+     model (equal or lesser power than the already-exposed stop/purge
+     endpoints); JSON-only parsing + no CORS headers mean browser pages
+     cannot invoke it cross-origin. If Kaizen ever binds the API beyond
+     loopback (Failure Lab remote access), an authorization model must land
+     first — tracked in RSK-26.
+- **Alternatives**: keep REST execution blocked entirely (engine/CLI only) —
+  rejected because the endpoints carry no power beyond existing lifecycle
+  routes and the future UI needs the same contract; bearer tokens on a
+  localhost API — rejected as security theater without a user model.
+- **Consequences**: fault execution over REST is as trustworthy as node
+  stop/purge already are; unsupported mechanisms (peer-disconnect,
+  partition) fail with typed `FAULT_NOT_SUPPORTED` results naming the
+  unblock path, and cleanup-failed targets stay quarantined until
+  reconciled — the injector cannot report success over an unproven rollback.

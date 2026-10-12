@@ -32,6 +32,11 @@ export type KaizenErrorCode =
   | 'NETWORK_ALREADY_RUNNING'
   | 'NODE_NOT_FOUND'
   | 'OPERATION_TIMEOUT'
+  // fault injection (T-3.2)
+  | 'FAULT_NOT_FOUND'
+  | 'FAULT_NOT_ALLOWED'
+  | 'FAULT_CONFLICT'
+  | 'FAULT_NOT_SUPPORTED'
   | 'INTERNAL';
 
 export interface KaizenErrorJson {

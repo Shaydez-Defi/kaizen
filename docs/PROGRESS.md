@@ -617,3 +617,116 @@ authorization (DEC-018).
   defaults (SIGSTOP, engine stop/start, reserved-only+proxy) and DEC-018's
   discipline for any kernel-level fault; re-verify each chosen mechanism
   inside the injector's own lifecycle.
+
+---
+
+## 2026-10-12 — PHASE 3B: FailureInjector Foundation (T-3.2)
+
+### 1. What was built
+
+A typed, safely-gated FailureInjector inside the shared engine
+(`packages/engine/src/fault/`), integrated via `engine.faults` — the same
+service both frontends will consume (the Failure Lab UI is explicitly NOT
+built here; T-3.3+ and T-3.6 own scenarios/CLI/UI).
+
+- **Fault domain model** (`fault/types.ts`, `fault/lifecycle.ts`): 11-state
+  machine (`requested → validating → (rejected | ready → executing →
+  verifying → cleaning-up → completed | failed | cancelled |
+  cleanup-failed)`); illegal transitions throw; results separate the claims
+  applied / effectObserved / faultRemoved / recovered / recoveryVerified
+  (never one "success" flag) with structured before/apply/effect/remove/
+  recovery evidence (timestamps, pids, RPC observations).
+- **Narrow adapters** (`fault/adapter.ts`, `fault/adapters/*`): each declares
+  type, privileges, preflight checks, bounded execution, expected effect,
+  verification, timeout behaviour, cleanup, and failure semantics. NO
+  generic shell/signal/executable/firewall surface exists.
+  - `pause` — SIGSTOP/SIGCONT on a re-verified managed PID (R-22 A).
+  - `terminate` — engine `stopNode`/`startNode`; restore verified with a NEW
+    pid (R-22 D).
+  - `peer-disconnect`, `partition` — registered as explicit BLOCKED adapters:
+    typed `FAULT_NOT_SUPPORTED` results with precise unblock paths (reserved-
+    only topology wiring; DEC-018 operator authorization); the R-22 negative
+    mechanisms are never substituted.
+- **Injector** (`fault/injector.ts`): dry-run is the default surface;
+  `execute()` is a separate explicit action that REVALIDATES the whole
+  boundary with fresh reads — DEC-008 `designatedTest` + local chain, node ∈
+  network, engine-managed running process, stable identity (pid +
+  `kaizen-node.pid` agreement — reused/ambiguous processes are refused, never
+  signalled), one active fault per node, quarantine check. Bounded durations
+  + per-step timeouts (wrap backstop above each adapter's own bound);
+  cancellation exits holds promptly and ALWAYS runs cleanup; cleanup-failed ⇒
+  honest `inconclusive` outcome + high-severity `fault.cleanup-failed` event
+  + target quarantine until `reconcile()` proves the effect gone;
+  `engine.close()` cancels in-flight faults and SIGCONT-sweeps pause records.
+- **Audit trail**: SQLite `faults` table (migration 6–8, schemaVersion 8) —
+  accepted, rejected, executed, verified, cleaned-up requests all recorded
+  with actor, state, plan, preflight report, evidence, error; every
+  transition persisted AND emitted as `fault.state`; operations table rows
+  (`fault.execute`) too. Evidence passes through key-aware redaction.
+- **API surface** (`apps/api/src/server.ts`): `POST …/faults/preflight`,
+  `…/dry-run`, `…/execute` (requires literal `mode:"execute"`), `GET
+  …/faults`, `GET /api/faults/:id`, `…/cancel`, `…/reconcile`; Zod-validated;
+  403 (gate), 404, 409 (conflict/unsupported) mappings; fault events flow
+  through the existing typed WS fanout.
+
+### 2. Mechanism statuses (final)
+
+| Mechanism | Status | Basis |
+|-----------|--------|-------|
+| pause | VERIFIED (implemented + live re-verified through the injector) | R-22 A + `faults.int.test.ts`: test-side polling observed the outage ≥5 s and recovery; same pid; chain resumed |
+| terminate | VERIFIED (implemented + live re-verified) | R-22 D + live: old pid dead, NEW pid serving RPC, peers reconverged, head advanced |
+| peer-disconnect | BLOCKED (adapter registered, typed unsupported) | R-22 B1/B2: only `--reserved-only` targets disconnect; no topology produces them and spawn mode is not persisted on NodeConfig — unblock path recorded (live: REST execute → 409) |
+| partition | BLOCKED (adapter registered, typed unsupported) | R-22 C2 (needs same wiring) / C4/C5 (need DEC-018 operator authorization + privileged path that T-3.2 deliberately does not implement) (live: REST execute → 409) |
+
+### 3. Gates (commands + actual results)
+
+| Command | Result |
+|---------|--------|
+| `npm run typecheck` | pass (engine, cli, api, web) |
+| `npm run lint` | pass |
+| `npm run build` | pass |
+| `npm test` | **136/136 passed** (18 files, 68 s) — 113 prior + 23 new fault unit tests |
+| `KAIZEN_TEST_LIVE=1 npm run test:integration` | **35/35 passed** (9 files, 268 s) — 30 prior + 5 new fault live tests, real `portaldot_dev 2.0.0` (sha256 `9df4d6332e84…`) |
+| post-suite hygiene | no orphan `portaldot_dev`, no netns, no t31/flt firewall rules (checked) |
+
+### 4. Bugs the new tests caught (fixed; regression-tested)
+
+1. Adapter preflight check failures were recorded but did NOT add to
+   `blockingReasons` — a pause could have executed with an unreachable
+   baseline. Fixed: adapter checks block like gate checks.
+2. Rejection codes collapsed to `FAULT_NOT_ALLOWED` — conflicts and blocked
+   mechanisms now map to `FAULT_CONFLICT` / `FAULT_NOT_SUPPORTED`.
+3. Error paths jumped straight to terminal states from `executing`/
+   `verifying` (illegal transition, state machine caught it). Fixed: every
+   terminal transition routes through `cleaning-up`.
+4. `persist()` dropped the `reconciled` flag — quarantine could never be
+   released. Fixed + tested.
+5. The wrap timeout equaled the adapters' internal poll budget and raced it
+   (spurious `OPERATION_TIMEOUT` on legitimate cleanup-failure paths). Fixed:
+   wrap = adapter bound + 3 s backstop.
+6. `redactDeep` scrubbed string values but not secret-NAMED keys
+   (`{ mnemonic: "…" }` survived). Fixed: key-aware redaction.
+7. `listFaults` ignored `nodeId` when `networkId` was also set (API filter
+   mismatch). Fixed before it could ship.
+
+### 5. Decisions made (new; DEC-001…DEC-018 unchanged)
+
+- **DEC-019** — injector boundary: engine-internal ops on DEC-008 targets;
+  dry-run default; REST execution consistent with the existing loopback-trust
+  model (equal-or-lesser power to stop/purge; JSON-only + no CORS blocks
+  browser-page invocation); privileged fault execution deliberately NOT
+  implemented until an operator-authorization model exists; any future
+  non-loopback binding requires authorization first (RSK-26).
+- **RSK-25** (cleanup-failed pause needs operator reconciliation — mitigated
+  by quarantine/reconcile/shutdown-sweep), **RSK-26** (loopback API auth
+  posture), **RSK-27** (fault-record retention) added; **RSK-24** mitigation
+  updated (injector refuses the bypass-prone mechanisms).
+
+### 6. Remaining work / exact next step
+
+- Stop here per instruction: Failure Lab UI, scenario engine (T-3.3/T-3.4),
+  diagnostics, recovery orchestration (T-4.4), validator ops, and K8s are
+  NOT started.
+- Next: **T-3.3** — scenario model + authoring (ordered actions, delays,
+  conditions; CRUD + validation) building on `engine.faults` +
+  `engine.networks` operations; keep the same dry-run/gate discipline.

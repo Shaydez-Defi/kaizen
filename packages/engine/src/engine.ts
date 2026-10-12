@@ -9,6 +9,7 @@
 import path from 'node:path';
 import { BinaryManager } from './binary/manager';
 import { EventBus } from './events/bus';
+import { FailureInjector } from './fault/injector';
 import { MonitoringService } from './monitor/service';
 import { NetworkService } from './network/service';
 import { NodeProcessManager } from './process/manager';
@@ -43,10 +44,14 @@ export interface KaizenEngine {
   networks: NetworkService;
   /** Real-RPC monitoring of running networks (auto-starts on 'running'). */
   monitoring: MonitoringService;
+  /** Guarded fault injection against designatedTest networks only
+   *  (DEC-008/DEC-018). Dry-run by default; execute() revalidates. */
+  faults: FailureInjector;
   /** WS RPC url of a node in a network (by node id). */
   wsUrlForNode(nodeId: string): string;
   /** Release engine resources. Managed node processes are NOT killed —
-   *  networks are long-running daemons (stop them explicitly). */
+   *  networks are long-running daemons (stop them explicitly). In-flight
+   *  faults are cancelled and rolled back first (no paused process leaks). */
   close(): Promise<void>;
 }
 
@@ -106,6 +111,7 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     events,
     intervalMs: options.monitorIntervalMs,
   });
+  const faults = new FailureInjector({ store, events, processes, networks });
 
   return {
     dataDir,
@@ -116,11 +122,13 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     events,
     networks,
     monitoring,
+    faults,
     wsUrlForNode(nodeId: string): string {
       const node = store.getNode(nodeId);
       return `ws://127.0.0.1:${node.ports.ws}`;
     },
     async close(): Promise<void> {
+      await faults.shutdown();
       monitoring.stopAll();
       store.close();
     },

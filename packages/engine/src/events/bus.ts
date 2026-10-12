@@ -7,6 +7,7 @@
  * an operation.
  */
 
+import type { FaultState, FaultType } from '../fault/types';
 import type {
   NetworkMonitorSnapshot,
   NetworkPreset,
@@ -84,6 +85,29 @@ export interface KaizenEventMap {
   'monitor.error': {
     networkId: string;
     nodeId?: string;
+    message: string;
+    at: string;
+  };
+  /** Fault lifecycle transition (audited; every state change is emitted). */
+  'fault.state': {
+    faultId: string;
+    networkId: string;
+    nodeId: string;
+    nodeName: string;
+    type: FaultType;
+    from: FaultState;
+    to: FaultState;
+    at: string;
+  };
+  /** High severity: a fault could not be confirmed cleaned up — the target
+   *  is quarantined until reconcile() proves the effect is gone. */
+  'fault.cleanup-failed': {
+    faultId: string;
+    networkId: string;
+    nodeId: string;
+    nodeName: string;
+    type: FaultType;
+    severity: 'high';
     message: string;
     at: string;
   };

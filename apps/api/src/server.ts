@@ -57,18 +57,39 @@ const logsQuery = z.object({
   maxBytes: z.coerce.number().int().min(1_024).max(65_536).default(16_384),
 });
 
+// Fault request bodies (T-3.2). The engine re-validates everything
+// server-side — these schemas only bound the wire format. Execution is a
+// separate explicit action: /dry-run is the default surface and /execute
+// demands an explicit mode:'execute' marker.
+const faultBody = z.object({
+  nodeId: z.string().min(1),
+  type: z.enum(['pause', 'terminate', 'peer-disconnect', 'partition']),
+  options: z
+    .object({ durationMs: z.number().int().min(0).max(600_000).optional() })
+    .optional(),
+  requestedBy: z.string().min(1).max(64).optional(),
+});
+const faultExecuteBody = faultBody.extend({ mode: z.literal('execute') });
+const faultIdParam = z.object({ faultId: z.string().min(1) });
+const faultListQuery = z.object({ nodeId: z.string().min(1).optional() });
+
 function statusFor(code: string): number {
   switch (code) {
     case 'INVALID_INPUT':
       return 400;
+    case 'FAULT_NOT_ALLOWED':
+      return 403;
     case 'NETWORK_NOT_FOUND':
     case 'NODE_NOT_FOUND':
+    case 'FAULT_NOT_FOUND':
       return 404;
     case 'NETWORK_ALREADY_EXISTS':
     case 'NETWORK_ALREADY_RUNNING':
     case 'NODE_ALREADY_RUNNING':
     case 'NODE_NOT_RUNNING':
     case 'BINARY_NOT_AVAILABLE':
+    case 'FAULT_CONFLICT':
+    case 'FAULT_NOT_SUPPORTED':
       return 409;
     default:
       return 500;
@@ -250,6 +271,128 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
       }
       const tail = engine.networks.nodeLogTail(params.nodeId, parsed.data.maxBytes);
       reply.send({ ok: true, nodeId: tail.nodeId, lines: tail.lines });
+    });
+
+    // ---- faults (FailureInjector, T-3.2) -----------------------------------
+    // Transport-only layer: body/params are Zod-validated, then the engine
+    // re-validates the whole safety boundary (designatedTest chain gate
+    // DEC-008, node ownership, managed-process identity, conflicts). No
+    // generic execution surface — only typed fault methods on registered
+    // disposable networks. Dry-run is the default; execute is a separate,
+    // explicit call that must carry mode:'execute'.
+    scope.post('/api/networks/:id/faults/preflight', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      const body = faultBody.safeParse(req.body);
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: 'INVALID_INPUT', message: 'Invalid fault request', details: { issues: body.error.issues } },
+        });
+        return;
+      }
+      const preflight = await engine.faults.preflight({
+        networkIdOrName: params.id,
+        nodeId: body.data.nodeId,
+        type: body.data.type,
+        options: body.data.options,
+        requestedBy: body.data.requestedBy ?? 'api',
+      });
+      reply.send({ ok: preflight.ok, preflight });
+    });
+
+    scope.post('/api/networks/:id/faults/dry-run', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      const body = faultBody.safeParse(req.body);
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: 'INVALID_INPUT', message: 'Invalid fault request', details: { issues: body.error.issues } },
+        });
+        return;
+      }
+      const preview = await engine.faults.dryRun({
+        networkIdOrName: params.id,
+        nodeId: body.data.nodeId,
+        type: body.data.type,
+        options: body.data.options,
+        requestedBy: body.data.requestedBy ?? 'api',
+      });
+      if (preview.state !== 'ready') {
+        // Gate/capability denial: visible at the HTTP layer, preview keeps the
+        // full check list + precise unblock path.
+        reply.status(403).send({ ok: false, preview });
+        return;
+      }
+      reply.send({ ok: true, preview });
+    });
+
+    scope.post('/api/networks/:id/faults/execute', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      const body = faultExecuteBody.safeParse(req.body);
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message:
+              'Execution requires an explicit mode:"execute" marker — POST /faults/dry-run is the default surface',
+            details: { issues: body.error.issues },
+          },
+        });
+        return;
+      }
+      const result = await engine.faults.execute({
+        networkIdOrName: params.id,
+        nodeId: body.data.nodeId,
+        type: body.data.type,
+        options: body.data.options,
+        requestedBy: body.data.requestedBy ?? 'api',
+      });
+      // The fault RAN: 200 with the structured result. ok/outcome/claims
+      // distinguish accepted vs applied vs observed vs recovered.
+      reply.send({ ok: result.ok, result });
+    });
+
+    scope.get('/api/networks/:id/faults', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      const { network } = engine.networks.getNetwork(params.id); // throws NOT_FOUND
+      const query = faultListQuery.safeParse(req.query);
+      if (!query.success) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: 'INVALID_INPUT', message: 'Invalid fault query', details: { issues: query.error.issues } },
+        });
+        return;
+      }
+      const faults = engine.faults.list({
+        networkId: network.id,
+        nodeId: query.data.nodeId,
+      });
+      reply.send({ ok: true, faults });
+    });
+
+    scope.get('/api/faults/:faultId', async (req, reply) => {
+      const params = requireParam(faultIdParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, fault: engine.faults.get(params.faultId) });
+    });
+
+    scope.post('/api/faults/:faultId/cancel', async (req, reply) => {
+      const params = requireParam(faultIdParam, req.params, reply);
+      if (!params) return;
+      const fault = await engine.faults.cancel(params.faultId);
+      reply.send({ ok: true, fault });
+    });
+
+    scope.post('/api/faults/:faultId/reconcile', async (req, reply) => {
+      const params = requireParam(faultIdParam, req.params, reply);
+      if (!params) return;
+      const fault = await engine.faults.reconcile(params.faultId);
+      reply.send({ ok: fault.reconciled === true, fault });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an

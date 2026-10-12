@@ -25,12 +25,13 @@ history.
 
 ## Current Implementation Status
 
-**Phase 2B — Web UI & Live Operations Dashboard: COMPLETE** (2026-10-12),
-on top of **Phase 2A — Topology Engine & Live Monitoring** (2026-10-10) and
-Phase 1 — Foundation & Node Lifecycle Core (2026-10-09). The monorepo is
-runnable: the shared engine manages real Portaldot node processes, and the
-CLI, the REST/WS API, and the web console all drive those same engine
-services.
+**Phase 3B — FailureInjector foundation: COMPLETE** (2026-10-12), on top of
+**Phase 3A — Fault Mechanism Feasibility Study** (2026-10-12), **Phase 2B —
+Web UI & Live Operations Dashboard** (2026-10-12), **Phase 2A — Topology
+Engine & Live Monitoring** (2026-10-10), and Phase 1 — Foundation & Node
+Lifecycle Core (2026-10-09). The monorepo is runnable: the shared engine
+manages real Portaldot node processes, and the CLI, the REST/WS API, and the
+web console all drive those same engine services.
 
 The web console (`apps/web`) — Overview, Networks (list + create), network
 detail (live monitoring table), node detail (health/sync/real log tail),
@@ -75,10 +76,18 @@ What is verified against the real `portaldot_dev` binary (evidence in
 - The CLI (`kaizen network …`, `kaizen node …`) and the Fastify API
   (REST + typed WS event stream) invoke only shared engine services; inputs
   are validated and errors are structured.
+- Engine-level fault injection (`engine.faults` — Phase 3B): typed,
+  audit-logged faults against **designated test networks only** (DEC-008).
+  `pause` (SIGSTOP/SIGCONT) and `terminate` (engine stop+restore) are
+  live-verified with independent RPC observation; dry-run is the default
+  and execution is an explicit, revalidated action; blocked mechanisms
+  (`peer-disconnect`, `partition`) fail with typed unsupported results
+  instead of substituting something unreliable. This is the foundation the
+  Failure Lab UI will consume — the UI itself is not built yet.
 
-What remains for later phases: the Failure Lab & scenarios (Phase 3),
-incident timelines (Phase 4), validator transactions (Phase 5), and
-Docker/K8s deployment adapters (Phase 6).
+What remains for later phases: the Failure Lab UI & scenario engine
+(Phase 3 remainder), incident timelines (Phase 4), validator transactions
+(Phase 5), and Docker/K8s deployment adapters (Phase 6).
 
 ## Verified Prerequisites (host)
 

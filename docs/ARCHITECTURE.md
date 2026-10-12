@@ -161,20 +161,56 @@ Failure states are first-class: `DEGRADED` (some nodes down), `UNREACHABLE`
 per-node health machine (`unknown/healthy/unhealthy/unavailable/stale`,
 DEC-012). Cleanup always releases ports and records final state.
 
-**Fault injection (planned, T-3.2 — mechanisms proven in R-22):** faults
-operate on this same lifecycle, never around it. Unprivileged mechanisms
-are the default: pause = `SIGSTOP`/`SIGCONT` on the managed PID, terminate
-= engine stop/start, topology faults = reserved-only + proxied-reserved-node
-rewiring at network creation (with `--no-mdns`). Kernel-level isolation
-(port/cgroup firewall rules or a per-node netns + veth) is an
-operator-authorized fallback under DEC-018: narrow scope to one
-process/link on both IP families, no interface scoping, no
-FORWARD/DOCKER chains, no host-global firewall changes, with the
-pre/post baseline captured and byte-identical rollback verified on every
-exit path. Every fault pre-checks the DEC-008 `designatedTest` gate, and a
-partition claim is only valid with evidence from the unaffected nodes too
-(peer sets, `ss`, head/finality progression) — never from the target's
-silence alone.
+**Fault injection (`engine.faults` — FailureInjector, T-3.2):** faults
+operate on this same lifecycle, never around it, and only ever against
+`designatedTest` networks (DEC-008). The injector is a typed service with:
+
+- **Narrow adapters** — one per Phase 3A-verified mechanism (R-22), each
+  declaring its type, required privileges, preflight checks, bounded
+  execution, expected observable effect, verification method, timeout
+  behaviour, cleanup, and failure semantics. Implemented today: `pause`
+  (SIGSTOP/SIGCONT on a re-verified managed PID — R-22 A) and `terminate`
+  (engine stopNode/startNode with a NEW pid — R-22 D). `peer-disconnect`
+  and `partition` are registered as explicit BLOCKED adapters: they fail
+  with typed unsupported results naming the precise unblock path (e.g.
+  reserved-only topology wiring, DEC-018 operator authorization) and NEVER
+  substitute a mechanism proven ineffective (plain reserved-peer RPC,
+  proxy-only cuts, static port firewall rules — R-22 negatives).
+- **Safety boundary** — every request is revalidated with fresh reads at
+  execution time: designatedTest + local chain, node ∈ network, engine-
+  managed running process, stable identity (pid + `kaizen-node.pid`
+  agreement — a reused PID or ambiguous process is refused, never
+  signalled), one active fault per node, quarantine check. Dry-run is the
+  default surface; `execute()` is a separate explicit action (over REST it
+  additionally demands a literal `mode:"execute"` body marker). Privileged
+  (sudo-level) faults are deliberately NOT implemented — the engine never
+  escalates privileges or touches host firewall state (DEC-018).
+- **Lifecycle & audit** — `requested → validating → (rejected | ready →
+  executing → verifying → cleaning-up → completed | failed | cancelled |
+  cleanup-failed)`; illegal transitions are refused, every transition is
+  persisted to the SQLite `faults` table and emitted as a `fault.state`
+  event. Accepted, rejected, executed, verified, and cleaned-up requests
+  are all recorded with actor, target, plan, and structured evidence.
+- **Verification discipline** — command-accepted, mechanism-applied,
+  effect-observed, fault-removed, recovered, and recovery-verified are
+  separate claims in the result (never one collapsed "success" flag),
+  backed by bounded polling against the node's own RPC and the process
+  table (e.g. pause = RPC unreachable WHILE pid alive; restart = NEW pid
+  answering RPC). Cleanup runs on completion, error, timeout, and
+  cancellation paths; if rollback cannot be proven the fault is marked
+  `cleanup-failed`, a high-severity `fault.cleanup-failed` event is
+  emitted, and the target is quarantined until `reconcile()` proves the
+  effect is gone. `engine.close()` cancels in-flight faults and resumes
+  paused processes — no stopped process outlives the engine.
+
+Kernel-level isolation (port/cgroup firewall rules or a per-node netns +
+veth) remains an operator-authorized fallback under DEC-018: narrow scope
+to one process/link on both IP families, no interface scoping, no
+FORWARD/DOCKER chains, no host-global firewall changes, with the pre/post
+baseline captured and byte-identical rollback verified on every exit path.
+A partition claim is only valid with evidence from the unaffected nodes
+too (peer sets, `ss`, head/finality progression) — never from the
+target's silence alone.
 
 ## 7. Data & Event Flow (monitoring)
 
@@ -211,7 +247,11 @@ flowchart LR
   git (`.kaizen/` in `.gitignore`); never logged, never returned via API.
 - **Blast-radius gate**: failure injection and any destructive op require the
   target network to carry `designatedTest: true`; chain must be Local/
-  Development type (FR-5, DEC-008).
+  Development type (FR-5, DEC-008). The FailureInjector enforces this with
+  fresh reads at execution time, refuses targets whose managed-process
+  identity is ambiguous, and exposes no generic command/signal/executable
+  surface — only typed fault methods on registered disposable networks
+  (T-3.2; privileged faults are not implemented, DEC-018).
 - **Supply chain**: upstream binaries carry no signatures; we record hashes
   TOFU and surface them in the UI (RSK-07).
 
