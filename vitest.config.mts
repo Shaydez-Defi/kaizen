@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'apps/web/src/**/*.test.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**', 'test/integration/**'],
     environment: 'node',
     reporters: ['default'],

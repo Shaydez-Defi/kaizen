@@ -53,6 +53,9 @@ const createNetworkBody = z.object({
 
 const idParam = z.object({ id: z.string().min(1) });
 const nodeParam = z.object({ id: z.string().min(1), nodeId: z.string().min(1) });
+const logsQuery = z.object({
+  maxBytes: z.coerce.number().int().min(1_024).max(65_536).default(16_384),
+});
 
 function statusFor(code: string): number {
   switch (code) {
@@ -206,7 +209,11 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
         });
         return;
       }
-      const snapshot = engine.monitoring.getLatest(params.id);
+      // Same fallback as the monitor route: after a fresh start the polling
+      // loop may not have stored a snapshot yet — sample on demand instead
+      // of reporting "no data" while the node is verifiably running.
+      const snapshot =
+        engine.monitoring.getLatest(params.id) ?? (await engine.monitoring.snapshotNow(params.id));
       const sample = snapshot?.samples.find((s) => s.nodeId === node.id) ?? null;
       const health = snapshot?.health.find((h) => h.nodeId === node.id) ?? null;
       reply.send({ ok: true, node, sample, health });
@@ -224,6 +231,25 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
       if (!params) return;
       const result = await engine.networks.stopNode(params.nodeId);
       reply.send({ ok: result.ok, result });
+    });
+
+    scope.get('/api/networks/:id/nodes/:nodeId/logs', async (req, reply) => {
+      const params = requireParam(nodeParam, req.params, reply);
+      if (!params) return;
+      const parsed = logsQuery.safeParse(req.query);
+      if (!parsed.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid log query',
+            details: { issues: parsed.error.issues },
+          },
+        });
+        return;
+      }
+      const tail = engine.networks.nodeLogTail(params.nodeId, parsed.data.maxBytes);
+      reply.send({ ok: true, nodeId: tail.nodeId, lines: tail.lines });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an

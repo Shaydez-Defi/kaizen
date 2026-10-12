@@ -561,6 +561,17 @@ export class NetworkService {
   }
 
   /**
+   * Tail a node's captured stdout/stderr log (real bytes on disk).
+   * Read-only diagnostics for API/UI (T-2.7); returns an empty list when no
+   * log has been written yet (e.g. the node never started).
+   */
+  nodeLogTail(nodeId: string, maxBytes = 16_384): { nodeId: string; lines: string[] } {
+    const node = this.requireNode(nodeId);
+    const clamped = Math.min(Math.max(Math.trunc(maxBytes), 1_024), 65_536);
+    return { nodeId: node.id, lines: readLogTail(node.logFile, clamped) };
+  }
+
+  /**
    * Delete all node chain databases while keeping the network definition,
    * node identities (peer ids), ports, and chain spec. The next start begins
    * from a fresh genesis. Refuses while any node is alive.

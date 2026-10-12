@@ -16,7 +16,7 @@
     "test": "vitest run --config vitest.config.mts",
     "test:integration": "vitest run --config vitest.integration.config.mts",
     "lint": "eslint .",
-    "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/cli --noEmit && tsc -p apps/api --noEmit"
+    "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/cli --noEmit && tsc -p apps/api --noEmit && tsc -p apps/web --noEmit"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

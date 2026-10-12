@@ -159,7 +159,8 @@ describe.runIf(LIVE)('API (live, real engine)', () => {
     expect(nodes).toHaveLength(3);
     const fullNode = nodes.find((n) => n.role === 'full')!;
 
-    // node detail: record present, no sample/health yet (nothing running)
+    // node detail: record present; with no stored snapshot the route samples
+    // on demand (DEC-017) → honest unreachable data for the non-running node
     const nodeDetail = await app.inject({
       method: 'GET',
       url: `/api/networks/${network.id}/nodes/${fullNode.id}`,
@@ -167,12 +168,12 @@ describe.runIf(LIVE)('API (live, real engine)', () => {
     expect(nodeDetail.statusCode).toBe(200);
     const nodeBody = nodeDetail.json() as {
       node: { id: string; role: string };
-      sample: unknown;
-      health: unknown;
+      sample: { rpc: { reachable: boolean } } | null;
+      health: { state: string } | null;
     };
     expect(nodeBody.node.role).toBe('full');
-    expect(nodeBody.sample).toBeNull();
-    expect(nodeBody.health).toBeNull();
+    expect(nodeBody.sample?.rpc.reachable).toBe(false);
+    expect(nodeBody.health?.state).toBe('unhealthy');
 
     // unknown node → 404 NODE_NOT_FOUND
     const missingNode = await app.inject({
