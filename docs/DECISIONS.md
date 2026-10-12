@@ -252,3 +252,53 @@ Format: context → decision → alternatives → consequences. Newest entries a
 - **Consequences**: any surface that can start a network automatically gets
   monitoring; the event stream is the single source of realtime truth for the
   future web UI (Phase 2B).
+
+## DEC-016 — Web UI is a thin typed client over the existing API; one shared WebSocket; engine types are import-type-only
+
+- **Date**: 2026-10-10 (Phase 2B, T-2.5/T-2.6/T-2.7)
+- **Context**: The operations console had to render only real backend data
+  without growing a second business-logic layer, duplicating engine models, or
+  leaking sockets/timers on navigation.
+- **Decision**:
+  - A single typed API client (`apps/web/src/api/client.ts`) owns base-URL
+    handling, JSON envelopes, structured `ApiError` translation, timeouts, and
+    abortability; components never call `fetch()` directly. Lifecycle ops use
+    long timeouts (start 300s / stop 120s) because they are health-gated.
+  - The UI's model types are `import type`-only from `@kaizen/engine` — zero
+    runtime coupling, zero drift from the shared models. The web bundle never
+    executes engine code.
+  - ONE `KaizenEventStream` for the whole app (React context): auto-reconnect
+    with capped backoff + jitter, last-unsubscribe teardown, and a `resync`
+    callback after every reconnect — the server does not replay missed events,
+    so pages refetch REST state instead of pretending the gap never happened.
+  - Live tables poll REST at a bounded cadence (5s while running; paused when
+    not running or nothing to show) and refetch on WS-driven invalidation.
+    Live data is never optimistic: values come from engine reads only.
+  - Node log tail is a real read of the node's captured log file via the API
+    (`nodeLogTail` in the shared engine); the pane auto-refreshes (10s) while
+    the node runs. No shell access from the browser (FR-1).
+- **Alternatives**: per-page fetch calls — rejected (scattered error/timeout
+  handling, drift); Redux-style global store — rejected (overkill for five
+  screens; the event ring buffer + page-local async state suffice); true WS
+  log streaming — deferred (bounded refresh covers the P1 need without a
+  second protocol; revisit with since-timestamp tailing if demanded).
+- **Consequences**: every UI number is traceable to an API response; the same
+  client layer is testable in Node against the real backend
+  (`test/integration/webclient.int.test.ts`), which is how the UI's data path
+  was verified against real Portaldot nodes in this phase.
+
+## DEC-017 — Node detail route samples on demand when no monitoring snapshot is stored yet
+
+- **Date**: 2026-10-10 (Phase 2B bug found by the live web-client test)
+- **Context**: `GET /api/networks/:id/nodes/:nodeId` returned
+  `sample: null, health: null` in the window between a network start and the
+  monitoring loop's first stored snapshot, even though the node was verifiably
+  running — the UI would show "no sample yet" against real evidence.
+- **Decision**: the node route now mirrors the monitor route's fallback:
+  `getLatest(networkId) ?? snapshotNow(networkId)`. An on-demand sample costs
+  one bounded RPC read and reports honest unreachable data when the node is
+  down (process evidence stays decisive per the Phase 2A health machine).
+- **Alternatives**: leave it and let the UI poll — rejected (first paint after
+  start would lie by omission; the fallback already existed one route above).
+- **Consequences**: node detail is correct at any moment; caught live by
+  `webclient.int.test.ts` (would have been invisible to mocked tests).

@@ -49,13 +49,18 @@ completed and verified BEFORE any UI work starts (T-2.5…T-2.7 remain Phase 2B)
 | T-2.8 | API/WS surface extension: network CRUD + lifecycle + purge, node detail/start/stop, monitoring snapshots, typed events (network.created, monitor.*) with validation and structured errors | T-2.4, T-1.8 | P0 | REST endpoints mirror engine services only; invalid input → structured 400/404/409; WS streams typed monitor/network events with timestamps+ids | live API integration tests (REST + WS) | VERIFIED |
 | T-2.9 | Phase 2A test suite + docs (PROGRESS/PLAN/RESEARCH/DECISIONS/TESTING/RISKS/ARCHITECTURE/README) + phase report | T-2.3, T-2.4, T-2.8 | P0 | suite green; evidence recorded; IMPLEMENTED vs VERIFIED distinguished; report written | `npm test`, live suite, docs diff review | VERIFIED |
 
-## Phase 2B — Web UI (P0, not started)
+## Phase 2B — Web UI (P0, complete)
+
+Built on the Phase 2A API/engine. The UI renders ONLY real API/WS data
+(DEC-009); the browser never launches processes — every operation goes
+through the backend (FR-1).
 
 | ID | Task | Deps | Pri | Acceptance criteria | Verification | Status |
 |----|------|------|-----|---------------------|--------------|--------|
-| T-2.5 | Web app scaffold (Vite+React): layout, API/WS client, network list/create view | T-1.8, T-2.8 | P0 | UI creates and lists real networks; no mock data anywhere | manual + component tests | NOT STARTED |
-| T-2.6 | Live network dashboard (nodes table: height/finalized/peers/health/roles, logs pane) | T-2.4, T-2.5 | P0 | dashboard shows live values updating over WS from a real network | e2e smoke (real nodes) | NOT STARTED |
-| T-2.7 | Log capture & tail API/UI (per node, since timestamp, follow mode) | T-2.2, T-2.5 | P1 | tail + follow works for any managed node | e2e smoke | NOT STARTED |
+| T-2.5 | Web app scaffold (Vite+React): layout, typed API client, WS client with reconnect, network list/create view, Overview/Events screens | T-1.8, T-2.8 | P0 | UI creates and lists real networks; no mock data anywhere | component tests (jsdom) + live client test against real backend | VERIFIED |
+| T-2.6 | Live network dashboard: network detail (identity, nodes, live monitoring table with peers/head/finalized/sync/health, lifecycle controls) + node detail page | T-2.4, T-2.5 | P0 | live values update in real time from a real network; unreachable fields shown explicitly, never invented | component tests + `webclient.int.test.ts` (real nodes; values cross-checked vs raw RPC). NOTE: live tables poll REST at a bounded 5s cadence (paused when not running); WS events drive invalidation + the event feed — real-time, but not per-value WS pushes | VERIFIED |
+| T-2.7 | Log capture & tail API/UI: engine `nodeLogTail`, `GET …/nodes/:nodeId/logs`, node-detail log pane with bounded auto-refresh while running | T-2.2, T-2.5 | P1 | tail works for any managed node; UI shows real log bytes | live webclient test (real log bytes from a running node) + component tests. Scope note: bounded-refresh follow, no since-timestamp streaming | VERIFIED |
+| T-2.10 | Phase 2B test suite + docs (PLAN/PROGRESS/ARCHITECTURE/TESTING/RISKS/README) + phase report (2A report archived) | T-2.5, T-2.6, T-2.7 | P0 | suite green; evidence recorded; IMPLEMENTED vs VERIFIED distinguished; report written | `npm test`, live suite, docs diff review | VERIFIED |
 
 ## Phase 3 — Failure Lab & Scenarios (P0)
 

@@ -1,143 +1,202 @@
-# Phase 2A Report — Topology Engine & Live Monitoring
+# Phase 2B Report — Web UI & Live Operations Dashboard
 
-**Date**: 2026-10-10
-**Tasks**: T-2.1, T-2.2, T-2.3, T-2.4, T-2.8, T-2.9 (split from Phase 2;
-web UI tasks T-2.5…T-2.7 remain Phase 2B, deliberately **not started**)
-**Outcome**: COMPLETE — every Phase 2A task is VERIFIED with recorded
-evidence (this report, `docs/PROGRESS.md`, `docs/TESTING.md` §5).
+**Date**: 2026-10-12
+**Tasks**: T-2.5, T-2.6, T-2.7, T-2.10 (Phase 2B split from Phase 2;
+Phase 2A was reported separately — archived at
+`docs/reports/PHASE_02A_REPORT.md`)
+**Outcome**: COMPLETE — every Phase 2B task is VERIFIED with recorded
+evidence (this report, `docs/PROGRESS.md`, `docs/TESTING.md` §9). One
+verification boundary is explicit: there is **no real-browser E2E** (RSK-23).
 
 ---
 
-## 1. What was delivered
+## 1. Summary & completed task IDs
 
-- **Topologies as data + validation**: five presets (single-node, two-node,
-  four-validator, validator+full-node, custom). Custom topologies are
-  validated by a pure function *before* any directory, port, or process is
-  touched: unique names, ≥1 validator, validator key material restricted to
-  the well-known dev keys (alice…ferdie), full nodes keyless, ≤8 nodes.
-- **Per-network chain specs**: the stock Local Testnet spec seeds only two
-  genesis authorities (Alice, Bob). Networks that need more get a patched
-  plain spec — authority key material derived from the real binary
-  (`key inspect`, sr25519 for babe/imOnline/authDiscovery, ed25519 for
-  grandpa; derivation verified by reproducing Alice's/Bob's genesis
-  entries) — rebuilt with `build-spec --raw`, plus a
-  `chain-spec.genesis.json` audit sidecar naming the baked-in authorities.
-  Nothing about chain data is hardcoded (DEC-011).
-- **Lifecycle**: ordered start/stop, per-node start/stop, partial-create
-  rollback (a failed create leaves no debris), `purge` (refuses while any
-  node runs; wipes chain DBs; keeps identity, ports, spec — restart boots
-  from genesis with the same peer ids), expected-peer wiring
-  (nodeCount − 1).
-- **Live monitoring**: per-network polling of real HTTP JSON-RPC
-  (system_health, system_peers, system_syncState, chain headers/finalized
-  head/genesis) every 2 s with an in-flight overlap guard; a pure health
-  state machine (`unknown/healthy/unhealthy/unavailable/stale`) that treats
-  process liveness as decisive evidence and never fabricates values; typed
-  `monitor.sample/health/peers/error` events; automatic start/stop tied to
-  network lifecycle; on-demand snapshots for short-lived CLI runs (DEC-012,
-  DEC-015).
-- **API/WS extension**: network CRUD + start/stop/purge, node detail +
-  node start/stop, monitoring snapshots; WS streams typed events with
-  timestamps and ids; Zod validation with structured errors and stable
-  codes (400 INVALID_INPUT, 404 NETWORK/NODE_NOT_FOUND, 409
-  ALREADY_EXISTS/NODE_NOT_RUNNING). Both API and CLI call the shared engine
-  only — no duplicated operation logic (FR-2).
-- **CLI extension**: `--preset` (all five), `--nodes` custom spec parser,
-  `network purge`, `network monitor`, `node list/get/start/stop`.
+Kaizen's lifecycle is CREATE → MONITOR → BREAK → DIAGNOSE → RECOVER →
+DEPLOY. Phase 2B implements the **CREATE and MONITOR** screens of the first
+functional web interface, on top of the already-verified Phase 2A engine +
+API. The console is a thin typed client: no operation logic, no mock data,
+no browser-side process execution (FR-1). Failure Lab, recovery, and
+deployment work was deliberately **not started** (Phases 3–6).
 
-## 2. Acceptance criteria — evaluated individually
+Completed: **T-2.5** (scaffold + typed API/WS client + Overview/Networks),
+**T-2.6** (network detail live dashboard + node detail), **T-2.7** (log tail
+API + UI), **T-2.10** (tests + docs + this report). Two backend fixes rode
+along because the UI needed them (documented, engine/API level):
+`GET …/nodes/:id/logs` (new) and the node-detail on-demand sample fix
+(DEC-017).
 
-### 2.1 Phase-plan tasks (`docs/IMPLEMENTATION_PLAN.md`, Phase 2A table)
+## 2. Screens and components implemented
 
-| Task | Criterion | Verdict | Evidence |
-|------|-----------|---------|----------|
-| T-2.1 | Authority set documented (R-05 flip) | **MET** | Plain spec = exactly 2 authorities (alice `5GrwvaEF…`, bob `5FHneW46x…`), `validatorCount=2`; key derivations reproduced from genesis entries. RESEARCH R-05 → VERIFIED; PROGRESS §1 |
-| T-2.1 | Presets + custom validation pure and unit-tested | **MET** | `topologies.test.ts` covers all presets + every custom rejection rule; unit suite 81/81 |
-| T-2.1 | Invalid topologies rejected before any side effect | **MET** | Unit (validation is a pure pre-pass) + live: invalid create → structured error, zero dirs/ports/rows (`topology.int.test.ts`) |
-| T-2.2 | 4-authority patched spec generated from the real binary | **MET** | Live 4-validator network on the patched spec: full mesh, identical genesis hash, all four authoring (PROGRESS §1; `topology.int.test.ts`) |
-| T-2.2 | Sidecar records baked-in authorities | **MET** | `chain-spec.genesis.json` per network (unit + CLI smoke step 4) |
-| T-2.2 | Purge resets chain data but keeps identity | **MET** | Live purge → restart from genesis, same peer ids (`topology.int.test.ts`; CLI smoke steps 15–17) |
-| T-2.3 | 4 validators full-mesh, all authoring, finality | **MET** | peers=3 everywhere; alice=36/bob=58/charlie=50/dave=42 authored blocks; finalized 12 vs best 14 (spike + live test) |
-| T-2.3 | Full node syncs and authors nothing | **MET** | Keyless 5th node: peers=4, synced to network best (95=95), `isSyncing=false`, 0 blocks authored |
-| T-2.3 | Node-level ops work | **MET** | `node stop`/`node start` live in monitor, api, and CLI smoke (steps 10–12) |
-| T-2.3 | Stop/start cycles clean | **MET** | purge→restart→purge cycles; `pgrep` no orphans after every suite |
-| T-2.4 | Samples at ≥1/2 s cadence | **MET** | `monitor.int.test.ts` (2 s configured, samples observed per tick); cadence unit-tested |
-| T-2.4 | Crash → unhealthy with reason | **MET** | Live SIGKILL behind the engine's back → `unhealthy`, reason matches /crashed|not running/ |
-| T-2.4 | Unreachable → unavailable | **MET (unit)** | Health-machine unit test (3 consecutive RPC failures on a live process → `unavailable`). Live suite covers the stronger process-dead → `unhealthy` path by design |
-| T-2.4 | Loop never overlaps | **MET** | In-flight guard unit test (slow tick skips, not stacks) |
-| T-2.4 | Polling stops with the network | **MET** | Live: after stop, job gone, snapshot cleared, on-demand snapshot honest |
-| T-2.8 | REST mirrors engine services only | **MET** | `server.ts` delegates every route to engine services; no operation logic at the edge |
-| T-2.8 | Structured 400/404/409 for invalid input | **MET** | `api.int.test.ts`: INVALID_INPUT (with per-problem details), NETWORK_NOT_FOUND, NODE_NOT_FOUND, NODE_NOT_RUNNING, NETWORK_ALREADY_EXISTS |
-| T-2.8 | WS typed events with timestamps+ids | **MET** | `network.created` + `network.status` live over WS; `monitor.*` typed payloads unit- and live-tested |
-| T-2.9 | Suite green; evidence recorded; IMPLEMENTED≠VERIFIED; report | **MET** | 81/81 unit; 25/25 live (213 s); CLI smoke 21/21; this report + PROGRESS/TESTING entries |
+Screens (React Router, all under the shared app shell):
 
-### 2.2 Spec functional requirements touched (`docs/PROJECT_SPEC.md` §7)
+| Route | Screen | Key contents |
+|---|---|---|
+| `/` | Overview | Fleet metrics **derived** from API responses (networks, running, unhealthy, total nodes), per-network health rollups ("not monitoring" when not running — never a guess), recent events, empty/loading/error/disconnected states |
+| `/networks` | Networks | List (name, topology, status, node count, created), client-side filter, create form for all 5 presets incl. a custom node editor, server validation errors rendered per issue |
+| `/networks/:id` | Network detail | Identity + persistence facts, nodes table (role/status/key/ports/expected peers), live monitoring table (health + reasons, peers n/expected, best/finalized, sync, uptime, sample age; `unreachable` cells; monitoring-off note when stopped), start/stop controls, purge/remove behind confirmation modals (disabled while running), per-network events |
+| `/networks/:id/nodes/:nodeId` | Node detail | Identity/process (pid, started, ports, bootnodes, base dir), live chain data with explicit `RPC unreachable` state (error text shown, no invented numbers), connected-peers table, real log tail (auto-refresh while running), node start/stop |
+| `/events` | Events | App-wide feed from the single WebSocket: kind filter, timestamps + network/node ids, expandable raw payloads, reconnect banner that states missed events are **not replayed**, clear-view |
 
-| FR | Assessment | Evidence |
-|----|------------|----------|
-| FR-1 backend owns all infrastructure ops | **MET** (engine side; no UI exists yet) | All spawning/signaling inside engine services |
-| FR-2 CLI and UI call the same engine | **MET** for CLI/API (UI = Phase 2B) | CLI/API are thin delegates; identical results verified via both surfaces |
-| FR-3 typed status, duration, structured errors | **MET** | `OperationResult` everywhere; API error envelope with stable codes; CLI `--json` envelopes |
-| FR-4 operations logged with actor/target/timestamps/result | **MET** | Operations table rows linked to networks (incl. failed ops via `failOperation`) |
-| FR-5 failure ops gated to test networks | N/A this phase | No failure operations exist yet; gate code untouched |
-| FR-6 all displayed data from real RPC/process signals | **MET** | Monitoring reports only sampled values or explicit `null`/state; honesty asserted on stopped/unreachable nodes |
-| FR-7 secrets never in logs/API/repo | **MET** | Node keys live only in per-node key files; never in DB/argv/logs; `git diff` secret scan clean |
-| FR-8 long ops support timeout + cancellation + cleanup | **MET** | Health-gated starts with timeouts; partial-create rollback; SIGTERM→SIGKILL escalation; killAll cleanup in every test hook |
+Shared components: app shell (nav + live-connection indicator +
+disconnection banner), status badges (network/node/degraded), health badges
+with evidence tooltips, loading/empty/error states, accessible confirmation
+dialog (Esc/backdrop cancel, focus management), async operation button
+(disabled + progress + inline error, never optimistic), formatting helpers.
+Styling: hand-rolled dark operations-console CSS (no UI framework) — tables,
+badges, tiles, responsive down to mobile widths, focus-visible outlines.
 
-### 2.3 Global acceptance criteria (`docs/PROJECT_SPEC.md` §8)
+Client layer: `KaizenApiClient` (single typed client; base URL config; 15s
+default / 300s start / 120s stop timeouts; `ApiError` with code + status +
+per-field issues; failed `OperationResult`s returned as values, not thrown)
+and `KaizenEventStream` (one socket for the whole app via React context;
+capped backoff + jitter reconnect; last-unsubscribe teardown; `resync`
+callback → pages refetch REST instead of assuming missed events arrived).
+Engine models are `import type`-only — zero runtime coupling, zero drift.
 
-- **AC-1** (create/start/stop/inspect a ≥2-node network that peers and
-  produces blocks): **MET and exceeded** — four-validator networks peer in
-  a full mesh, all four authorities produce blocks, GRANDPA finality
-  advances, plus a keyless full node follows the chain.
-- **AC-2** (web UI shows live data over WS): **not yet met — UI is Phase
-  2B**. The underlying data path (engine → typed WS events → API) is
-  verified; the UI itself is honestly labeled NOT STARTED.
-- **AC-3/4/5**: unchanged by this phase (scenarios, failure lab, Helm).
+## 3. Files changed
 
-## 3. Evidence summary
+- `apps/web/` — **new** src tree: `api/{types,client,events}.ts` (+ 2 test
+  files), `state/{useAsync.ts,EventsContext.tsx}`, `components/{Layout,
+  States,StatusBadge,ConfirmDialog,OperationButton}.tsx`, `components/fmt.ts`,
+  `pages/{OverviewPage,NetworksPage,CreateNetworkForm,NetworkDetailPage,
+  NodeDetailPage,EventsPage}.tsx` (+ 6 test files), `App.tsx`, `main.tsx`,
+  `styles.css`, `test-utils/{fake.ts,fixtures.ts,render.tsx}`; updated
+  `index.html`, `tsconfig.json`, `package.json` (react-router-dom; jsdom +
+  testing-library dev-deps).
+- `apps/api/src/server.ts` — new `GET /api/networks/:id/nodes/:nodeId/logs`
+  (Zod-validated `maxBytes` 1 KiB–64 KiB); node-detail route now
+  `getLatest() ?? snapshotNow()` (DEC-017).
+- `packages/engine/src/network/service.ts` — new `nodeLogTail(nodeId,
+  maxBytes)` (read-only; reuses the engine's existing `readLogTail`; clamped).
+- `package.json` (root) — typecheck now includes `tsc -p apps/web --noEmit`.
+- `vitest.config.mts` — web tests included in `npm test`.
+- `test/integration/webclient.int.test.ts` — **new** live test (below).
+- `test/integration/api.int.test.ts` — node-route contract updated for
+  DEC-017 (null → honest unreachable/unhealthy sample).
+- Docs: `IMPLEMENTATION_PLAN.md`, `PROGRESS.md`, `ARCHITECTURE.md`,
+  `DECISIONS.md` (DEC-016/017), `RISKS.md` (RSK-23), `TESTING.md` (§9),
+  `README.md`, this report (2A archived to `docs/reports/PHASE_02A_REPORT.md`).
 
-| Gate | Command | Result |
-|------|---------|--------|
-| Typecheck | `npm run typecheck` | clean (engine, cli, api) |
-| Lint | `npm run lint` | clean |
-| Build | `npm run build` | ok |
-| Unit | `npm test` | **81/81 pass (10 files)** |
-| Live | `KAIZEN_TEST_LIVE=1 npm run test:integration` | **25/25 pass (7 files), 213 s**, no orphan processes |
-| CLI smoke | scripted 21-step run (real 4-validator net) | **21/21 steps**, no orphans |
-| Spike | manual 4-validator + full-node experiment | full mesh, 4/4 authoring, finality, keyless sync (PROGRESS §1) |
-| Secrets | `git diff` scan (mnemonics/keys/64-hex) | no matches; `.kaizen/` gitignored |
+## 4. API endpoints and WebSocket events integrated
 
-Skipped-on-purpose (never reported as passing): live suites without
-`KAIZEN_TEST_LIVE=1`; macOS/WSL execution; PromQL scrapes.
+REST (all existing; one added): `GET /api/health`, `GET /api/binaries`,
+`GET/POST /api/networks`, `GET/DELETE /api/networks/:id`,
+`POST /api/networks/:id/{start,stop,purge}`, `GET /api/networks/:id/monitor`,
+`GET/POST …/nodes/:nodeId/{start,stop}`, **NEW**
+`GET …/nodes/:nodeId/logs` (real log-tail bytes from the engine).
 
-## 4. Bugs the tests caught (fixed; PROGRESS §4 has full detail)
+WebSocket `/api/events` (single connection app-wide): `hello`,
+`network.created`, `network.status`, `node.status`, `monitor.sample`,
+`monitor.health`, `monitor.peers`, `monitor.error`, `operation.completed` —
+rendered in the event feed with real timestamps and identifiers; WS
+reconnects increment a resync generation that triggers REST refetches on
+every page.
 
-1. Health-machine precedence — dead/never-started nodes were mislabeled
-   `unavailable`/`unknown`; process evidence now dominates RPC failures.
-2. Stdio drain race — capturing subprocess output on `'exit'` rather than
-   `'close'` occasionally lost the node-key peer id under concurrent
-   creation; fixed in every capture path.
-3. Development-time unit catches: head-advance closure bug, promise-result
-   shape misuse, non-idempotent store `close`.
+## 5. Exact test commands and actual results
 
-## 5. Limitations & honest caveats
+| Command | Result |
+|---|---|
+| `npm run typecheck` | **OK** (engine, cli, api, web — web added this phase) |
+| `npm run lint` | **OK** — 0 problems |
+| `npm run build` | **OK** — engine→cli→api→web; web bundle 304.15 kB (93.28 kB gzip). Rolldown prints a benign `use client` directive warning from react-router (their code, browser bundle, no effect) |
+| `npm test` | **113 passed / 17 files** — 81 pre-existing engine/CLI (unchanged) + 32 new web tests (client 7, events stream 6, Overview 4, Networks 4, NetworkDetail 4, NodeDetail 3, EventsPage 4) |
+| `KAIZEN_TEST_LIVE=1 npm run test:integration` | **30 passed / 8 files, 224.79s** (Phase 2A's 25 + webclient 5). One failure mid-phase was api.int asserting the pre-DEC-017 contract; test updated, api.int re-run **6/6**, webclient standalone **5/5** |
+| `pgrep -ax portaldot_dev` (after suites) | **no orphans** |
+| CLI smoke | **not re-run** — CLI untouched this phase; the engine change is additive-only (`nodeLogTail`) and all engine tests are green. (Phase 2A's 21/21 smoke stands for the CLI surface.) |
 
-- Validator custom topologies are capped at six nodes (alice…ferdie) —
-  the only key derivations verifiable from this binary (DEC-014).
-- `unavailable` (alive process, dead RPC) is unit-tested but not induced
-  live; the live suite exercises process-dead → `unhealthy` instead.
-- Stall detection (chain-stalled reason) is implemented and unit-tested
-  but not induced against a real wedged node — Phase 3 will do that.
-- Partial authority-set finality (e.g. 3-of-4 online) intentionally
-  untested (RSK-12).
-- Monitoring snapshots are in-memory by design (DEC-012); short-lived CLI
-  runs use on-demand sampling, not historical replay.
-- Verified on linux-x64 only; live nodes used ~5 concurrent processes on a
-  2-vCPU host without thrash (RSK-11 narrowed, not closed).
+Secrets scan: `git diff` inspected before commit — no keys, no `.kaizen/`
+state, no credentials, no machine-specific absolute paths in committed code.
 
-## 6. Next step
+## 6. Real backend/infrastructure verification vs mocks
 
-Phase 2B (T-2.5 web scaffold → T-2.6 live dashboard over the typed WS
-stream → T-2.7 log tail). This phase stops at the engine/API/CLI boundary
-per instruction; no UI work was started.
+**Real (infrastructure)** — `test/integration/webclient.int.test.ts` runs
+the ACTUAL `KaizenApiClient` + `KaizenEventStream` (the browser's code, Node
+24 provides fetch/WebSocket) against a real API server + engine/StateStore +
+a real `portaldot_dev` single-node network:
+
+- health + structured validation errors through the client;
+- create → detail → `network.created` observed on the UI stream with real
+  timestamp; structured 404s;
+- health-gated start; monitor shows `healthy`, peers `0/0`, real head
+  number, `0x…` genesis; node detail carries the same evidence; values
+  **cross-checked against an independent raw RPC read** of the same node
+  (head within drift, peer count equal, real `12D3KooW…` peer id);
+- new logs endpoint returns real log bytes from disk (`listening for new
+  connections…`); invalid `maxBytes` → structured 400;
+- stop → `stopped` + honest `unhealthy`/unreachable; typed
+  `network.status running/stopped` events on the stream; cleanup via client.
+
+**Mocks/fixtures** — all 32 web unit/component tests (jsdom, scripted
+`FakeWebSocket`, recorded-shape fixtures). They verify rendering and state
+logic only.
+
+**Not done (honest boundary)** — no real-browser E2E: rendering in an
+actual browser was not exercised (no Playwright in the repo; adding browsers
+was judged out of scope for this phase). RSK-23 tracks this; Phase 7 is the
+planned place for a clean-clone browser smoke. This report therefore claims
+"client-layer verified live against real nodes", **not** "browser-verified".
+
+## 7. Acceptance criteria — PASS/FAIL/BLOCKED
+
+### 7.1 Phase-plan tasks (`docs/IMPLEMENTATION_PLAN.md`, Phase 2B table)
+
+| Task | Verdict | Evidence |
+|---|---|---|
+| T-2.5 scaffold, typed API/WS client, list/create, no mock data | **PASS** | unit: client/events/list/create suites; live: webclient create + stream. `grep` shows no fixture/mock import outside `*.test.*`/`test-utils` |
+| T-2.6 live dashboard (peers/head/finalized/health; explicit unknowns) | **PASS** (AC re-scoped & noted in plan: live values update via bounded 5s REST polling + WS-driven invalidation — real-time, not per-value WS pushes) | live webclient monitor + cross-check; unit: unreachable/unhealthy renderings |
+| T-2.7 log tail API/UI | **PASS** (scope: tail + bounded-refresh follow; no since-timestamp streaming — recorded) | live webclient logs test (real bytes); unit: log pane |
+| T-2.10 tests + docs + report | **PASS** | this report; PROGRESS/TESTING/PLAN consistent |
+
+### 7.2 User-phase requirements (this assignment)
+
+| Requirement | Verdict | Evidence |
+|---|---|---|
+| Establish existing frontend on the repo's stack; keep usable on desktop+mobile | **PASS** | Vite+React retained; responsive CSS (breakpoints 720/860/980px, scroll-wrapped tables) |
+| Fix backend where genuinely missing, in engine/API, documented | **PASS** | logs endpoint + DEC-017 fix, both in engine/API with docs |
+| Overview with all metrics from real API responses + states | **PASS** | derived metrics; empty/loading/error/disconnected covered by tests |
+| Networks list/create/filter/validation errors/refresh | **PASS** | NetworksPage tests (4) incl. create + structured issues |
+| Network detail: nodes, connectivity, sync, blocks, health; explicit unavailable/stale; supported controls only | **PASS** | monitor table with `unreachable` cells; start/stop/purge/remove wired to real endpoints only |
+| Node detail: identity, health, peers, sync, blocks, logs/events, clear errors | **PASS** | NodeDetail tests + live log bytes + `RPC unreachable` state |
+| Events from the real WS with timestamps/ids, reconnect, no duplicate subscriptions/rendering | **PASS** | single-socket guarantee (unit), one-row-per-delivery (unit), reconnect banner (unit), real events live (webclient) |
+| Shared typed client; centralized base URL/errors; timeouts; cleanup; no excessive polling | **PASS** | DEC-016; polling cadences listed in PROGRESS §1, all paused when idle |
+| Browser never launches processes/shell; no fake metrics/mock data in prod UI | **PASS** | all ops via POST endpoints; test fixtures confined to test files |
+| Interface quality (hierarchy, states, confirmations, a11y, no decoration) | **PASS** | console-dark CSS, confirm modals with Esc/focus, focus-visible, aria labels |
+| Tests: client, flows, states, WS rendering, reconnect, controls, unavailable data | **PASS** | 32 unit + 5 live (§5) |
+| Run real build/typecheck/lint/tests; separate frontend tests from backend verification; no false E2E claims | **PASS** | §5/§6 and explicit boundary |
+| Update docs; preserve task IDs; record screens/integrations/evidence/outstanding work | **PASS** | §8 |
+| No Failure Lab / K8s / Phase 3 work started | **PASS** | untouched; recorded as remaining |
+| Full report in PHASE_REPORT.md; 2A archived; git diff inspected | **PASS** | this file; `docs/reports/PHASE_02A_REPORT.md` |
+
+## 8. Known issues, risks, remaining work
+
+- **RSK-23 (new, OPEN)**: no real-browser E2E — rendering verified by jsdom
+  tests only; client transport verified live. Planned: Playwright smoke in
+  Phase 7.
+- WS reconnect does not replay missed events (by design, DEC-016); pages
+  refetch REST state and the Events page states this openly. A user can
+  still miss a fast transient event between reconnects.
+- Log "follow" is bounded refresh (10s while running), not streaming; no
+  since-timestamp tailing yet.
+- Event feed is capped at 500 in-memory events per session (no pagination).
+- CLI smoke not re-run this phase (see §5).
+- Not started, per instruction: Failure Lab & scenarios (Phase 3), incident
+  timelines (Phase 4), validator transactions (Phase 5), Docker/K8s
+  deployment (Phase 6), security audit (Phase 7).
+
+## 9. Documentation updated
+
+`docs/IMPLEMENTATION_PLAN.md` (Phase 2B statuses + T-2.10),
+`docs/PROGRESS.md` (full entry: files, gates, boundary, bugs, decisions),
+`docs/ARCHITECTURE.md` (web component + logs route), `docs/DECISIONS.md`
+(DEC-016, DEC-017), `docs/RISKS.md` (RSK-23), `docs/TESTING.md` (§9 with
+reproduction commands), `README.md` (status + Web UI quickstart + reports
+table row), `docs/PHASE_REPORT.md` (this file; 2A archived to
+`docs/reports/PHASE_02A_REPORT.md`).
+
+## 10. Exact recommended next action
+
+Start **Phase 3 — Failure Lab & Scenarios** at **T-3.1** (failure-mechanism
+feasibility spike: process signals vs single-host network isolation; keep
+the DEC-008 designated-test-network gate intact; record mechanism
+capabilities in `docs/TECHNICAL_RESEARCH.md` before building the injector).

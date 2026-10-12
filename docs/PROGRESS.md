@@ -358,3 +358,128 @@ lifecycle + on-demand snapshots).
 Phase 2B web UI (T-2.5 scaffold → T-2.6 dashboard over the typed WS stream →
 T-2.7 log tail) — deliberately NOT started; this phase stops at the engine/
 API/CLI boundary per instruction. Next session begins T-2.5.
+
+## 2026-10-12 — PHASE 2B: Web UI & Live Operations Dashboard (T-2.5, T-2.6, T-2.7, T-2.10)
+
+**Phase/Task IDs**: Phase 2B (web UI over the Phase 2A API/engine; Failure
+Lab / K8s NOT started — recorded as remaining work).
+**Files created/modified**:
+- `apps/web/` — NEW src tree: `api/{types,client,events}.ts`, `state/
+  {useAsync.ts,EventsContext.tsx}`, `components/{Layout,States,StatusBadge,
+  ConfirmDialog,OperationButton,fmt}.tsx|ts`, `pages/{Overview,Networks,
+  CreateNetworkForm,NetworkDetail,NodeDetail,Events}Page.tsx`, `App.tsx`,
+  `main.tsx`, `styles.css`; tests NEW `src/**/*.test.{ts,tsx}` +
+  `src/test-utils/{fake,fixtures,render}`; `index.html`, `tsconfig.json`,
+  `vite.config.ts`, `package.json` (react-router-dom, testing-library, jsdom).
+- `apps/api/src/server.ts` — NEW `GET …/nodes/:nodeId/logs` (Zod query);
+  node-detail route now samples on demand when no snapshot is stored (DEC-017).
+- `packages/engine/src/network/service.ts` — NEW `nodeLogTail()` (read-only
+  tail of a node's captured log via the engine's existing `readLogTail`).
+- root `package.json` (typecheck now covers `apps/web`), `vitest.config.mts`
+  (web tests included), `test/integration/webclient.int.test.ts` (NEW live),
+  `test/integration/api.int.test.ts` (contract update for DEC-017),
+  `docs/{ARCHITECTURE,DECISIONS,IMPLEMENTATION_PLAN,RISKS,TESTING,README}` +
+  this entry + NEW `docs/PHASE_REPORT.md` (2A report archived to
+  `docs/reports/PHASE_02A_REPORT.md`).
+
+### 1. What was built (screens + integration)
+
+Five screens, all rendering real API/WS data only (DEC-009), desktop +
+mobile responsive, keyboard/focus styles, confirmation modals for
+purge/remove:
+
+- **Overview** — fleet metrics DERIVED from `GET /api/networks` +
+  per-running-network `GET …/monitor` (networks/running/unhealthy/total
+  nodes), per-network health rollups, recent event feed, empty/loading/
+  error/disconnected states.
+- **Networks** — list (name/topology/status/node count/created) with client
+  filter, create form for all 5 presets incl. a custom node editor; server
+  validation errors (code + per-field issues) rendered verbatim.
+- **Network detail** — identity/persistence facts, nodes table (role/status/
+  key/ports/expected peers), live monitoring table (health + reasons, peers
+  n/expected, best/finalized, sync, uptime, sample age; `unreachable` cells
+  when RPC is down; "monitoring runs while running" note when stopped),
+  lifecycle controls (start/stop; purge/remove behind confirm + disabled
+  while running), per-network recent events.
+- **Node detail** — identity/process (pid, started, ports, bootnodes), live
+  chain data with explicit `RPC unreachable` state (error text shown, no
+  invented numbers), connected-peers table, real log tail (auto-refresh
+  while running), node start/stop.
+- **Events** — app-wide feed from the single WS (kind filter, timestamps,
+  ids, payload disclosure), reconnect banner that states missed events are
+  NOT replayed, clear-view control.
+
+Integration layer: one typed `KaizenApiClient` (base URL, timeouts — 300s
+start / 120s stop, structured `ApiError` with issues) + one
+`KaizenEventStream` in React context (capped backoff + jitter reconnect,
+last-unsubscribe teardown, `resync` → pages refetch REST). Engine models
+imported `import type`-only. Bounded polling: monitor 5s (running only),
+logs 10s (running only), overview 10s (active only), networks 3s
+(starting/stopping only). Browser never launches processes (FR-1).
+
+### 2. Gates (commands + actual results)
+
+- `npm run typecheck` → OK (now includes `tsc -p apps/web --noEmit`).
+- `npm run lint` → OK (0 problems).
+- `npm run build` → OK; web bundle 304.15 kB (93.28 kB gzip). Rolldown
+  emits a benign `use client` directive warning from react-router — not
+  our code, bundle works.
+- `npm test` → **113 passed (17 files)** = 81 pre-existing (unchanged) +
+  32 NEW web tests (client, events stream, 6 page/component suites).
+- `KAIZEN_TEST_LIVE=1 npm run test:integration` → full suite
+  **30 tests / 8 files, 224.79s**: 1 failure was api.int asserting the
+  pre-DEC-017 node-route contract (`sample: null`); test updated to the
+  new contract and re-run green (api.int 6/6, webclient 5/5). Final state:
+  all 8 live files pass.
+- `pgrep -ax portaldot_dev` after suites → no orphans.
+- CLI smoke not re-run: CLI untouched this phase; engine change is
+  additive-only (`nodeLogTail`) and all engine tests are green.
+
+### 3. Real-backend verification vs component tests (explicit boundary)
+
+`test/integration/webclient.int.test.ts` (LIVE) runs the ACTUAL
+`KaizenApiClient` + `KaizenEventStream` — the exact code the browser
+executes — against a real API server + engine + real `portaldot_dev`
+network: health & structured validation errors through the client; network
+create + `network.created` observed on the UI's stream; health-gated start;
+monitor shows `healthy` with peers 0/0, real head, `0x…` genesis; values
+CROSS-CHECKED against an independent raw RPC read (head within drift,
+peer count equal, real `12D3KooW…` peer id); real log bytes via the new
+logs endpoint; stop → honest `unhealthy`/unreachable; typed
+`network.status running/stopped` events seen; cleanup via client.
+**Boundary**: jsdom component tests verify rendering/state logic with
+fixtures only; there is NO real-browser E2E in this phase (no Playwright in
+the repo) — recorded as RSK-23, not claimed as verified.
+
+### 4. Bugs the new tests caught (fixed)
+
+1. **Node-detail route returned null sample/health** in the window between
+   start and the first stored snapshot, even for a verifiably running node
+   (caught LIVE by webclient; invisible to mocked tests). Fixed: route now
+   uses `getLatest() ?? snapshotNow()` like the monitor route (DEC-017);
+   api.int contract updated accordingly.
+2. **Client error classification**: a failed request with a non-JSON body
+   reported `BAD_RESPONSE` instead of `HTTP_<status>`; fixed so status-based
+   classification wins for non-2xx (unit test).
+3. **Event stream teardown**: `manuallyClosed` made the socket unreopenable
+   after StrictMode's subscribe→cleanup→subscribe cycle; replaced by
+   subscriber-count-based teardown (unit-tested: reconnect works, no leak).
+4. **Status listener echo**: `onStatus` emitted the initial state twice when
+   `connect()` produced a transition; fixed (unit-tested exact sequence).
+
+### 5. Decisions made (new; DEC-001…DEC-015 unchanged)
+
+DEC-016 (thin typed web client over existing API; single shared WS with
+resync-refetch; engine types import-type-only; bounded polling, never
+optimistic), DEC-017 (node detail samples on demand when no snapshot is
+stored).
+
+### 6. Remaining work / exact next step
+
+- Not in this phase (per instruction, NOT started): Failure Lab/scenarios
+  (Phase 3), incident timelines (Phase 4), validator transactions (Phase 5),
+  Docker/K8s deployment (Phase 6), real-browser E2E (RSK-23).
+- UI refinements deferred: WS log streaming with since-timestamp tailing
+  (DEC-016 alternative), pagination for very large event feeds.
+- Next: Phase 3 — start with T-3.1 (failure-mechanism feasibility spike,
+  DEC-008 gate intact).

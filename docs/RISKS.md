@@ -23,6 +23,7 @@ Updated at every phase gate. Each risk names an owner action (task ID).
 | RSK-12 | Finality behavior with partial authority sets (2-of-N) could confuse demos | L | OPEN | Full-set finality verified for 2-, 3- and 4-authority nets (Phase 2A); partial-set quorum behavior deliberately untested — Phase 3 failure work will characterize it; dashboard shows best vs finalized distinctly |
 | RSK-21 | Patched genesis assumes stable dev-key derivations in the binary (session keys baked at create) | M | MITIGATED | Key material derived from the binary at create time (DEC-011), never hardcoded; TOFU hash (DEC-007) refuses a silently changed binary; `chain-spec.genesis.json` sidecar records exactly which authorities were baked in |
 | RSK-22 | Monitoring loop degradation (host event-loop starvation) masking node health | L | MITIGATED | 'stale' state distinguishes old samples from node failure (DEC-012); in-flight guard prevents overlapping polls; unref'd timers; unit-tested state machine |
+| RSK-23 | No real-browser E2E: UI rendering verified only by jsdom component tests; regressions in actual layout/interaction could ship unseen | M | OPEN | Phase 2B verified the exact client code paths (fetch/WS) live against real nodes (`webclient.int.test.ts`) + 32 component tests; add a Playwright smoke against a running backend in Phase 7 (clean-clone E2E) — until then no browser-E2E claim is made (see PHASE_REPORT boundary) |
 
 ## Security
 

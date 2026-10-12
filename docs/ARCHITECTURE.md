@@ -64,7 +64,7 @@ flowchart TB
 
 | Component | Responsibility |
 |---|---|
-| **Web UI** | Visual control surface: networks, nodes, monitors, Failure Lab, scenarios, incidents, deployments. Renders only engine-provided data. |
+| **Web UI** (`apps/web`) | Operations console (React 19 + Vite): Overview, Networks (+ create), Network detail, Node detail, Events. Thin typed client over the API/WS only (DEC-016): one shared API client for base-URL/errors/timeouts, one WebSocket in a React context (auto-reconnect + resync refetch), engine models via `import type`. Renders only engine-provided data; the browser never launches processes or runs shell commands. |
 | **CLI (`kaizen`)** | Scriptable surface (human + `--json` output). Thin argument parsing → engine calls. Exit codes for automation. |
 | **API Layer** | HTTP for commands/queries; WebSocket for engine event stream. Input validation (Zod), auth-less by design for localhost-first (see §8). |
 | **Operations Engine** | The single source of operational truth. Application services with typed inputs/outputs; emits events; persists history. |
@@ -84,7 +84,9 @@ flowchart TB
 - **Web ↔ API**: REST for commands (`POST /api/networks`,
   `POST /api/networks/{id}/purge`, `POST /api/nodes/{id}/start|stop`,
   `POST /api/networks/{id}/start|stop|remove`, …) and queries
-  (`GET /api/networks/{id}/nodes/{nodeId}`, `GET /api/networks/{id}/monitor`);
+  (`GET /api/networks/{id}/nodes/{nodeId}`, `GET /api/networks/{id}/monitor`,
+  `GET /api/networks/{id}/nodes/{nodeId}/logs` — real log-tail bytes from the
+  engine, DEC-016/DEC-017);
   WebSocket `/api/events` for the engine event bus (network lifecycle,
   node lifecycle, typed `monitor.sample` / `monitor.health` / `monitor.peers`
   / `monitor.error`, operation results — every payload carries timestamps and

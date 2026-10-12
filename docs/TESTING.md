@@ -252,3 +252,77 @@ curl -s -H 'Content-Type: application/json' \
 - Phase 6: image build, container network, helm install/upgrade/destroy on
   minikube, pod-kill recovery.
 - Phase 7: full-lifecycle E2E from clean clone; security audit checklist.
+
+## 9. Tests Executed in Phase 2B (web UI, client layer, logs endpoint)
+
+### 9.1 Component/unit layer (mocked — fixtures only, never production)
+
+`npm test` → **113 tests / 17 files pass** (81 pre-existing engine/CLI
+unchanged + 32 new web tests, `apps/web/src/**/*.test.{ts,tsx}`):
+
+- `api/client.test.ts` (7): success envelope; structured error → `ApiError`
+  with code/status/issues; non-envelope failure → `HTTP_500`; non-JSON 2xx →
+  `BAD_RESPONSE`; hung request → `TIMEOUT`; transport failure →
+  `NETWORK_ERROR`; failed `OperationResult` returned as value (never thrown).
+- `api/events.test.ts` (6): single socket for many subscribers; event fan-out
+  + garbage frames ignored; reconnect with backoff → new socket → `resync`
+  fires once; no reconnect with zero listeners; `close()` tears socket+timers;
+  exact status transition sequence.
+- `pages/OverviewPage.test.tsx` (4): metrics DERIVED from responses (not
+  hardcoded); unhealthy counted from real health states; empty state; error +
+  retry.
+- `pages/NetworksPage.test.tsx` (4): list + client-side filter; create →
+  navigate; API validation issues rendered; list failure error state.
+- `pages/NetworkDetailPage.test.tsx` (4): nodes + live tables incl. honest
+  `unreachable` cells; Start runs + refetches actual state; purge requires
+  confirmation (cancel does nothing); not-found error state.
+- `pages/NodeDetailPage.test.tsx` (3): live chain data + real log tail;
+  explicit `RPC unreachable` state (no invented numbers); unknown-node error.
+- `pages/EventsPage.test.tsx` (4): honest waiting state; one row per event
+  delivery with real timestamp; reconnect banner + no replayed/fake events;
+  kind filter.
+
+jsdom environment; `src/test-utils/` holds the scripted `FakeWebSocket`,
+record builders, and render wrapper (test-only).
+
+### 9.2 Live suite — `KAIZEN_TEST_LIVE=1 npm run test:integration`
+
+**30 tests / 8 files** (Phase 2A's 25 + webclient 5). Full-suite runtime
+224.79s on this host. One failure during the phase was api.int asserting the
+pre-DEC-017 node-route contract (`sample: null`); the contract intentionally
+improved (on-demand sample of honest unreachable data) and the test was
+updated — re-run green.
+
+New file `test/integration/webclient.int.test.ts` runs the ACTUAL
+`KaizenApiClient` + `KaizenEventStream` (the browser's code) against a real
+API server + engine + real `portaldot_dev` network (single-node preset,
+health-gated start → monitor → stop → remove):
+
+1. health + structured `INVALID_INPUT` errors through the client;
+2. create → detail (1 node) → `network.created` observed on the UI stream
+   with a real timestamp; structured 404 for unknown ids;
+3. start (health-gated) → monitor: `healthy`, peers `0/0`, real head number,
+   `0x…` genesis; node detail carries the same live evidence; **cross-check
+   vs an independent raw RPC read** (head within drift, peer count equal,
+   real `12D3KooW…` peer id);
+4. new logs endpoint → real log bytes from disk (`listening for new
+   connections…`); invalid `maxBytes` → structured 400;
+5. stop → `stopped` + honest `unhealthy`/unreachable; typed
+   `network.status running/stopped` events seen on the stream; cleanup.
+
+Reproduce:
+
+```bash
+npm run build
+KAIZEN_TEST_LIVE=1 TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
+  npm run test:integration
+pgrep -ax portaldot_dev   # must print nothing after the suites
+```
+
+### 9.3 Verification boundary (read this before citing evidence)
+
+- **Real backend/infrastructure**: §9.2 only (REST/WS/engine/nodes/RPC +
+  the UI's transport code end-to-end).
+- **Mocks/fixtures**: everything in §9.1 — rendering and state logic.
+- **NOT done**: real-browser E2E (no Playwright in the repo) — RSK-23. Do
+  not describe Phase 2B as "browser-verified".

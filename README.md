@@ -25,10 +25,23 @@ history.
 
 ## Current Implementation Status
 
-**Phase 2A — Topology Engine & Live Monitoring: COMPLETE** (2026-10-10),
-on top of Phase 1 — Foundation & Node Lifecycle Core (2026-10-09). The
-monorepo is runnable: the shared engine manages real Portaldot node
-processes, and the CLI and API both drive those same engine services.
+**Phase 2B — Web UI & Live Operations Dashboard: COMPLETE** (2026-10-12),
+on top of **Phase 2A — Topology Engine & Live Monitoring** (2026-10-10) and
+Phase 1 — Foundation & Node Lifecycle Core (2026-10-09). The monorepo is
+runnable: the shared engine manages real Portaldot node processes, and the
+CLI, the REST/WS API, and the web console all drive those same engine
+services.
+
+The web console (`apps/web`) — Overview, Networks (list + create), network
+detail (live monitoring table), node detail (health/sync/real log tail),
+Events — is a thin typed client over the existing API: one shared fetch
+client (timeouts, structured errors), one auto-reconnecting WebSocket for
+the whole app, engine models imported `import type`-only. Every number on
+screen comes from a real API response or WS event; the browser never
+launches processes. Its exact transport code was verified live against a
+real Portaldot network (`test/integration/webclient.int.test.ts`);
+rendering is covered by jsdom component tests — **no real-browser E2E yet**
+(RSK-23).
 
 What is verified against the real `portaldot_dev` binary (evidence in
 `docs/PROGRESS.md`, reproduction commands in `docs/TESTING.md`):
@@ -63,9 +76,9 @@ What is verified against the real `portaldot_dev` binary (evidence in
   (REST + typed WS event stream) invoke only shared engine services; inputs
   are validated and errors are structured.
 
-What remains for later phases: the real web UI (Phase 2B — Phase 1 ships only
-a scaffold page), the Failure Lab, incident timelines, validator
-transactions, and Docker/K8s deployment adapters.
+What remains for later phases: the Failure Lab & scenarios (Phase 3),
+incident timelines (Phase 4), validator transactions (Phase 5), and
+Docker/K8s deployment adapters (Phase 6).
 
 ## Verified Prerequisites (host)
 
@@ -126,6 +139,22 @@ node packages/cli/dist/index.js network remove demo
 Runtime state (SQLite db, node data dirs, logs, binary cache) lives in
 `./.kaizen/` (gitignored) or `$KAIZEN_DATA_DIR`.
 
+## Web UI Quickstart (Phase 2B)
+
+```bash
+npm run build
+node apps/api/dist/index.js          # API + WS on http://127.0.0.1:4310
+npm run dev -w @kaizen/web           # console on http://127.0.0.1:5173
+```
+
+The dev server proxies `/api` (REST **and** WebSocket) to the local backend,
+so the console is same-origin — no CORS setup. Open the console, create a
+network from the Networks screen, start it, and watch the live monitoring
+table, node health, log tails, and the typed event feed. `VITE_KAIZEN_API`
+overrides the API origin when not using the proxy. All operations pass
+through the backend and shared engine — the browser never executes shell
+commands or spawns processes.
+
 ## Documentation
 
 | Document | Purpose |
@@ -138,6 +167,7 @@ Runtime state (SQLite db, node data dirs, logs, binary cache) lives in
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture/implementation decision records |
 | [docs/TESTING.md](docs/TESTING.md) | Test strategy, executed tests, evidence, reproduction |
 | [docs/PHASE_REPORT.md](docs/PHASE_REPORT.md) | Phase reports with per-acceptance-criteria verdicts |
+| [docs/reports/](docs/reports/) | Archived phase reports (e.g. PHASE_02A_REPORT.md) |
 | [docs/RISKS.md](docs/RISKS.md) | Risk register with mitigations |
 | [AGENTS.md](AGENTS.md) | Durable build-governance instructions for agents |
 
