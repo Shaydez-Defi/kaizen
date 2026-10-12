@@ -326,3 +326,56 @@ pgrep -ax portaldot_dev   # must print nothing after the suites
 - **Mocks/fixtures**: everything in §9.1 — rendering and state logic.
 - **NOT done**: real-browser E2E (no Playwright in the repo) — RSK-23. Do
   not describe Phase 2B as "browser-verified".
+
+---
+
+## 10. Experiments Executed in Phase 3A (fault-mechanism feasibility, T-3.1)
+
+### 10.1 What ran
+
+Standalone harness `test/experiments/t31-spike.mjs` (Node ESM; imports the
+built engine only — run `npm run build` first). Every experiment creates a
+**fresh disposable** Kaizen-managed network, verifies `designatedTest`
+before faulting (DEC-008), and tears everything down (leak checks after
+each run: no `portaldot_dev`/`socat`, empty netns, empty INPUT/OUTPUT
+firewall, no `t31-*` cgroups, no leftover data dirs).
+
+```bash
+KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin TMPDIR=/tmp/opencode \
+  node test/experiments/t31-spike.mjs <subcommand>
+```
+
+| Subcommand | Mechanism | Result | Log |
+|------------|-----------|--------|-----|
+| `a-pause` | SIGSTOP/SIGCONT pause-resume | VERIFIED | `t31-a-full.log` |
+| `b-peer` | reserved-peer RPC (normal connection) | negative (no disconnect) | `t31-b.log`, `t31-b2.log` |
+| `b-peer-reserved` | removeReservedPeer on `--reserved-only` node | VERIFIED | `t31-b3.log` |
+| `c-partition` | bootnode-proxy cut, `--no-mdns` | cut yes / reconverges ~15 s | `t31-c3.log` |
+| `c-partition-mdns` | bootnode-proxy cut, mDNS left on | reconverges ~1 s (mDNS bypass) | `t31-c5.log`, `t31-c2.log` |
+| `c-partition-reserved` | reserved-only + proxied reserved-nodes (unprivileged) | VERIFIED sustained ≥90 s | `t31-c4.log` |
+| `c-iptables` | static port-scoped iptables (v4) | partial; escape via ephemeral/IPv6 | `t31-f2.log`, `t31-f4.log` |
+| `c-iptables-cgroup` | ip{,6}tables + cgroup process scoping | VERIFIED sustained; baseline restored | `t31-f6.log` |
+| `c-netns` | netns + veth link cut | VERIFIED; head frozen vs advancing | `t31-g.log` |
+| `d-terminate` | engine stop/start | VERIFIED (health ≠ pause) | `t31-d.log` |
+| `rpc-probe` | RPC method inventory (no faults) | method set recorded | any run log |
+
+`c-iptables*` and `c-netns` are privileged (sudo) and require prior operator
+authorization (DEC-018); they self-verify firewall/netns state before and
+after.
+
+### 10.2 Gates executed for T-3.1 (all green)
+
+- `npm run typecheck` ✅ · `npm run lint` ✅ · `npm run build` ✅
+- `npm test` ✅ — 113 tests / 17 files
+- `KAIZEN_TEST_LIVE=1 npm run test:integration` ✅ — 30 tests / 8 files
+  (226 s, real `portaldot_dev 2.0.0-unknown-x86_64-linux-gnu`)
+
+### 10.3 Verification boundary
+
+- Partition claims require observed connectivity change **and** unaffected
+  connectivity on non-target nodes (peer sets + `ss` + head/finality), never
+  the target's silence alone.
+- Health values cited are direct RPC reads; no monitor/UI behavior during
+  faults is claimed.
+- Not covered: windows >90 s, partial-authority finality under isolation
+  (RSK-12), real-browser anything (unchanged boundary, §9.3).

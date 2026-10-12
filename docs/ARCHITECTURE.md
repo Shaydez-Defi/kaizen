@@ -161,6 +161,21 @@ Failure states are first-class: `DEGRADED` (some nodes down), `UNREACHABLE`
 per-node health machine (`unknown/healthy/unhealthy/unavailable/stale`,
 DEC-012). Cleanup always releases ports and records final state.
 
+**Fault injection (planned, T-3.2 — mechanisms proven in R-22):** faults
+operate on this same lifecycle, never around it. Unprivileged mechanisms
+are the default: pause = `SIGSTOP`/`SIGCONT` on the managed PID, terminate
+= engine stop/start, topology faults = reserved-only + proxied-reserved-node
+rewiring at network creation (with `--no-mdns`). Kernel-level isolation
+(port/cgroup firewall rules or a per-node netns + veth) is an
+operator-authorized fallback under DEC-018: narrow scope to one
+process/link on both IP families, no interface scoping, no
+FORWARD/DOCKER chains, no host-global firewall changes, with the
+pre/post baseline captured and byte-identical rollback verified on every
+exit path. Every fault pre-checks the DEC-008 `designatedTest` gate, and a
+partition claim is only valid with evidence from the unaffected nodes too
+(peer sets, `ss`, head/finality progression) — never from the target's
+silence alone.
+
 ## 7. Data & Event Flow (monitoring)
 
 ```mermaid

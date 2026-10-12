@@ -66,7 +66,7 @@ through the backend (FR-1).
 
 | ID | Task | Deps | Pri | Acceptance criteria | Verification | Status |
 |----|------|------|-----|---------------------|--------------|--------|
-| T-3.1 | Fault mechanism study: peer disconnect (reserved-peer RPC vs rewire), pause (SIGSTOP/SIGCONT), partition (isolation strategy) on single host | T-2.3 | P0 | each mechanism proven with evidence; documented in RESEARCH | recorded experiments | NOT STARTED |
+| T-3.1 | Fault mechanism study: peer disconnect (reserved-peer RPC vs rewire), pause (SIGSTOP/SIGCONT), partition (isolation strategy) on single host | T-2.3 | P0 | each mechanism proven with evidence; documented in RESEARCH | capability matrix R-22 (TECHNICAL_RESEARCH); 10 recorded spike runs (`test/experiments/t31-spike.mjs`, logs `t31-*.log`); gates green (typecheck/lint/build/unit 113/live 30) | VERIFIED 2026-10-12 (B1/C1/C3 partial — negative results proven; see R-22) |
 | T-3.2 | FailureInjector with safeguards (designated-test-network gate, dry-run preview, timeouts, cleanup) | T-3.1 | P0 | destructive op refused on non-test target; every fault logged w/ actor/target/result | unit + integration tests | NOT STARTED |
 | T-3.3 | Scenario model + authoring (ordered actions, delays, conditions; CRUD + validation) | T-3.2 | P0 | invalid scenarios rejected with precise errors; valid saved to SQLite | unit tests | NOT STARTED |
 | T-3.4 | ScenarioEngine execution w/ per-action recording (timestamps, results, errors) + cancellation | T-3.3 | P0 | scenario runs against live network; history complete incl. failures | integration test | NOT STARTED |

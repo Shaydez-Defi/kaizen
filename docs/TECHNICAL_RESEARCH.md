@@ -454,6 +454,100 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 
 ---
 
+## R-22 — Fault mechanism feasibility (T-3.1 capability matrix)
+
+- **Question**: On a single host, which failure mechanisms can Kaizen induce
+  safely and *prove* — pause/resume, peer disconnect, network partition,
+  termination/restart — with what privileges, scope, recovery, and cleanup?
+- **Source**: Phase 3A experiments, 2026-10-12, each against a freshly
+  created disposable Kaizen-managed network only (`designatedTest === true`
+  verified in the harness before every fault — DEC-008 intact). Harness:
+  `test/experiments/t31-spike.mjs` (standalone ESM; imports only built engine
+  helpers; argv-only spawns; SIGSTOP-PID registry + firewall/netns/cgroup
+  rollback registered on every exit path; emergency cleanup on
+  SIGINT/SIGTERM). Raw evidence logs: `/tmp/opencode/t31-*.log`.
+- **Environment**: `portaldot_dev 2.0.0-unknown-x86_64-linux-gnu` (sha256
+  `9df4d6332e84…`, TOFU); Linux x86_64 6.x, 2 vCPU / 7.8 GiB; passwordless
+  sudo; iptables/ip6tables on the nf_tables backend; Docker present
+  (chains owned by dockerd); no Kubernetes.
+
+### Capability matrix
+
+| # | Mechanism | Approach | Privileges | Scope | Induced successfully | Evidence (log) | Recovery | Cleanup | Limitations | Status |
+|---|-----------|----------|-----------|-------|----------------------|----------------|----------|---------|-------------|--------|
+| A | Node pause / resume | `SIGSTOP` → `SIGCONT` on the engine-managed node PID | none (same-user signal) | one process; topology untouched | YES — pause: PID alive, RPC answers time out, health `unknown` (2 fails) → `unavailable` ("RPC unreachable for N consecutive checks"); bob kept producing at reduced rate (head 1→3 / 36 s) with finality stalled (2/2 GRANDPA); libp2p connection survived (bob peers 1/1) | `t31-a-full.log` | `SIGCONT`: RPC back <3 s, alice synced 0→4 in 3 s, finality 0→5 in ~20 s, both healthy — no restart needed | no residue | paused process still gets kernel TCP handling, so peers hold it as a live peer ≥45 s; health reaches `unavailable`, never `unhealthy` (distinct signature from D) | VERIFIED |
+| B1 | Peer disconnect via reserved-peer RPC on a normal connection | localhost `system_addReservedPeer` / `system_removeReservedPeer` (`--rpc-methods Auto`) | none (localhost unsafe RPC) | reserved set only | **NO** (negative result, proven): set membership changes apply, the live connection never drops — 60 s / 20 samples, both sides, both runs | `t31-b.log`, `t31-b2.log` | n/a | n/a | bare peer-id argument fails (`2002 MultiaddrParse(InvalidMultiaddr)`; full multiaddr required); this RPC cannot sever a discovery-maintained connection on this build | PARTIALLY VERIFIED (behavior proven; disconnect not induced) |
+| B2 | Peer disconnect on a reservation-bound connection | victim spawned `--reserved-only --reserved-nodes <multiaddr>`; then `system_removeReservedPeer(<peerId>)` on the victim | none beyond spawn config | exactly that link | YES — `system_reservedPeers` `[alice]` → `[]`; victim peers 1→0 at t=0 s; alice stops seeing it by t=3 s; sustained 60 s (victim now rejects the peer: no longer reserved) | `t31-b3.log` | re-add reserved peer or restart | normal | reserved-set filter is by **peer ID, not address** — a reserved peer can reconnect from any reachable address; requires `--reserved-only` at spawn | VERIFIED (conditional on reserved-only config) |
+| C1 | Partition via per-node TCP proxy cut (unprivileged) | socat relay as the victim's only bootnode; kill the socat process group | none | the proxied link | PARTIAL — link severed instantly (0.014 s with `--no-mdns`; `ss` proves the proxied leg existed and died), but full mesh reconverges: ~1 s when mDNS is on, ~15 s via identify-learned direct addresses with `--no-mdns` | `t31-c2.log`, `t31-c3.log`, `t31-c5.log` | restore proxy → reconnect observed | no residue | **not a sustained partition**: peers learn real addresses and redial around the cut; mDNS (default ON for non-dev chains) bypasses bootnode wiring entirely | PARTIALLY VERIFIED (cut proven, sustainability refuted) |
+| C2 | Partition via controlled peer configuration (unprivileged) | victim `--no-mdns --reserved-only --reserved-nodes <proxy-multiaddr>`; cut the proxy | none | victim vs. whole mesh | YES — victim peers → 0 at t=0.006 s and stayed 0 for the full 90 s; unaffected nodes kept their mesh (alice=2, bob+keep; keep=2) | `t31-c4.log` | proxy restored → reconnect within 120 s | no residue | victim must be spawned reserved-only (topology wiring); observed window 90 s (longer windows untested) | VERIFIED |
+| C3 | Partition via static port-scoped iptables (privileged, authorized) | v4-only `--dport/--sport` rules on the victim's ports (loopback-scoped + per-socket ephemeral ports) | sudo (authorized) | one node's ports | PARTIAL — alice dropped bob at 50 s, bob's view hit 0 at 55 s, **reconverged by 85 s**: escape via fresh ephemeral source ports and IPv6 (`[::1]`) — and `-i lo` missed eth0 (`10.0.4.11`) legs | `t31-f2.log`, `t31-f4.log` | rules removed → reconvergence | rules removed, table verified | static port rules cannot predict ephemeral redials; `iptables` is IPv4-only; interface scoping leaks non-loopback routes | PARTIALLY VERIFIED (isolation window proven; sustainability refuted) |
+| C4 | Partition via ip{,6}tables + cgroup process scoping (privileged, authorized) | both families, no interface scoping: `INPUT --dport <p2p>`, `OUTPUT --sport <p2p>`, per-established-socket port seals (from live `ss`), plus `OUTPUT -m conntrack --ctstate NEW -m cgroup --path /t31-*` with the victim moved into that cgroup | sudo (authorized) | exactly one process (any port, any family) | YES — alice dropped bob at 50 s; sustained t=55→145 s: alice={keep}, keep={alice}, **victim peers=0, victim RPC still up**; zero rule-deletion failures | `t31-f6.log` | rules removed → reconverged ≤10 s | firewall (v4+v6) back to byte-identical baseline; cgroup removed (`leftovers: []`) | `--ctdir ORIGINAL` is inert on this backend (do not use); `--pid-owner` unsupported; cgroup path must exist at rule-insert (EINVAL otherwise); moving a LIVE process back to the root cgroup fails EBUSY (kill first) | VERIFIED |
+| C5 | Partition via network namespace + veth (privileged, authorized) | throwaway `ip netns` + veth pair (`10.77.53.1/24` ↔ `10.77.53.2`); victim spawned inside; cut = host-side `ip link set … down` | sudo (authorized) | one link / one node (dedicated IP) | YES — alice lost the ns-node at 55 s; **ns peers=0 with ns RPC still up and ns head frozen at 1 while alice's head advanced to 16**; `ss` showed zero host legs to the ns node; alice↔bob intact throughout (bob=1) | `t31-g.log` | link up → reconnected ≤5 s (ns peers=2) | netns list empty, veth gone (verified) | node runs as root inside the ns (root-owned data needs `sudo rm`); peer-drop latency followed the ~50 s ping timeout, not instant carrier-down | VERIFIED |
+| D | Terminate + restart via the engine | `engine.networks.stopNode` (SIGTERM→SIGKILL) → `startNode` | none (engine path) | one node | YES — `alive=false`, RPC down, health **`unhealthy` "process is not running (status: stopped)"** (distinct from pause's `unavailable`); peers 0/1 stayed healthy inside the startup grace | `t31-d.log` | `startNode` → new PID (21174 vs 20731), peers reconnected <1 s, chain 0→3 → finality #1; final heads 10→12, both healthy | engine-managed, no residue | none observed; identity/genesis preserved across restart | VERIFIED |
+
+### Environment facts any injector must respect (discovered live)
+
+- **mDNS is default-ON** for non-dev chains (`--no-mdns` disables;
+  auto-implied by `--dev`). Without it, bootnode/proxy wiring is bypassed
+  and proxy cuts are invisible (C1).
+- **`--reserved-only` disables automatic discovery**; the reserved filter is
+  by **peer ID**, so a reserved peer can be reached from any address — which
+  is why C2 still depended on the victim being unable to dial anything else.
+- **Outbound p2p dials use ephemeral local ports**, not the listen port —
+  static port rules cannot predict redials (C3).
+- **Dual-stack and multi-homed**: p2p ran over `127.0.0.1`, `[::1]`, and
+  `10.0.4.11` (eth0) in the same run. `iptables` is IPv4-only; `-i lo`
+  misses eth0. Any kernel-level cut needs **both families and no interface
+  scoping** (C3→C4 lesson).
+- **nft-backend quirks**: `--pid-owner` unsupported; `--ctdir ORIGINAL`
+  silently matches nothing (micro-test: counter 0, bytes kept flowing);
+  `--ctstate NEW` + `-m cgroup --path` **works** (path must exist at insert
+  else EINVAL); deletion requires the exact `-D <chain> <rule-spec>` form
+  (wrong form fails silently and leaks rules — hit and fixed in T-3.1).
+- **sudo**: passwordless here; `unshare --net` works; `ip netns` + veth
+  work; a live process cannot be moved back to the root cgroup (EBUSY —
+  kill it first, then `rmdir`).
+- **RPC**: `system_localPeerId` (not `system_peerId`);
+  `system_addReservedPeer`/`system_removeReservedPeer`/`system_reservedPeers`
+  present; listen addresses are advertised in both `/tcp/<port>/p2p/…` and
+  `/tcp/<port>/ws/p2p/…` forms (both dialable).
+- **Health signatures** (for the monitor, DEC-012): pause →
+  `unknown` → `unavailable`; process stop → `unhealthy`
+  ("process is not running (status: stopped)"); these are distinguishable
+  and must not be conflated in the Failure Lab UI.
+
+Reproduce (needs the built engine + cached binary):
+```bash
+KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin TMPDIR=/tmp/opencode \
+  node test/experiments/t31-spike.mjs <a-pause|b-peer|b-peer-reserved|
+  c-partition|c-partition-reserved|c-partition-mdns|c-iptables|
+  c-iptables-cgroup|c-netns|d-terminate|rpc-probe>
+```
+Privileged variants (`c-iptables*`, `c-netns`) require prior operator
+authorization (DEC-018) and verify firewall/netns state before and after.
+
+- **Status**: PARTIALLY VERIFIED overall — A, B2, C2, C4, C5, D VERIFIED;
+  B1, C1, C3 PARTIALLY VERIFIED (negative results proven by observation).
+- **Implications for T-3.2 (FailureInjector)**: unprivileged defaults are
+  SIGSTOP/SIGCONT (pause), engine stop/start (terminate), and
+  reserved-only + proxy rewiring (topology faults); kernel-level isolation
+  (C4/C5) is the fallback for arbitrary-node cuts and must follow the
+  proven discipline: capture firewall baseline → narrow rules scoped to one
+  process/link → verify isolation with peer+`ss` evidence → exact rollback
+  → verify restored baseline. Never touch FORWARD/DOCKER chains; never
+  host-global firewall changes; every fault pre-checks `designatedTest`.
+- **Uncertainties**: windows >90 s (long-horizon reconvergence) untested;
+  partial-authority finality under isolation not measured here (RSK-12
+  remains open — A only shows finality stalling with 2/2 authorities
+  pause-split); cgroup/iptables semantics on non-nft backends or other
+  kernels untested; monitor-health transitions during partition observed
+  only through direct RPC reads, not asserted beyond them.
+- **Next verification step**: T-3.2 implementation re-verifies each chosen
+  mechanism inside the injector's own lifecycle (with unit tests for the
+  DEC-008 gate and integration evidence for at least one fault + recovery).
+
+---
+
 ## Summary Matrix
 
 | ID | Capability | Status |
@@ -478,3 +572,5 @@ Reproduce: script archived at Phase 0 (`multinode-test.sh`), summarized:
 | R-18 | Kubernetes + Helm | UNVERIFIED (tooling present) |
 | R-19 | Mainnet endpoint | UNVERIFIED (out of scope) |
 | R-20 | Platform coverage (macOS/WSL) | VERIFIED |
+| R-21 | HTTP JSON-RPC for monitoring | VERIFIED (Phase 2A) |
+| R-22 | Fault mechanisms: pause/disconnect/partition/terminate (T-3.1) | PARTIALLY VERIFIED — A/B2/C2/C4/C5/D VERIFIED; B1/C1/C3 negative results proven (see matrix) |

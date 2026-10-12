@@ -302,3 +302,32 @@ Format: context → decision → alternatives → consequences. Newest entries a
   start would lie by omission; the fallback already existed one route above).
 - **Consequences**: node detail is correct at any moment; caught live by
   `webclient.int.test.ts` (would have been invisible to mocked tests).
+
+## DEC-018 — Kernel-level fault operations are operator-authorized, narrowly scoped, and rollback-verified
+
+- **Date**: 2026-10-12 (Phase 3A, T-3.1 — informed by experiments C3–C5)
+- **Context**: Proving sustained network partition on a single host required
+  elevated mechanisms (iptables/ip6tables, network namespaces). Static
+  port-scoped rules were shown to leak (fresh ephemeral source ports, IPv6
+  loopback, eth0 legs), and one harness iteration silently failed to delete
+  its rules — i.e. the dangerous part of privileged fault injection is not
+  the cut, it is the residue.
+- **Decision**: any future Kaizen operation that touches kernel state
+  (firewall rules, netns, cgroups) must: (1) obtain explicit operator
+  authorization before the run; (2) target only a designated test network
+  (DEC-008 `designatedTest` pre-check, unchanged); (3) be scoped to a single
+  process or link (cgroup/port rules on both IP families with no interface
+  scoping, or a dedicated per-node link) — never host-global firewall
+  changes and never FORWARD/DOCKER chains; (4) capture the rule/netns
+  baseline before and verify byte-identical restoration after, with rollback
+  registered on every exit path (including crashes); (5) record the exact
+  commands and evidence in the run log.
+- **Alternatives**: unprivileged-only injector (reserved-only + proxy
+  rewiring, SIGSTOP) — retained as the default for T-3.2; kernel-level
+  mechanisms remain the authorized fallback for cutting arbitrary nodes.
+  Host-global firewall edits — rejected outright (would affect unrelated
+  traffic, violates the experiment charter).
+- **Consequences**: FailureInjector kernel faults are explicit, reversible,
+  and auditable; evidence of isolation always includes unaffected-node
+  checks (peers/head on non-targets) so a "partition" claim is never made
+  from the target's silence alone.

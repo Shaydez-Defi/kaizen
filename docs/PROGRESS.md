@@ -360,7 +360,6 @@ T-2.7 log tail) — deliberately NOT started; this phase stops at the engine/
 API/CLI boundary per instruction. Next session begins T-2.5.
 
 ## 2026-10-12 — PHASE 2B: Web UI & Live Operations Dashboard (T-2.5, T-2.6, T-2.7, T-2.10)
-
 **Phase/Task IDs**: Phase 2B (web UI over the Phase 2A API/engine; Failure
 Lab / K8s NOT started — recorded as remaining work).
 **Files created/modified**:
@@ -483,3 +482,138 @@ stored).
   (DEC-016 alternative), pagination for very large event feeds.
 - Next: Phase 3 — start with T-3.1 (failure-mechanism feasibility spike,
   DEC-008 gate intact).
+
+## 2026-10-12 — PHASE 3A: Fault Mechanism Study (T-3.1)
+
+**Phase/Task IDs**: Phase 3A / T-3.1 only. FailureInjector, scenario
+engine, and Failure Lab UI were explicitly NOT started (T-3.2 next). All
+faults ran against freshly created disposable Kaizen-managed networks with
+`designatedTest === true` verified before every fault (DEC-008 intact).
+Privileged experiments (iptables/netns) ran only after explicit operator
+authorization (DEC-018).
+**Files created/modified**:
+- `test/experiments/t31-spike.mjs` — NEW standalone experiment harness
+  (imports built engine helpers only; argv-only spawns; SIGSTOP-PID
+  registry; firewall/netns/cgroup rollback registered on every exit path;
+  emergency cleanup on SIGINT/SIGTERM). Subcommands: `a-pause`, `b-peer`,
+  `b-peer-reserved`, `c-partition[-reserved|-mdns]`, `c-iptables[-cgroup]`,
+  `c-netns`, `d-terminate`, `rpc-probe`.
+- `eslint.config.mjs` — Node globals declared for `test/**/*.mjs` (the new
+  harness tripped `no-undef` on `process`/`console`/`fetch`/timers).
+- `docs/TECHNICAL_RESEARCH.md` — NEW entry **R-22** (capability matrix +
+  environment facts + reproduction), summary matrix rows R-21/R-22.
+- `docs/DECISIONS.md` — NEW **DEC-018** (kernel-level fault operations:
+  authorization, scope, rollback verification).
+- `docs/{IMPLEMENTATION_PLAN,RISKS,ARCHITECTURE,TESTING}` updated (see §5),
+  `docs/PHASE_REPORT.md` rewritten (2B report archived to
+  `docs/reports/PHASE_02B_REPORT.md`).
+
+### 1. Mechanisms proven (evidence in `/tmp/opencode/t31-*.log`, matrix in R-22)
+
+- **A — pause/resume (VERIFIED)**: `t31-a-full.log`. SIGSTOP on alice →
+  PID alive, RPC times out → health `unknown` → `unavailable`; bob
+  half-rate production (head 1→3/36 s), finality stalled (2/2), libp2p
+  connection held (peers 1/1). SIGCONT → RPC <3 s, sync 0→4 in 3 s,
+  finality resumed to #5 in ~20 s, both healthy, no restart.
+- **B1 — reserved-peer RPC on a normal connection (PARTIAL, negative)**:
+  `t31-b.log`, `t31-b2.log`. Bare peer-id add fails (`2002
+  MultiaddrParse`), multiaddr add/remove changes `system_reservedPeers`,
+  but the live connection never dropped (60 s, 20 samples, both sides,
+  both runs). This RPC is set-membership only.
+- **B2 — disconnect on a reservation-bound connection (VERIFIED)**:
+  `t31-b3.log`. On a `--reserved-only` node, `removeReservedPeer(alice)`
+  → reserved set emptied, victim peers 1→0 at t=0 s, alice lost it by
+  t=3 s, sustained 60 s.
+- **C1 — proxy cut alone (PARTIAL, negative)**: `t31-c2/c3/c5.log`.
+  `ss` proved the proxied leg carried the connection and the group-kill
+  severed it instantly (0.014 s) — but the mesh reconverged in ~1 s with
+  mDNS on and ~15 s with `--no-mdns` (identify-learned direct addresses).
+  mDNS (default ON for non-dev chains) bypasses bootnode wiring entirely.
+- **C2 — reserved-only + proxied reserved-nodes, unprivileged (VERIFIED)**:
+  `t31-c4.log`. Victim peers → 0 at t=0.006 s, sustained 90 s; alice/bob/
+  keep mesh intact; reconnect on proxy restore.
+- **C3 — static port-scoped iptables (PARTIAL, negative)**: `t31-f2/f4.log`.
+  Isolation until ~50 s, then escape via fresh ephemeral ports and IPv6
+  (`[::1]`); `-i lo` additionally missed eth0 (`10.0.4.11`) legs.
+- **C4 — ip{,6}tables + cgroup process scoping (VERIFIED)**: `t31-f6.log`.
+  Both families, no interface scoping: port rules + per-established-socket
+  seals + `OUTPUT -m conntrack --ctstate NEW -m cgroup --path /t31-*`
+  with the victim in that cgroup. Alice dropped bob at 50 s; sustained
+  t=55→145 s (alice={keep}, keep={alice}, victim peers=0, victim RPC up);
+  reconverge ≤10 s after removal; firewall (v4+v6) byte-identical to
+  baseline; cgroup removed (`leftovers: []`); zero delete failures.
+- **C5 — netns + veth (VERIFIED)**: `t31-g.log`. Dedicated `10.77.53.0/24`
+  link; host-side link-down → ns peers=0 with ns RPC up and **ns head
+  frozen at 1 while alice advanced to 16**, zero host `ss` legs, alice↔bob
+  intact; link-up → reconnected ≤5 s; netns+veth removed (verified).
+- **D — terminate + restart (VERIFIED)**: `t31-d.log`. Engine stop →
+  `unhealthy` "process is not running (status: stopped)" — distinct from
+  pause's `unavailable`; start → new PID, peers back <1 s, chain resumed
+  0→3 → finality #1, final heads 10→12 healthy.
+
+### 2. Commands actually run (with results)
+
+- Experiments: `KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin TMPDIR=/tmp/opencode
+  node test/experiments/t31-spike.mjs <subcommand>` — 10 recorded runs
+  (a×1, b×3, c×5, d×1, plus `rpc-probe` inventory).
+- Micro-tests isolating kernel semantics: cgroup rule (BLOCKED + counter
+  incremented), `--ctdir ORIGINAL` (counter 0, bytes flowed → inert).
+- Gates: `npm run typecheck` ✅, `npm run lint` ✅ (after the eslint globals
+  fix), `npm run build` ✅, `npm test` ✅ **113/113 (17 files)**,
+  `KAIZEN_TEST_LIVE=1 npm run test:integration` ✅ **30/30 (8 files,
+  226 s, real `portaldot_dev 2.0.0`)**.
+- Leak checks after every privileged run: `pgrep portaldot_dev` none,
+  `socat` none, `ip netns list` empty, `vt31a` gone, iptables/ip6tables
+  INPUT/OUTPUT empty (Docker chains untouched), no `/sys/fs/cgroup/t31-*`,
+  no leftover data dirs.
+
+### 3. Problems encountered (honest record)
+
+1. **Harness bugs fixed during the spike**: missing `engine.networks.start()`
+   in setup; `system_peerId` → `system_localPeerId`; `key generate-node-key`
+   prefix + peer-id regex; `engine.binaries.nodePath()`; single-node preset
+   has no spec file (C switched to two-node + keyless manual peers).
+2. **socat listener kill left forked children** holding established
+   connections → fixed with `detached:true` + process-group SIGKILL.
+3. **Firewall rule leak (incident, fixed)**: the first `-D` construction
+   dropped the chain name (`iptables -D 1 …`) so deletion failed silently
+   and rules remained. Detected by the harness's own final-state log, the
+   rules were deleted manually (verified empty) and the harness now builds
+   exact `-D <chain> <rule-spec>` commands and logs every delete failure.
+4. **Two kernel surprises that invalidated rule sets** (documented in R-22):
+   `--ctdir ORIGINAL` inert (0 packets matched) and IPv6/eth0 bypasses of
+   IPv4/loopback-scoped rules. Only the empirically re-verified rule set
+   (C4) is claimed.
+5. **Live-process cgroup move-back fails EBUSY** in this container →
+   cleanup kills nodes first, then removes the cgroup (verified empty).
+
+### 4. Verification boundary (no overclaiming)
+
+- "Partition succeeded" claims are only made where the connectivity change
+  AND unaffected connectivity were both observed (peer sets on every node +
+  `ss` + head/finality progression), never from the target's silence.
+- No claim is made about monitor/UI behavior during faults — health values
+  cited are direct RPC reads (`system_health`, `system_peers`).
+- Long-horizon (>90 s) reconvergence and partial-authority finality under
+  isolation were not measured (RSK-12 stays open).
+
+### 5. Decisions & doc status flips
+
+- **DEC-018** added (kernel-level fault operations: authorization, narrow
+  scope, rollback verification).
+- **RSK-09** → MITIGATED (mechanisms evaluated empirically; two unprivileged
+  and two privileged routes proven, limitations recorded).
+- **RSK-24** added (injector bypass via discovery/address leakage — mDNS,
+  ephemeral ports, dual-stack/multi-homed — with the R-22-derived
+  mitigations).
+- ARCHITECTURE §6 gains the fault-injection lifecycle note; TESTING §10
+  records reproduction commands; T-3.1 → VERIFIED in IMPLEMENTATION_PLAN.
+
+### 6. Remaining work / exact next step
+
+- Stop here per instruction: FailureInjector/scenario engine NOT started.
+- Next: **T-3.2** — FailureInjector with the DEC-008 gate, dry-run preview,
+  timeouts and guaranteed cleanup, using R-22's recommended unprivileged
+  defaults (SIGSTOP, engine stop/start, reserved-only+proxy) and DEC-018's
+  discipline for any kernel-level fault; re-verify each chosen mechanism
+  inside the injector's own lifecycle.
