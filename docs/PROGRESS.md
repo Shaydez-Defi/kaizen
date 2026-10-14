@@ -730,3 +730,148 @@ built here; T-3.3+ and T-3.6 own scenarios/CLI/UI).
 - Next: **T-3.3** — scenario model + authoring (ordered actions, delays,
   conditions; CRUD + validation) building on `engine.faults` +
   `engine.networks` operations; keep the same dry-run/gate discipline.
+
+## 2026-10-14 — PHASE 3C: Scenario Model & Authoring Foundation (T-3.3)
+
+### 1. What was built
+
+The Failure Lab's authoring foundation in the shared engine
+(`packages/engine/src/scenario/`), surfaced as `engine.scenarios` with a
+minimal REST surface. Everything here is DATA + VALIDATION: there is no
+execution path anywhere — CRUD and validate never touch a process, never
+emit a fault event, never create a fault record (asserted by tests), and a
+saved scenario never auto-runs. Scenario execution is T-3.4 (ScenarioEngine)
+and the Failure Lab UI is T-3.6; neither was started.
+
+- **Scenario model** (`scenario/types.ts`): versioned
+  (`SCENARIO_SCHEMA_VERSION = 1`) definitions with stable ids
+  (`scn-…`), name/description/tags, explicit target requirements
+  (designatedTest enforced true — DEC-008; optional preset/minNodes/
+  capabilities), ordered steps (stable `step-…` ids, explicit `order` =
+  array position), typed operations, bounded delays
+  (0..300 000 ms), per-step timeouts (5 s..15 min; a pause step's timeout
+  must cover its hold + 60 s cleanup/recovery headroom), typed
+  pre/postconditions, and explicit failure/cancellation semantics as
+  persisted enums (`onPreconditionFailed: skip-step|abort-run|cancel-run`,
+  `onStepFailed: abort-run|continue|cancel-run`,
+  `onVerificationInconclusive: fail-step|warn-and-continue`,
+  `onStepTimeout: fail-step|cancel-run`, and the fixed safe pair
+  `onCleanupFailed: cancel-run` / `cancellation: cleanup-then-stop`).
+  Conditions are typed inspectable data — never executable strings — with
+  per-kind evaluability: `rpc-reachable`, `process-state`, `health-state`,
+  `peers`, `syncing`, `chain-progress`, `recovery-verified` are supported;
+  `finality-progress` and `runtime-event` are declared but marked
+  `planned` and REJECTED by validation (never pretended to be checkable).
+- **Safe operation registry** (`scenario/operations.ts`) — descriptive
+  only, built at runtime from the injector's new
+  `describeMechanisms()` (static `AdapterSupport` added to each adapter;
+  blocked adapters' preflight now reads the same reason/unblock consts —
+  single source of truth). `pause`/`terminate` = supported;
+  `peer-disconnect`/`partition` = BLOCKED with the adapters' unblock paths
+  verbatim (never shown executable); `node-restart` = planned. Each
+  definition exposes display metadata, strict Zod config schema, required
+  target capabilities, safety flags (designatedTest required, DEC-018
+  authorization for privileged), timeout envelope, and supported
+  conditions. No arbitrary shell/signal/firewall/executable surface exists.
+- **Deterministic validation** (`scenario/validate.ts`) — pure (no clock,
+  no store, no UI); identical input + registry ⇒ byte-identical structured
+  `ScenarioValidationResult` (stable code, severity, path, message,
+  remediation; no timestamps inside). Catches: unknown/blocked/planned
+  operations, invalid/strict-config violations, missing fault preconditions,
+  missing-postcondition warnings, contradictory/impossible conditions
+  (opposite booleans, disjoint state sets, unsatisfiable peer bounds,
+  stopped-but-RPC-reachable, recovered-but-RPC-down), non-evaluable
+  condition kinds, condition/label/timeout/delay bounds,
+  `TIMEOUT_TOO_SHORT_FOR_HOLD`, worst-case duration > 30 min, step id and
+  ordering mistakes, designatedTest=false, capability gaps (severity tracks
+  operation status: error for supported, warning for blocked/planned),
+  preset ↔ node-label mismatches (custom topologies warn), schemaVersion
+  mismatch, and secret-shaped content anywhere it would persist (reusing
+  the injector's redaction patterns). Zod `strict()` schemas reject
+  unknown fields, including secret-named keys.
+- **Persistence** (`state/store.ts`, migrations 9–10, schemaVersion 8→10):
+  `scenarios` table (UNIQUE name, JSON columns for tags/requires/steps/
+  execution/validation, recency index); atomic insert/replace (single
+  statements; UNIQUE → `SCENARIO_ALREADY_EXISTS`; update with 0 rows →
+  `SCENARIO_NOT_FOUND`); restart-reload byte-identical; rows this build
+  cannot parse or with a newer schemaVersion are surfaced as structured
+  per-row `malformed` entries (`SCENARIO_MALFORMED` /
+  `SCENARIO_VERSION_UNSUPPORTED`), never silently dropped or half-parsed.
+- **Service** (`scenario/service.ts`): `list` (q/tag/status filters +
+  limit/offset paging + total), `get`, `create`, `update` (patch merged
+  over the stored record and re-validated WHOLE — a patch cannot smuggle
+  an invalid end state; provenance preserved), `remove`, `validate`
+  (validate-without-save), `describeOperations` (JSON-safe registry for
+  authoring clients). Emits `scenario.created|updated|deleted` audit
+  events (actor included). The registry is injected from the live
+  injector in `engine.ts` — the service cannot disagree with the injector.
+- **API** (`apps/api/src/server.ts`): `GET /api/scenarios` (filters +
+  paging), `GET /api/scenarios/operations` (registry),
+  `POST /api/scenarios/validate` (200 + validity — a query, not an
+  operation), `POST /api/scenarios` (201), `GET/PUT/DELETE
+  /api/scenarios/:id`; `SCENARIO_INVALID`→400 (structured issues in
+  details), `SCENARIO_NOT_FOUND`→404, `SCENARIO_ALREADY_EXISTS`/
+  `SCENARIO_VERSION_UNSUPPORTED`→409; malformed JSON now honors Fastify's
+  4xx classification (400 + structured envelope, was 500). There are NO
+  execute/run/replay routes (404 by absence, test-asserted). DEC-019
+  posture unchanged (loopback-only, JSON-only; scenario endpoints add no
+  host-execution power). Typed scenario methods added to the shared web
+  client contract (`apps/web/src/api/client.ts` + types) for future CLI/UI
+  consumption — no UI was built (T-3.6).
+
+### 2. Gates (commands + actual results, 2026-10-14)
+
+```bash
+npm run typecheck        # pass (engine, cli, api, web)
+npm run lint             # pass
+npm run build            # pass
+npm test                 # 202/202 passed (21 files) — 136 prior + 66 new:
+                         #   scenario.test.ts 32, scenario-store.test.ts 11,
+                         #   apps/api/test/scenarios.test.ts 18 (new suite),
+                         #   client.test.ts +4, fault.test.ts +1
+TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
+  KAIZEN_TEST_LIVE=1 npm run test:integration
+                         # 35/35 passed (9 files, 346 s) — full regression;
+                         # T-3.2 live fault suites intact
+```
+
+No live-node work was needed for T-3.3 (authoring is pure data + SQLite);
+the live run is regression evidence only. Hygiene after the run: no
+orphaned `portaldot_dev` processes, no leftover netns/iptables rules
+(the live suites assert this themselves and passed).
+
+### 3. Files
+
+- New: `packages/engine/src/scenario/{types,operations,validate,service}.ts`;
+  `packages/engine/test/{scenario,scenario-store}.test.ts`;
+  `apps/api/test/scenarios.test.ts` (+ vitest include);
+  `docs/reports/PHASE_03B_REPORT.md` (3B archived verbatim).
+- Modified: `fault/{adapter,injector}.ts` + `adapters/{pause,terminate,
+  blocked}.ts` (additive: static support + describeMechanisms, single-
+  source reason/unblock consts); `state/store.ts` (migrations 9–10 + CRUD);
+  `errors.ts` (5 SCENARIO_* codes); `events/bus.ts` (3 scenario events);
+  `engine.ts` (scenarios wiring); `index.ts` (exports); `apps/api/src/
+  server.ts`; `apps/web/src/api/{client,types}.ts` + client tests;
+  `packages/engine/package.json` + lockfile (zod ^4.6.5 — project-standard
+  boundary validation, same version as the API, workspace-hoisted);
+  `store.test.ts` (schemaVersion 10), `fault.test.ts` (+1 mirror test).
+
+### 4. Problems, decisions, and remaining work
+
+- **Decisions made** (all recorded in DEC-020): registry derives from the
+  injector's actual adapters (never a parallel list); blocked/planned ops
+  authorable only as warnings; un-evaluable conditions are errors;
+  designatedTest enforced at authoring with safe default true; explicit
+  step `order` that contradicts position is an error (position is
+  authoritative), not silently normalized; validate results carry no
+  timestamps (determinism beats convenience). `TARGET_NODE_UNVERIFIABLE`
+  (custom presets) is deliberately a warning — labels resolve at run time.
+- **zod added to the engine**: justified by the repo-wide Zod-at-boundaries
+  rule (AGENTS.md); identical version to apps/api; lockfile updated.
+- **Not started (per the phase boundary)**: T-3.4 ScenarioEngine
+  execution/recording, T-3.5 replay, T-3.6 CLI/UI surfaces, diagnostics,
+  recovery orchestration. RSK-28 records that authoring-time validation is
+  inert until T-3.4's executor revalidates through the injector gates.
+- Next: **T-3.4** — ScenarioEngine execution with per-action recording and
+  cancellation, reusing this model unchanged and executing ONLY through
+  the FailureInjector's existing gates (dry-run→execute discipline).

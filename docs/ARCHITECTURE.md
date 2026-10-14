@@ -212,6 +212,50 @@ A partition claim is only valid with evidence from the unaffected nodes
 too (peer sets, `ss`, head/finality progression) — never from the
 target's silence alone.
 
+**Scenario authoring (`engine.scenarios` — ScenarioService, T-3.3):**
+scenarios are reusable, validated *data*: ordered steps with typed
+operations, bounded delays/timeouts, typed pre/postconditions, and explicit
+failure/cancellation semantics, persisted in the SQLite `scenarios` table.
+Key properties:
+
+- **Safe operation registry** — built at runtime from the injector's
+  `describeMechanisms()` (single source of truth), so the authoring view
+  can never contradict what the injector supports: `pause`/`terminate`
+  show as supported mechanisms, `peer-disconnect`/`partition` stay BLOCKED
+  with their unblock paths verbatim, `node-restart` is listed as planned.
+  The registry is descriptive only — it never bypasses runtime safety;
+  execution (T-3.4 ScenarioEngine) still revalidates through the
+  injector's preflight/gates. There is no arbitrary shell/signal/firewall
+  surface: configs are strict schema-validated objects targeting node
+  labels within a designated-test topology.
+- **Deterministic validation** — pure (no clock, no store, no UI), the
+  same input + registry yields a byte-identical structured
+  `ScenarioValidationResult` (stable codes, severity, field path, message,
+  remediation). It catches unknown/blocked/planned operations, invalid
+  configs, missing fault preconditions, contradictory or impossible
+  conditions, ordering mistakes, out-of-bounds delays/timeouts, pause
+  holds that don't fit their step budget, excessive worst-case duration,
+  safety violations (designatedTest=false is never allowed), capability
+  and preset/node-label mismatches, and secret-shaped content. Conditions
+  the architecture cannot evaluate yet (`finality-progress`,
+  `runtime-event`) are represented with evaluability `planned` and
+  REJECTED by validation — never pretended to be checkable.
+- **Failure/cancellation semantics are data** — precondition-fail,
+  step-fail, inconclusive verification, step timeout, and cleanup-failure
+  are explicit enums persisted on the scenario (today the legal values
+  are `abort-run|continue|cancel-run`, `fail-step|warn-and-continue`, and
+  the fixed safe `cancel-run`/`cleanup-then-stop` pair). Skipping steps is
+  only representable via `onPreconditionFailed: 'skip-step'`. The
+  executor (T-3.4) implements these semantics; the service itself has NO
+  execution path — CRUD and validate-only endpoints never run anything,
+  and a saved scenario never auto-executes.
+- **Persistence & audit** — validated definitions (including their
+  validation result and `valid|warning` status) round-trip across
+  restarts; rows with newer schema versions or corrupt JSON are surfaced
+  as structured per-row entries (`SCENARIO_VERSION_UNSUPPORTED` /
+  `SCENARIO_MALFORMED`), never silently dropped. Authoring mutations emit
+  `scenario.created|updated|deleted` audit events.
+
 ## 7. Data & Event Flow (monitoring)
 
 ```mermaid

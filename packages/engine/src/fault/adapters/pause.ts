@@ -63,6 +63,7 @@ function verifiedPid(ctx: FaultAdapterContext): number {
 export const pauseAdapter: FaultAdapter = {
   type: 'pause',
   mechanism: 'SIGSTOP/SIGCONT on the verified managed node PID (R-22 A)',
+  support: { status: 'supported' },
   privileges: 'none',
   reversible: true,
   expectedEffect:

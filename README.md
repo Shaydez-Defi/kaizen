@@ -25,6 +25,7 @@ history.
 
 ## Current Implementation Status
 
+**Phase 3C — Scenario model & authoring: COMPLETE** (2026-10-14), on top of
 **Phase 3B — FailureInjector foundation: COMPLETE** (2026-10-12), on top of
 **Phase 3A — Fault Mechanism Feasibility Study** (2026-10-12), **Phase 2B —
 Web UI & Live Operations Dashboard** (2026-10-12), **Phase 2A — Topology
@@ -84,9 +85,18 @@ What is verified against the real `portaldot_dev` binary (evidence in
   (`peer-disconnect`, `partition`) fail with typed unsupported results
   instead of substituting something unreliable. This is the foundation the
   Failure Lab UI will consume — the UI itself is not built yet.
+- Scenario authoring (`engine.scenarios` + `GET/POST/PUT/DELETE
+  /api/scenarios` — Phase 3C): reusable scenario definitions (ordered
+  steps with typed operations, bounded delays/timeouts, typed pre/post-
+  conditions, explicit failure/cancellation semantics) with deterministic
+  structured validation and SQLite persistence. The safe operation registry
+  mirrors the actual injector adapters, so blocked mechanisms
+  (`peer-disconnect`, `partition`) are never presented as executable;
+  saving a scenario NEVER runs anything — there are no execution endpoints,
+  and scenario execution (T-3.4) and the Failure Lab UI (T-3.6) come later.
 
-What remains for later phases: the Failure Lab UI & scenario engine
-(Phase 3 remainder), incident timelines (Phase 4), validator transactions
+What remains for later phases: scenario execution/replay & the Failure Lab
+UI (Phase 3 remainder), incident timelines (Phase 4), validator transactions
 (Phase 5), and Docker/K8s deployment adapters (Phase 6).
 
 ## Verified Prerequisites (host)

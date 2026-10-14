@@ -40,7 +40,13 @@ import type { NetworkRecord, NodeRecord } from '../types';
 import { pauseAdapter } from './adapters/pause';
 import { terminateAdapter } from './adapters/terminate';
 import { partitionAdapter, peerDisconnectAdapter } from './adapters/blocked';
-import { sleep, type FaultAdapter, type FaultAdapterContext, type FaultNetworkOps } from './adapter';
+import {
+  sleep,
+  type FaultAdapter,
+  type FaultAdapterContext,
+  type FaultMechanismInfo,
+  type FaultNetworkOps,
+} from './adapter';
 import { assertTransition, canTransition } from './lifecycle';
 import { createRpcObserver, type FaultObserver } from './observer';
 import { redactDeep } from './redact';
@@ -127,6 +133,26 @@ export class FailureInjector {
   /** Fault types the injector knows about (implemented or explicitly blocked). */
   get supportedTypes(): FaultType[] {
     return [...this.adapters.keys()];
+  }
+
+  /**
+   * Read-only mechanism descriptions (T-3.3): static metadata + support
+   * status straight from the registered adapters — the single source of
+   * truth for "which fault mechanisms exist and which are executable today".
+   * Consumers (scenario operation registry, API authoring surface) must use
+   * this instead of re-declaring fault support anywhere else.
+   */
+  describeMechanisms(): FaultMechanismInfo[] {
+    return [...this.adapters.values()].map((a) => ({
+      type: a.type,
+      mechanism: a.mechanism,
+      privileges: a.privileges,
+      reversible: a.reversible,
+      expectedEffect: a.expectedEffect,
+      cleanupDescription: a.cleanupDescription,
+      timeouts: { ...a.timeouts },
+      support: { ...a.support },
+    }));
   }
 
   /** Currently active (executing/verifying/cleaning-up) faults in this process. */

@@ -21,6 +21,12 @@ import type {
   NodeDetailResponse,
   NodeLogsResponse,
   OperationResponse,
+  ScenarioDeleteResponse,
+  ScenarioInput,
+  ScenarioListResponse,
+  ScenarioOperationsResponse,
+  ScenarioResponse,
+  ScenarioValidateResponse,
 } from './types';
 
 /** Stable machine-readable failure classification for the UI. */
@@ -85,7 +91,7 @@ export class KaizenApiClient {
   }
 
   private async request<T>(
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     options: { body?: unknown; timeoutMs?: number } = {},
   ): Promise<T> {
@@ -215,6 +221,46 @@ export class KaizenApiClient {
       'GET',
       `/api/networks/${encodeURIComponent(networkId)}/nodes/${encodeURIComponent(nodeId)}/logs?maxBytes=${maxBytes}`,
     );
+  }
+
+  // ---- scenarios (T-3.3 authoring surface; no execution endpoints exist) ---
+  listScenarios(
+    filter: { q?: string; tag?: string; status?: 'valid' | 'warning'; limit?: number; offset?: number } = {},
+  ): Promise<ScenarioListResponse> {
+    const params = new URLSearchParams();
+    if (filter.q !== undefined) params.set('q', filter.q);
+    if (filter.tag !== undefined) params.set('tag', filter.tag);
+    if (filter.status !== undefined) params.set('status', filter.status);
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    if (filter.offset !== undefined) params.set('offset', String(filter.offset));
+    const qs = params.toString();
+    return this.request('GET', `/api/scenarios${qs ? `?${qs}` : ''}`);
+  }
+
+  /** Safe operation registry (statuses, bounds, safety metadata). */
+  scenarioOperations(): Promise<ScenarioOperationsResponse> {
+    return this.request('GET', '/api/scenarios/operations');
+  }
+
+  /** Validate WITHOUT saving (never executes anything). */
+  validateScenario(input: ScenarioInput): Promise<ScenarioValidateResponse> {
+    return this.request('POST', '/api/scenarios/validate', { body: input });
+  }
+
+  createScenario(input: ScenarioInput): Promise<ScenarioResponse> {
+    return this.request('POST', '/api/scenarios', { body: input });
+  }
+
+  getScenario(id: string): Promise<ScenarioResponse> {
+    return this.request('GET', `/api/scenarios/${encodeURIComponent(id)}`);
+  }
+
+  updateScenario(id: string, patch: Partial<ScenarioInput>): Promise<ScenarioResponse> {
+    return this.request('PUT', `/api/scenarios/${encodeURIComponent(id)}`, { body: patch });
+  }
+
+  deleteScenario(id: string): Promise<ScenarioDeleteResponse> {
+    return this.request('DELETE', `/api/scenarios/${encodeURIComponent(id)}`);
   }
 }
 

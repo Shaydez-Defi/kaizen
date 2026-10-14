@@ -76,12 +76,14 @@ const faultListQuery = z.object({ nodeId: z.string().min(1).optional() });
 function statusFor(code: string): number {
   switch (code) {
     case 'INVALID_INPUT':
+    case 'SCENARIO_INVALID':
       return 400;
     case 'FAULT_NOT_ALLOWED':
       return 403;
     case 'NETWORK_NOT_FOUND':
     case 'NODE_NOT_FOUND':
     case 'FAULT_NOT_FOUND':
+    case 'SCENARIO_NOT_FOUND':
       return 404;
     case 'NETWORK_ALREADY_EXISTS':
     case 'NETWORK_ALREADY_RUNNING':
@@ -90,6 +92,8 @@ function statusFor(code: string): number {
     case 'BINARY_NOT_AVAILABLE':
     case 'FAULT_CONFLICT':
     case 'FAULT_NOT_SUPPORTED':
+    case 'SCENARIO_ALREADY_EXISTS':
+    case 'SCENARIO_VERSION_UNSUPPORTED':
       return 409;
     default:
       return 500;
@@ -394,6 +398,76 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
       const fault = await engine.faults.reconcile(params.faultId);
       reply.send({ ok: fault.reconciled === true, fault });
     });
+
+    // ---- scenarios (authoring, T-3.3) --------------------------------------
+    // CRUD + validate ONLY. There is intentionally no execute/run/replay
+    // route: saving, updating, or validating a scenario NEVER runs anything.
+    // Execution is the future ScenarioEngine (T-3.4), through the injector's
+    // own preflight/gates — never through authoring endpoints. Authorization
+    // is the existing DEC-019 posture: loopback-only binding, JSON-only, no
+    // browser invocation; scenario endpoints add no host-execution power.
+
+    const scenarioListQuery = z.object({
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      offset: z.coerce.number().int().min(0).optional(),
+      tag: z.string().min(1).max(24).optional(),
+      q: z.string().min(1).max(64).optional(),
+      status: z.enum(['valid', 'warning']).optional(),
+    });
+
+    scope.get('/api/scenarios', async (req, reply) => {
+      const query = scenarioListQuery.safeParse(req.query);
+      if (!query.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid scenario query',
+            details: { issues: query.error.issues },
+          },
+        });
+        return;
+      }
+      reply.send({ ok: true, ...engine.scenarios.list(query.data) });
+    });
+
+    // Safe operation registry (descriptive; static route matches before /:id).
+    scope.get('/api/scenarios/operations', async () => ({
+      ok: true,
+      operations: engine.scenarios.describeOperations(),
+    }));
+
+    // Validate a scenario WITHOUT saving it (and without executing anything).
+    scope.post('/api/scenarios/validate', async (req, reply) => {
+      const result = engine.scenarios.validate(req.body);
+      // Always 200: this reports validity, it is not an operation failure.
+      reply.send({ ok: result.valid, result });
+    });
+
+    scope.post('/api/scenarios', async (req, reply) => {
+      const scenario = engine.scenarios.create(req.body, 'api');
+      reply.status(201).send({ ok: true, scenario });
+    });
+
+    scope.get('/api/scenarios/:id', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, scenario: engine.scenarios.get(params.id) });
+    });
+
+    scope.put('/api/scenarios/:id', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      const scenario = engine.scenarios.update(params.id, req.body, 'api');
+      reply.send({ ok: true, scenario });
+    });
+
+    scope.delete('/api/scenarios/:id', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      engine.scenarios.remove(params.id, 'api');
+      reply.send({ ok: true, removed: params.id });
+    });
   });
   // Never expose setup/download over the API: binary acquisition is an
   // explicit CLI-only decision (`kaizen setup`).
@@ -403,6 +477,19 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
     if (isKaizenError(error)) {
       const json = error.toJSON();
       reply.status(statusFor(json.code)).send({ ok: false, error: json });
+      return;
+    }
+    const statusCode = typeof (error as { statusCode?: unknown }).statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+    if (statusCode >= 400 && statusCode < 500) {
+      // Framework-level client errors (e.g. malformed JSON bodies) — honor
+      // the 4xx classification with a structured envelope, never a 500.
+      const message = error instanceof Error ? error.message : String(error);
+      reply.status(statusCode).send({
+        ok: false,
+        error: { code: 'INVALID_INPUT', message },
+      });
       return;
     }
     const message = error instanceof Error ? error.message : String(error);

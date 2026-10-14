@@ -436,3 +436,89 @@ TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
 - Prerequisites: `npm run build` first (API typecheck consumes engine dist);
   the live suites need a binary cache (`KAIZEN_TEST_BIN_DIR`) and skip
   honestly without `KAIZEN_TEST_LIVE=1`.
+
+## 12. Tests Executed in Phase 3C — Scenario Model & Authoring (T-3.3)
+
+### 12.1 Unit layer (pure model + registry; no processes, no clock)
+
+`packages/engine/test/scenario.test.ts` — **32 tests**. Registry built from
+a REAL `FailureInjector.describeMechanisms()` (never a fixture list).
+Covered: registry mirrors adapters (pause/terminate supported;
+peer-disconnect/partition blocked with unblock paths verbatim;
+node-restart planned; no shell/command/signal/env surface; strict config
+schemas reject unknown keys); normalization (missing step ids → `step-N`,
+order = array position, pause default timeout = hold + 60s headroom);
+explicit order mismatch; duplicate/malformed step ids; schemaVersion;
+unknown operation types; blocked/planned representability (warnings only,
+`validationStatus: 'warning'`, never errors that would imply executability);
+per-operation config validation (strict); fault precondition requirement +
+missing-postcondition warning; planned-condition rejection
+(`CONDITION_NOT_EVALUABLE`); contradictions/impossibilities (opposite
+booleans, disjoint state sets, unsatisfiable peer bounds, exact-count
+conflicts, stopped-but-RPC-reachable, recovered-but-RPC-down); condition
+timeout/label bounds; delay/timeout bounds; `TIMEOUT_TOO_SHORT_FOR_HOLD`;
+worst-case duration cap; DEC-008 designated-test enforcement; preset ↔
+node-label checks (incl. custom-preset unverifiable warning); failure/
+cancellation policy enums (including the fixed safe `cancel-run` /
+`cleanup-then-stop` pair); names/tags/description/step-count limits;
+secret-shaped content rejection (description + PEM in step descriptions);
+structured issue shape (code/severity/path/message/remediation/stepId);
+non-object input never throws; byte-identical deterministic results;
+capability rules via an injected registry (supported op missing capability
+→ error; declared → passes).
+
+### 12.2 Persistence layer (real SQLite, incl. file-backed restart)
+
+`packages/engine/test/scenario-store.test.ts` — **11 tests**. CRUD
+round-trip with stable ids/timestamps; full restart reload (close + reopen
+the same db file) byte-identical; duplicate names on create/update →
+`SCENARIO_ALREADY_EXISTS`; duplicate ids at the store layer; NOT_FOUND on
+get/update/delete; atomic updates (invalid update changes nothing, good
+update writes everything with provenance preserved); q/tag/status filters
++ pagination + totals; malformed JSON row and schema-version-99 row
+surfaced as per-row `malformed` entries while parseable rows still serve;
+`validate()` persists nothing and emits nothing; CRUD emits
+`scenario.created|updated|deleted` audit events and ZERO fault events or
+fault records; delete semantics.
+
+### 12.3 API layer (real Fastify app + real SQLite via app.inject)
+
+`apps/api/test/scenarios.test.ts` — **18 tests** (new `apps/api/test/`
+suite, added to `vitest.config.mts`). CRUD (201/200/200/404), structured
+`SCENARIO_INVALID` 400 with per-issue code/severity/path/remediation,
+unknown-operation 400, secret-content 400 (secret never echoed back),
+duplicate-name 409, malformed-JSON 400 (no stack leaks), list filtering +
+pagination + invalid query 400, validate-without-store-touch (totals
+unchanged), registry endpoint statuses (blocked ops with unblock paths,
+no command/shell/exec/signal fields), blocked-op drafts save as explicit
+warnings, **no fault execution during CRUD/validate** (zero fault events,
+zero fault records, zero active faults), **no execute/run/replay routes
+exist** (404 by absence), DEC-019 posture (loopback host constant,
+structured 400 for malformed JSON). `apps/web/src/api/client.test.ts` +
+**4 tests** for the typed scenario client contract (list query params,
+validate path/method, PUT/DELETE, SCENARIO_INVALID translation).
+`packages/engine/test/fault.test.ts` + **1 test** asserting
+`describeMechanisms()` mirrors the adapters.
+
+### 12.4 Commands and actual results (2026-10-14)
+
+```bash
+npm run typecheck        # pass (engine, cli, api, web)
+npm run lint             # pass
+npm run build            # pass
+npm test                 # 202/202 passed (21 files) — 136 prior + 66 new
+TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
+  KAIZEN_TEST_LIVE=1 npm run test:integration
+                         # 35/35 passed (9 files, 346 s) — full regression,
+                         # T-3.2 injector/live fault suites intact
+```
+
+- **No new live-node work in T-3.3** (authoring is pure data + SQLite); the
+  live run above is regression evidence that the injector, network, API,
+  and web-client live suites all still pass with the scenario changes.
+- **CLI smoke**: no new CLI surface (scenario CLI is T-3.6, per plan); CLI
+  typecheck/build covered by the shared-engine suites.
+- Prerequisite reminders: `npm run build` before typecheck (API consumes
+  engine dist); `zod` is now an engine dependency (workspace-hoisted, same
+  version as the API); the API test suite runs in the unit config (real
+  Fastify app + temp SQLite — never spawns portaldot).

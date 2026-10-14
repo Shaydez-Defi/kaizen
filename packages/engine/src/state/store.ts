@@ -10,7 +10,17 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { KaizenError } from '../errors';
 import type { FaultEvidence, FaultExecutionResult, FaultPlanStep, FaultPreflight, FaultRecord, FaultState } from '../fault/types';
+import { SCENARIO_SCHEMA_VERSION } from '../scenario/types';
+import type {
+  ScenarioExecutionPolicy,
+  ScenarioListResult,
+  ScenarioMalformedEntry,
+  ScenarioRecord,
+  ScenarioTargetRequirements,
+  ScenarioValidationResult,
+} from '../scenario/types';
 import type {
   KaizenErrorJson,
 } from '../errors';
@@ -100,6 +110,26 @@ const MIGRATIONS: string[] = [
    );`,
   `CREATE INDEX IF NOT EXISTS faults_network_idx ON faults(network_id);`,
   `CREATE INDEX IF NOT EXISTS faults_node_idx ON faults(node_id);`,
+  // 9: scenario definitions (T-3.3 authoring — validation/status persisted
+  //    alongside the definition so reloads see exactly what was accepted).
+  `CREATE TABLE IF NOT EXISTS scenarios (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL UNIQUE,
+     description TEXT NOT NULL DEFAULT '',
+     schema_version INTEGER NOT NULL,
+     tags TEXT NOT NULL DEFAULT '[]',
+     requires TEXT NOT NULL,
+     steps TEXT NOT NULL,
+     execution TEXT NOT NULL,
+     validation TEXT NOT NULL,
+     validation_status TEXT NOT NULL,
+     created_by TEXT NOT NULL DEFAULT 'engine',
+     updated_by TEXT NOT NULL DEFAULT '',
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );`,
+  // 10: recency index for list ordering
+  `CREATE INDEX IF NOT EXISTS scenarios_updated_idx ON scenarios(updated_at);`,
 ];
 
 interface NetworkRow {
@@ -169,6 +199,23 @@ interface FaultRow {
   result: string | null;
   error: string | null;
   reconciled: number;
+}
+
+interface ScenarioRow {
+  id: string;
+  name: string;
+  description: string;
+  schema_version: number;
+  tags: string;
+  requires: string;
+  steps: string;
+  execution: string;
+  validation: string;
+  validation_status: string;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface InsertNetworkInput {
@@ -553,6 +600,167 @@ export class StateStore {
     ).map(mapFault);
   }
 
+  // -------------------------------------------------------------------------
+  // Scenarios (T-3.3) — create/read/update/delete of validated definitions.
+  // NEVER executes anything; these rows are inert authoring data.
+
+  /** Insert a fully validated record. Atomic (single statement); UNIQUE
+   *  violations on id/name surface as SCENARIO_ALREADY_EXISTS. */
+  insertScenario(record: ScenarioRecord): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO scenarios
+           (id, name, description, schema_version, tags, requires, steps, execution,
+            validation, validation_status, created_by, updated_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.id,
+          record.name,
+          record.description,
+          record.schemaVersion,
+          JSON.stringify(record.tags),
+          JSON.stringify(record.requires),
+          JSON.stringify(record.steps),
+          JSON.stringify(record.execution),
+          JSON.stringify(record.validation),
+          record.validationStatus,
+          record.createdBy,
+          record.updatedBy,
+          record.createdAt,
+          record.updatedAt,
+        );
+    } catch (e) {
+      throw translateScenarioConstraint(e, record.name);
+    }
+  }
+
+  /**
+   * Replace one record atomically (single statement). The caller has already
+   * re-validated the merged scenario, so all columns are written together —
+   * a failed update leaves the previous row untouched.
+   */
+  updateScenario(record: ScenarioRecord): void {
+    let changes = 0;
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE scenarios SET
+             name = ?, description = ?, schema_version = ?, tags = ?, requires = ?,
+             steps = ?, execution = ?, validation = ?, validation_status = ?,
+             updated_by = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          record.name,
+          record.description,
+          record.schemaVersion,
+          JSON.stringify(record.tags),
+          JSON.stringify(record.requires),
+          JSON.stringify(record.steps),
+          JSON.stringify(record.execution),
+          JSON.stringify(record.validation),
+          record.validationStatus,
+          record.updatedBy,
+          record.updatedAt,
+          record.id,
+        );
+      changes = Number(result.changes);
+    } catch (e) {
+      throw translateScenarioConstraint(e, record.name);
+    }
+    if (changes === 0) {
+      throw new KaizenError('SCENARIO_NOT_FOUND', `Scenario ${record.id} not found`, {
+        scenarioId: record.id,
+      });
+    }
+  }
+
+  /** Throws SCENARIO_NOT_FOUND (missing) or read errors (malformed/version). */
+  getScenario(id: string): ScenarioRecord {
+    const row = this.db.prepare('SELECT * FROM scenarios WHERE id = ?').get(id) as
+      | ScenarioRow
+      | undefined;
+    if (!row) {
+      throw new KaizenError('SCENARIO_NOT_FOUND', `Scenario ${id} not found`, {
+        scenarioId: id,
+      });
+    }
+    return mapScenarioRow(row);
+  }
+
+  /** undefined when missing; may throw structured read errors when the row
+   *  cannot be parsed/supported by this build. */
+  tryGetScenario(id: string): ScenarioRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM scenarios WHERE id = ?').get(id) as
+      | ScenarioRow
+      | undefined;
+    return row ? mapScenarioRow(row) : undefined;
+  }
+
+  tryGetScenarioByName(name: string): ScenarioRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM scenarios WHERE name = ?').get(name) as
+      | ScenarioRow
+      | undefined;
+    return row ? mapScenarioRow(row) : undefined;
+  }
+
+  /** Newest-updated first; unparseable rows are surfaced, never dropped. */
+  listScenarios(
+    filter: { q?: string; tag?: string; status?: string; limit?: number; offset?: number } = {},
+  ): ScenarioListResult {
+    const { whereSql, params } = scenarioFilterWhere(filter);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM scenarios ${whereSql} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, filter.limit ?? 50, filter.offset ?? 0) as unknown as ScenarioRow[];
+    const scenarios: ScenarioRecord[] = [];
+    const malformed: ScenarioMalformedEntry[] = [];
+    for (const row of rows) {
+      try {
+        scenarios.push(mapScenarioRow(row));
+      } catch (e) {
+        malformed.push({
+          id: row.id,
+          code:
+            e instanceof KaizenError &&
+            (e.code === 'SCENARIO_MALFORMED' || e.code === 'SCENARIO_VERSION_UNSUPPORTED')
+              ? e.code
+              : 'SCENARIO_MALFORMED',
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return { scenarios, malformed };
+  }
+
+  countScenarios(filter: { q?: string; tag?: string; status?: string } = {}): number {
+    const { whereSql, params } = scenarioFilterWhere(filter);
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM scenarios ${whereSql}`)
+      .get(...params) as { n: number };
+    return row.n;
+  }
+
+  /** true when a scenario with this name exists (any id). */
+  scenarioNameExists(name: string, exceptId?: string): boolean {
+    const row = exceptId
+      ? (this.db
+          .prepare('SELECT id FROM scenarios WHERE name = ? AND id != ?')
+          .get(name, exceptId) as { id: string } | undefined)
+      : (this.db.prepare('SELECT id FROM scenarios WHERE name = ?').get(name) as
+          | { id: string }
+          | undefined);
+    return row !== undefined;
+  }
+
+  deleteScenario(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM scenarios WHERE id = ?').run(id);
+    return Number(result.changes) > 0;
+  }
+
   private closed = false;
 
   close(): void {
@@ -575,6 +783,107 @@ function mapNetwork(row: NetworkRow): NetworkRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** Translate UNIQUE constraint failures on scenarios into typed errors. */
+function translateScenarioConstraint(e: unknown, name: string): KaizenError {
+  if (e instanceof Error && /UNIQUE constraint/i.test(e.message)) {
+    return new KaizenError(
+      'SCENARIO_ALREADY_EXISTS',
+      `A scenario named "${name}" (or with the same id) already exists`,
+      { name },
+    );
+  }
+  return e instanceof KaizenError
+    ? e
+    : new KaizenError('SCENARIO_MALFORMED', e instanceof Error ? e.message : String(e));
+}
+
+function scenarioFilterWhere(filter: { q?: string; tag?: string; status?: string }): {
+  whereSql: string;
+  params: string[];
+} {
+  const where: string[] = [];
+  const params: string[] = [];
+  if (filter.q !== undefined && filter.q !== '') {
+    where.push('(name LIKE ? OR description LIKE ?)');
+    params.push(`%${filter.q}%`, `%${filter.q}%`);
+  }
+  if (filter.tag !== undefined && filter.tag !== '') {
+    where.push('tags LIKE ?');
+    params.push(`%"${filter.tag}"%`);
+  }
+  if (filter.status !== undefined && filter.status !== '') {
+    where.push('validation_status = ?');
+    params.push(filter.status);
+  }
+  return {
+    whereSql: where.length > 0 ? `WHERE ${where.join(' AND ')}` : '',
+    params,
+  };
+}
+
+/**
+ * Map one scenarios row. Throws structured errors instead of returning
+ * half-parsed data: a newer schema version (downgrade) is
+ * SCENARIO_VERSION_UNSUPPORTED; unparseable/shape-broken JSON is
+ * SCENARIO_MALFORMED. Callers (list) collect these per row.
+ */
+function mapScenarioRow(row: ScenarioRow): ScenarioRecord {
+  if (row.schema_version !== SCENARIO_SCHEMA_VERSION) {
+    throw new KaizenError(
+      'SCENARIO_VERSION_UNSUPPORTED',
+      `Scenario ${row.id} was stored with schemaVersion ${row.schema_version}; this build supports ${SCENARIO_SCHEMA_VERSION}`,
+      { scenarioId: row.id, stored: row.schema_version, supported: SCENARIO_SCHEMA_VERSION },
+    );
+  }
+  try {
+    const tags = JSON.parse(row.tags) as unknown;
+    const requires = JSON.parse(row.requires) as ScenarioTargetRequirements;
+    const steps = JSON.parse(row.steps) as unknown;
+    const execution = JSON.parse(row.execution) as ScenarioExecutionPolicy;
+    const validation = JSON.parse(row.validation) as ScenarioValidationResult;
+    const basicShapeOk =
+      Array.isArray(tags) &&
+      tags.every((t) => typeof t === 'string') &&
+      requires !== null &&
+      typeof requires === 'object' &&
+      Array.isArray(steps) &&
+      steps.every((s) => s !== null && typeof s === 'object') &&
+      execution !== null &&
+      typeof execution === 'object' &&
+      validation !== null &&
+      typeof validation === 'object' &&
+      typeof validation.valid === 'boolean' &&
+      Array.isArray(validation.issues);
+    if (!basicShapeOk) {
+      throw new Error('stored scenario columns do not match the expected shape');
+    }
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      schemaVersion: row.schema_version,
+      tags: tags as string[],
+      requires,
+      steps: steps as ScenarioRecord['steps'],
+      execution,
+      validation,
+      validationStatus:
+        row.validation_status === 'warning' ? 'warning' : 'valid',
+      createdBy: row.created_by,
+      updatedBy: row.updated_by,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  } catch (e) {
+    if (e instanceof KaizenError) throw e;
+    throw new KaizenError(
+      'SCENARIO_MALFORMED',
+      `Scenario ${row.id} cannot be parsed by this build: ${e instanceof Error ? e.message : String(e)}`,
+      { scenarioId: row.id },
+    );
+  }
 }
 
 function mapFault(row: FaultRow): FaultRecord {

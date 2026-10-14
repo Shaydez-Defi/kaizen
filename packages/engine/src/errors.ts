@@ -37,6 +37,12 @@ export type KaizenErrorCode =
   | 'FAULT_NOT_ALLOWED'
   | 'FAULT_CONFLICT'
   | 'FAULT_NOT_SUPPORTED'
+  // scenario authoring (T-3.3)
+  | 'SCENARIO_NOT_FOUND'
+  | 'SCENARIO_ALREADY_EXISTS'
+  | 'SCENARIO_INVALID'
+  | 'SCENARIO_MALFORMED'
+  | 'SCENARIO_VERSION_UNSUPPORTED'
   | 'INTERNAL';
 
 export interface KaizenErrorJson {

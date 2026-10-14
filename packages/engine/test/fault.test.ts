@@ -1008,3 +1008,33 @@ describe('secret redaction', () => {
     expect(serialized).not.toMatch(/BEGIN.*PRIVATE KEY/);
   });
 });
+
+describe('FailureInjector mechanism descriptions (T-3.3)', () => {
+  it('describeMechanisms() mirrors the registered adapters: supported vs blocked with unblock paths', () => {
+    const store = new StateStore(':memory:');
+    const injector = new FailureInjector({
+      store,
+      events: new EventBus(),
+      processes: new NodeProcessManager({}),
+      networks: { stopNode: async () => ({ ok: false }), startNode: async () => ({ ok: false }) },
+    });
+    const mechanisms = injector.describeMechanisms();
+    expect(mechanisms.map((m) => m.type)).toEqual(['pause', 'terminate', 'peer-disconnect', 'partition']);
+    const byType = new Map(mechanisms.map((m) => [m.type, m]));
+    expect(byType.get('pause')!.support.status).toBe('supported');
+    expect(byType.get('terminate')!.support.status).toBe('supported');
+    for (const blocked of ['peer-disconnect', 'partition'] as const) {
+      const support = byType.get(blocked)!.support;
+      expect(support.status).toBe('blocked');
+      if (support.status === 'blocked') {
+        expect(support.reason.length).toBeGreaterThan(50);
+        expect(support.unblock.length).toBeGreaterThan(50);
+      }
+    }
+    // Serializable, no secrets, no argv.
+    const serialized = JSON.stringify(mechanisms);
+    expect(serialized).not.toMatch(/password/i);
+    expect(serialized).not.toMatch(/BEGIN.*PRIVATE KEY/);
+    store.close();
+  });
+});

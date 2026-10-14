@@ -1,284 +1,242 @@
-# Phase 3B Report — FailureInjector Foundation (T-3.2)
+# Phase 3C Report — Scenario Model & Authoring Foundation (T-3.3)
 
-**Date**: 2026-10-12
-**Tasks**: T-3.2 only. Scenario model/authoring (T-3.3/T-3.4), diagnostics,
-recovery orchestration (T-4.4), Failure Lab UI, and CLI fault commands
-(T-3.6) were explicitly NOT started — this report stops at the injector,
-per instruction. The previous report (Phase 3A, T-3.1 fault-mechanism
-study) is archived verbatim at `docs/reports/PHASE_03A_REPORT.md`.
-**Outcome**: COMPLETE and VERIFIED — the production-quality internal
-FailureInjector ships with pause + terminate live-verified against real
-`portaldot_dev` nodes; peer-disconnect and partition are registered as
-typed-blocked adapters with precise unblock paths (never silently
-substituted).
+**Date**: 2026-10-14
+**Tasks**: T-3.3 only. Scenario execution/recording (T-3.4), replay
+(T-3.5), CLI/UI surfaces for the Failure Lab (T-3.6), diagnostics
+(Phase 4), and recovery orchestration were explicitly NOT started — this
+report stops at the authoring foundation, per instruction. The previous
+report (Phase 3B, T-3.2 FailureInjector) is archived verbatim at
+`docs/reports/PHASE_03B_REPORT.md`; Phase 3A remains at
+`docs/reports/PHASE_03A_REPORT.md`.
 
----
+## 1. Scope & Exclusions
 
-## 1. Summary & completed task IDs
+**In scope (delivered):**
 
-- **T-3.2 — FailureInjector with safeguards**: IMPLEMENTED and VERIFIED.
+- Typed, versioned scenario model: stable ids, name/description/tags,
+  explicit target-network requirements, ordered steps (stable step ids,
+  explicit order), typed operation + strict schema-validated config,
+  bounded delays, typed pre/postconditions, bounded per-step timeouts,
+  explicit failure/cancellation semantics as persisted enums.
+- Safe operation registry derived from the FailureInjector's ACTUAL
+  adapters (`describeMechanisms()`), distinguishing supported
+  (`pause`, `terminate`), blocked (`peer-disconnect`, `partition` — with
+  the adapters' unblock paths verbatim), and planned (`node-restart`)
+  operations. Descriptive only; never a bypass of runtime safety.
+- Deterministic, UI-independent validation returning structured issues
+  (stable code, severity, scenario/step id, field path, explanation,
+  remediation).
+- SQLite persistence (migrations 9–10, schemaVersion 8→10) with atomic
+  create/update, uniqueness, restart reload, and honest malformed/
+  schema-mismatch handling.
+- Minimal authoring REST surface (list/get/create/update/delete +
+  validate-without-save + registry) and typed client contracts for the
+  future CLI/UI.
 
-Delivered as one integrated subsystem of the shared engine (no parallel
-subsystem): fault domain model + lifecycle machine, narrow typed adapters
-(only Phase 3A/R-22-verified mechanisms), the injector with dry-run
-default and revalidating execution, SQLite audit trail + typed events,
-REST transport, unit tests with real stand-in processes, and a live
-integration suite against a disposable two-node network.
+**Explicitly out of scope (sequencing boundary, not scope reduction):**
 
-## 2. Scope & explicit exclusions
+- No scenario executor, run history, or replay (T-3.4/T-3.5).
+- No Failure Lab UI, no new CLI commands (T-3.6 owns those surfaces).
+- No incident timelines, diagnostics, or recovery orchestration
+  (Phase 4 / T-4.4). All roadmap tasks remain planned and unchanged.
 
-**In scope (T-3.2):**
+## 2. Files
 
-- `engine.faults` — typed fault operations on `designatedTest` networks
-  only (DEC-008), integrated into the existing engine services.
-- Mechanisms: `pause` (SIGSTOP/SIGCONT) and `terminate` (engine
-  stop/start + restore) fully implemented and verified end-to-end.
-- `peer-disconnect` and `partition` registered as blocked adapters
-  returning typed `FAULT_NOT_SUPPORTED` results with reasons, evidence
-  refs, and unblock paths.
-- Dry-run default; explicit `execute()` that revalidates the full safety
-  boundary with fresh reads; lifecycle states + enforced transitions;
-  separate evidence claims; bounded polling/timeouts; cleanup on every
-  path; quarantine + reconcile; redacted, persisted, auditable records;
-  typed events.
-- REST surface (`preflight`/`dry-run`/`execute`/list/get/cancel/reconcile).
+**New**
 
-**Explicitly excluded:**
+| File | Purpose |
+|------|---------|
+| `packages/engine/src/scenario/types.ts` | Model: limits, operations, conditions (+ evaluability), execution policy enums, target requirements, steps, validation result types, persisted record |
+| `packages/engine/src/scenario/operations.ts` | Safe operation registry built from `describeMechanisms()`; condition definitions; strict config schemas; JSON-safe serialization |
+| `packages/engine/src/scenario/validate.ts` | Zod schemas + normalization + all semantic rules; `validateScenarioInput` / `prepareScenario` (pure, deterministic) |
+| `packages/engine/src/scenario/service.ts` | `ScenarioService`: list/get/create/update/remove/validate/describeOperations + audit events |
+| `packages/engine/test/scenario.test.ts` | 32 unit tests (model, registry, validation) |
+| `packages/engine/test/scenario-store.test.ts` | 11 persistence tests (real SQLite, file-backed restart) |
+| `apps/api/test/scenarios.test.ts` | 18 API tests (real Fastify app + real SQLite via `app.inject`) |
+| `docs/reports/PHASE_03B_REPORT.md` | Phase 3B report archived verbatim |
 
-- Failure Lab UI, scenario engine (T-3.3/T-3.4), diagnostics pipeline
-  (T-4.x), recovery orchestration (T-4.4), CLI fault commands (T-3.6).
-- Privileged (sudo-level) fault execution — deliberately not implemented
-  (DEC-018/DEC-019); the engine never escalates privileges.
-- Reserved-only topology wiring for peer-disconnect — requires a topology
-  change (spawn mode not persisted on NodeConfig); recorded as unblock path.
-- Operator-authorization model for kernel-level partition — not implemented.
-- No generic shell/signal/executable/host/firewall API — narrow typed
-  adapters only.
+**Modified**
 
-## 3. Implementation summary
+| File | Change |
+|------|--------|
+| `fault/adapter.ts` | ADDITIVE: `AdapterSupport` type, `FaultMechanismInfo`, `support` field on `FaultAdapter` |
+| `fault/adapters/{pause,terminate}.ts` | `support: { status: 'supported' }` |
+| `fault/adapters/blocked.ts` | `PEER_DISCONNECT_SUPPORT` / `PARTITION_SUPPORT` consts now single-source (static `support` + preflight read the same reason/unblock text) |
+| `fault/injector.ts` | ADDITIVE: `describeMechanisms()` (read-only view of registered adapters) |
+| `state/store.ts` | Migrations 9–10 (`scenarios` table, recency index); scenario CRUD + `mapScenarioRow` with structured read errors |
+| `errors.ts` | `SCENARIO_NOT_FOUND`, `SCENARIO_ALREADY_EXISTS`, `SCENARIO_INVALID`, `SCENARIO_MALFORMED`, `SCENARIO_VERSION_UNSUPPORTED` |
+| `events/bus.ts` | `scenario.created|updated|deleted` audit events |
+| `engine.ts` / `index.ts` | `engine.scenarios` wiring (registry from the live injector); scenario exports |
+| `apps/api/src/server.ts` | Scenario routes; status mappings; malformed-JSON now honors Fastify's 4xx (structured 400, was 500) |
+| `apps/web/src/api/{client,types}.ts` + `client.test.ts` | Typed scenario client contract (+4 tests) |
+| `packages/engine/package.json` + `package-lock.json` | `zod ^4.6.5` (project-standard boundary validation; same version as `apps/api`, workspace-hoisted) |
+| `packages/engine/test/{store,fault}.test.ts` | schemaVersion 10 assertion; `describeMechanisms` mirror test (+1) |
+| `vitest.config.mts` | Include `apps/api/test/**` |
 
-- **Domain model** (`fault/types.ts`, `fault/lifecycle.ts`): 11 states,
-  enforced transition table, `FaultExecutionResult` separating claims
-  applied / effectObserved / faultRemoved / recovered / recoveryVerified,
-  structured before/apply/effect/remove/recovery evidence.
-- **Adapters** (`fault/adapter.ts`, `fault/adapters/{pause,terminate,blocked}.ts`):
-  each declares mechanism, privileges, preflight checks, bounded execution,
-  expected effect, verification method, timeout/failure semantics, cleanup.
-  Pause re-verifies pid + `kaizen-node.pid` agreement before signalling
-  (ambiguous identity → refused, never signalled). Terminate's removal is
-  engine `startNode`; recovery requires a NEW pid answering RPC.
-- **Injector** (`fault/injector.ts`): `preflight` (read-only), `dryRun`
-  (default, persists), `execute` (revalidates; conflict-atomic), `get`,
-  `list`, `cancel`, `reconcile`, `activeFaults`, `shutdown`. Safety gate =
-  designatedTest + local chain + node ∈ network + managed-running process +
-  stable identity + no active fault + not quarantined + adapter preflight.
-  Per-step timeouts use a wrap backstop above each adapter's own bound.
-  Cleanup runs on success, error, timeout, and cancel paths; unverified
-  cleanup ⇒ `cleanup-failed` + high-severity `fault.cleanup-failed` event +
-  quarantine until `reconcile()` proves the effect gone. `engine.close()`
-  cancels in-flight faults and SIGCONT-sweeps pause records.
-- **Audit** (`state/store.ts`): `faults` table (migrations 6–8,
-  schemaVersion 8), every state/transition + preflight/plan/evidence/
-  result/error persisted; operations rows (`fault.execute`); key-aware
-  redaction on read. `events/bus.ts`: `fault.state`, `fault.cleanup-failed`
-  (high severity), flowing through the existing WS fanout.
-- **API** (`apps/api/src/server.ts`): Zod-validated fault routes;
-  `POST …/faults/execute` requires a literal `mode:"execute"` body marker;
-  statusFor maps `FAULT_NOT_ALLOWED`→403, `FAULT_NOT_FOUND`→404,
-  `FAULT_CONFLICT`/`FAULT_NOT_SUPPORTED`→409.
+## 3. Model & Registry Design
 
-## 4. Files changed
+- **Operations**: `ScenarioOperationType = FaultType | 'node-restart'`.
+  Fault types come straight from the injector; extending `FAULT_TYPES`
+  extends the model surface. Configs are strict Zod objects (`node` label
+  + optional bounded `durationMs` for pause) — unknown fields (including
+  secret-named keys) are rejected by construction; there is no
+  shell/command/signal/env/path field anywhere.
+- **Registry provenance**: built in `engine.ts` from
+  `faults.describeMechanisms()`, whose `support` declarations ARE what
+  blocked-adapter preflight reports (one source of truth). A registry
+  entry saying `supported` means "the mechanism exists in the engine
+  today" — not "run this anywhere": the executor (T-3.4) must still go
+  through the injector's preflight/gates (DEC-008/DEC-018/DEC-019).
+- **Conditions** are discriminated-union typed data (never strings) with
+  per-kind evaluability from the condition registry. Supported kinds map
+  exactly onto what monitoring/health/fault-claims can evaluate today
+  (`rpc-reachable`, `process-state`, `health-state`, `peers`, `syncing`,
+  `chain-progress` via stall detection, `recovery-verified`).
+  `finality-progress` and `runtime-event` exist in the model with
+  evaluability `planned` and are REJECTED with
+  `CONDITION_NOT_EVALUABLE` (+ remediation) — the model never pretends a
+  condition can be checked.
+- **Ordering/timing**: array position is authoritative; explicit `order`
+  that contradicts position is an error, not silently normalized. Missing
+  step ids are assigned deterministically (`step-N`). Delays are bounded
+  (0..300 s), step timeouts 5 s..15 min, pause holds 0..600 s with the
+  step timeout required to cover hold + 60 s cleanup/recovery headroom,
+  and the worst-case scenario (Σ delays + timeouts) capped at 30 min.
+- **Failure semantics**: persisted enums for precondition-fail
+  (`skip-step|abort-run|cancel-run`), step-fail
+  (`abort-run|continue|cancel-run`), inconclusive verification
+  (`fail-step|warn-and-continue`), step timeout (`fail-step|cancel-run`),
+  plus the fixed safe pair `onCleanupFailed: cancel-run` /
+  `cancellation: cleanup-then-stop` (cleanup-failed already quarantines
+  the target in the injector; the only safe scenario reaction today is to
+  stop the run). No partial-execution loop exists in the service.
+- **Severity discipline**: blocked/planned operations are authorable only
+  as WARNINGS (scenario saves with `validationStatus: 'warning'`) so
+  drafts can exist, but nothing about them may read as executable;
+  unknown operations, invalid configs, contradictions, un-evaluable
+  conditions, safety violations, and bounds violations are errors
+  (not savable).
 
-- **New**: `packages/engine/src/fault/` (types, lifecycle, redact,
-  observer, adapter, injector, adapters/{pause,terminate,blocked}),
-  `packages/engine/test/fault.test.ts`,
-  `test/integration/faults.int.test.ts`,
-  `docs/reports/PHASE_03A_REPORT.md` (archive).
-- **Modified**: engine `engine.ts` (faults wiring + shutdown ordering),
-  `errors.ts` (4 fault codes), `events/bus.ts`, `index.ts` (exports),
-  `state/store.ts` (faults table + CRUD); `apps/api/src/server.ts`
-  (routes + statusFor); `packages/engine/test/store.test.ts`
-  (schemaVersion 8); docs `ARCHITECTURE`, `DECISIONS` (DEC-019),
-  `IMPLEMENTATION_PLAN`, `PROGRESS`, `RISKS` (RSK-25/26/27),
-  `TECHNICAL_RESEARCH` (R-22 T-3.2 status), `TESTING` (§11), `README`.
+## 4. Persistence & API
 
-## 5. Architecture & safety decisions
+- SQLite `scenarios` table (migration 9; index 10): UNIQUE name, JSON
+  columns (tags/requires/steps/execution/validation), validation result +
+  `valid|warning` status persisted alongside the definition. Inserts and
+  full-record replaces are single-statement atomic; UNIQUE violations →
+  `SCENARIO_ALREADY_EXISTS`; zero-row update → `SCENARIO_NOT_FOUND`.
+  Update re-validates the merged scenario as a whole (provenance
+  `createdBy/createdAt` preserved, `updatedBy/updatedAt` refreshed).
+- Rows this build cannot parse or whose `schema_version` is newer are
+  surfaced as structured per-row `malformed` entries in list results
+  (`SCENARIO_MALFORMED` / `SCENARIO_VERSION_UNSUPPORTED` on direct get) —
+  never dropped, never half-parsed.
+- REST: `GET /api/scenarios` (q/tag/status filters, limit/offset paging,
+  totals), `GET /api/scenarios/operations` (serialized registry),
+  `POST /api/scenarios/validate` (200 + validity — a query), `POST
+  /api/scenarios` (201), `GET/PUT/DELETE /api/scenarios/:id`. Errors:
+  400 `SCENARIO_INVALID` (structured `details.issues`), 404
+  `SCENARIO_NOT_FOUND`, 409 `SCENARIO_ALREADY_EXISTS` /
+  `SCENARIO_VERSION_UNSUPPORTED`, 400 for malformed JSON (now honoring
+  Fastify's 4xx classification with a structured envelope). Authorization
+  is the unchanged DEC-019 posture: loopback-only, JSON-only; scenario
+  authoring adds no host-execution power, so no new auth model was needed
+  and none was invented.
 
-1. **Narrow typed adapters, no generic execution surface** — the engine
-   exposes typed fault methods only; there is no API to run arbitrary
-   commands, signals, or host-level firewall changes (DEC-019).
-2. **Dry-run default; execute is separate and revalidating** — every
-   execution re-reads the entire safety boundary (designatedTest/DEC-008,
-   chain local, node ownership, running state, stable identity beyond PID
-   file agreement, conflicts, quarantine). REST execution additionally
-   demands an explicit `mode:"execute"` marker.
-3. **No silent mechanism substitution** — unsupported mechanisms fail with
-   typed results + unblock paths + R-22 evidence refs; the refuted
-   mechanisms (plain reserved-peer RPC, proxy-only cut, static port rules)
-   are never used as stand-ins.
-4. **Distinct claims, never one success flag** — accepted/applied/
-   effect-observed/removed/recovered/recovery-verified are separate,
-   each backed by bounded observation (RPC reachability, process table,
-   new-pid checks). Unverified rollback ⇒ `cleanup-failed` + quarantine;
-   `reconcile()` releases only on proof.
-5. **Loopback-trust execution posture** (DEC-019) — REST fault execution
-   carries no more power than the existing stop/purge endpoints under the
-   same binding model; JSON-only + no CORS blocks browser-page invocation;
-   any future non-loopback binding requires an authorization model first
-   (RSK-26). No browser-executable host commands exist.
-6. **Privileged faults not implemented** — kernel-level mechanisms
-   (DEC-018) stay out of the injector until an operator-authorization
-   model exists; partition's blocked adapter names that path.
+## 5. Test Results (counts by layer)
 
-## 6. Mechanism status matrix (with evidence refs)
+| Layer | File | Tests | Nature |
+|-------|------|-------|--------|
+| Unit (pure model/registry/validation) | `packages/engine/test/scenario.test.ts` | 32 | real injector registry + injected synthetic registries; no processes/clock |
+| Unit (persistence) | `packages/engine/test/scenario-store.test.ts` | 11 | real SQLite (`:memory:` + file-backed restart), raw-SQL corruption injection |
+| API (app + db integration) | `apps/api/test/scenarios.test.ts` | 18 | real Fastify app + real SQLite via `app.inject`; no portaldot |
+| Unit (regression, added) | `packages/engine/test/fault.test.ts` +1, `apps/web/src/api/client.test.ts` +4, `store.test.ts` schemaVersion | 5 | mirror test, typed client contract, migration assertion |
+| **Total `npm test`** | 21 files | **202/202 passed** | 136 prior + 66 new |
+| Live integration (regression) | `test/integration/*` | **35/35 passed** (9 files, 346 s) | real `portaldot_dev`; full T-3.2 injector + network + API + webclient suites intact |
 
-| Mechanism | Status | Evidence |
-|-----------|--------|----------|
-| pause (SIGSTOP/SIGCONT) | **VERIFIED — implemented + live re-verified** | R-22 A (`t31-a-full.log`); live `faults.int.test.ts`: test's own 500 ms RPC polling observed the victim unreachable ≥5 s and reachable again; pid unchanged; `chain_getHeader` advanced past the pre-fault head; `outcome=verified` |
-| terminate (engine stop/start) | **VERIFIED — implemented + live re-verified** | R-22 D; live: old pid dead, NEW pid serving RPC, `peers>=1` on both nodes, head advanced |
-| peer-disconnect | **BLOCKED — adapter registered, typed unsupported result** | R-22 B1/B2: only `--reserved-only` targets disconnect; no topology produces them and spawn mode isn't persisted on NodeConfig. Unblock: reserved-only + proxied-reserved wiring; evidence `t31-b3.log`. Live: REST execute → 409 `FAULT_NOT_SUPPORTED`, victim unaffected |
-| partition (C2 unprivileged) | **BLOCKED** | R-22 C2: needs the same reserved-only wiring; `t31-c4.log`/`t31-f6-g` show proxy cut insufficiency and privileged-route behavior. Live: 409, no firewall/netns state touched |
-| partition (C4/C5 privileged) | **BLOCKED — NOT IMPLEMENTED by design** | DEC-018 operator authorization + privileged execution path deliberately absent (DEC-019); unblock path recorded on the adapter |
+Gates (2026-10-14): `npm run typecheck` pass; `npm run lint` pass;
+`npm run build` pass; `npm test` 202/202;
+`TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin
+KAIZEN_TEST_LIVE=1 npm run test:integration` 35/35.
+No live-node work was required by T-3.3 itself (authoring is pure data);
+the live run is regression evidence.
 
-## 7. Commands & actual results (2026-10-12)
+## 6. Acceptance Criteria
 
-```text
-npm run typecheck        → PASS (engine, cli, api, web)
-npm run lint             → PASS
-npm run build            → PASS
-npm test                 → PASS: 136/136 tests, 18 files, 68 s
-                          (113 prior + 23 new fault unit tests)
-TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
-  KAIZEN_TEST_LIVE=1 npm run test:integration
-                         → PASS: 35/35 tests, 9 files, 268 s
-                          (30 prior + 5 new fault live tests)
-post-suite hygiene       → 0 orphan portaldot_dev, 0 netns, 0 t31/flt
-                          firewall rules (checked); pre-existing stray
-                          stub from an earlier session killed (PID 64620)
-```
+| # | Criterion | Result |
+|---|-----------|--------|
+| 1 | Typed model matches architecture (ordered actions, delays, conditions, explicit failure semantics, versioned) | PASS |
+| 2 | Registry reflects the actual injector (supported/blocked/planned; unblock paths verbatim; blocked never executable) | PASS (registry built from `describeMechanisms()`; mirror test) |
+| 3 | Pre/postconditions, ordering, delays, timeouts, failure policies represented AND validated | PASS |
+| 4 | Deterministic structured validation (byte-identical results; stable codes/paths/remediation) | PASS (asserted) |
+| 5 | Scenarios persist across restart | PASS (file-backed reload byte-identical) |
+| 6 | CRUD + validation tested (valid/invalid, unknown ids, malformed JSON, error formatting, filtering, auth posture) | PASS (18 API + 11 store tests) |
+| 7 | CRUD/validate cannot trigger fault execution | PASS (zero fault events/records/active faults after full CRUD+validate; no execute/run/replay routes exist — 404 by absence) |
+| 8 | Injector safety + regression tests pass | PASS (fault suite green; live 35/35) |
+| 9 | Docs/report match the code | PASS (ARCHITECTURE §6, DEC-020, RSK-28, TESTING §12, PROGRESS, this report) |
+| 10 | Prior reports preserved | PASS (3A intact; 3B archived verbatim as `docs/reports/PHASE_03B_REPORT.md`) |
+| 11 | Roadmap intact (T-3.4–T-3.6, Phases 4–6 unchanged) | PASS |
 
-Test counts by layer (kept separate):
+**Overall: PASS.**
 
-- **Unit (no portaldot)**: 23 new in `fault.test.ts` (real stand-in
-  `node -e` HTTP-RPC child processes: real signals, real TCP, real pid
-  files) + store schemaVersion assertion updated. Total unit 136.
-- **Live (real `portaldot_dev 2.0.0`, sha256 `9df4d6332e84…`)**: 5 new in
-  `faults.int.test.ts` against a Kaizen-created two-node network
-  (`designatedTest === true` asserted at creation). Total live 35.
-- **Harness**: the Phase 3A spike (`t31-spike.mjs`) was NOT duplicated or
-  reused by the injector — no experiment code in production paths.
-- **CLI smoke**: none — no new CLI surface in T-3.2 (T-3.6 owns it).
+## 7. Limitations & Risks
 
-## 8. Before / during / after observations (live claims)
+- Validation is **authoring-time only**; its guarantees (preconditions,
+  bounds, blocked ops) are inert until T-3.4's executor revalidates every
+  run through the injector's own gates. Tracked as **RSK-28** and as an
+  explicit acceptance gate for T-3.4.
+- Node references are topology *labels* (e.g. `alice` → `<net>-alice`);
+  label resolution against a concrete network is an executor concern
+  (T-3.4). With `requires.preset: 'custom'` labels cannot be verified at
+  authoring time — a deliberate `TARGET_NODE_UNVERIFIABLE` warning.
+- `chain-progress` evaluation rides on the health machine's stall
+  detection; `finality-progress` and `runtime-event` conditions remain
+  `planned` (rejected) until monitoring/incident work makes them
+  evaluable.
+- The registry is a snapshot of injector capabilities at engine
+  construction; run-time enforcement is the injector's, not the
+  registry's, job by design (DEC-020).
+- No CLI command for scenarios yet (T-3.6) and no UI — the typed web
+  client methods are the contract both will consume.
 
-- **pause**: before — victim `system_health` answering, peers ≥1,
-  `chain_getHeader` head H₀, pid P. During — injector executed SIGSTOP;
-  the TEST's independent polling (500 ms, 800 ms timeout) recorded a
-  continuous unreachable window ≥5 s; process stayed alive. After —
-  SIGCONT applied, RPC reachable again, same pid P, head advanced past H₀
-  (chain resumed), `result.outcome=verified` with all five claims true.
-- **terminate**: before — pid P serving RPC, peers ≥1. During — engine
-  `stopNode`; old pid dead (process table check), RPC down; evidence
-  `effect.observation.rpcReachable=false`. After — engine `startNode`
-  restored a NEW pid P′ answering RPC, peers reconverged ≥1 on both nodes,
-  head advanced past the pre-fault head, `recovery.newPid=P′`.
-- **REST blocked mechanisms**: against the same live network, execute of
-  `peer-disconnect` and `partition` returned HTTP 409
-  `FAULT_NOT_SUPPORTED`; victim RPC stayed reachable afterwards (no
-  effect, no substitution).
-- **Escape**: targeting another network's node through this network →
-  `NODE_NOT_FOUND`; the other network's node status stayed `created`.
+## 8. Documentation
 
-## 9. Cleanup / rollback evidence (including failure paths)
+Updated: `ARCHITECTURE.md` (§6 scenario authoring), `DECISIONS.md`
+(DEC-020), `RISKS.md` (RSK-28), `TESTING.md` (§12), `PROGRESS.md`
+(Phase 3C entry), `IMPLEMENTATION_PLAN.md` (T-3.3 → VERIFIED),
+`README.md` (status line + capability bullet). `TECHNICAL_RESEARCH.md`
+unchanged — no new research findings (the injector's `support`/`describeMechanisms`
+extension is documented in ARCHITECTURE/DEC-020).
 
-- Successful pause/terminate runs: cleanup (SIGCONT / engine restore)
-  verified on the record itself (`faultRemoved`, `recoveryVerified`) and
-  independently by the test.
-- Cleanup FAILURE is exercised deliberately (unit): a lying observer that
-  can't confirm recovery produces `cleanup-failed`, the high-severity
-  event, quarantine of the target (further executes refused), and
-  `reconcile()` releasing only when reality shows the effect gone —
-  `quarantine kept` vs `quarantine released` notes are asserted.
-- Shutdown with an in-flight pause: fault cancelled, process resumed (test
-  asserts RPC reachable after `engine.close()` path) — no paused process
-  leaks.
-- Post-suite: no orphan processes, no netns, no firewall residue.
+## 9. Hygiene
 
-## 10. Known limitations & unresolved risks
+- Scoped diff, reviewed; secret scan of the full diff clean (only
+  intentional fake-secret test literals such as `hunter2` in negative
+  tests; no keys, credentials, or machine paths committed).
+- `.kaizen/` untouched; no binaries or generated data in the commit.
+- Post-live-run process hygiene: no orphaned `portaldot_dev` processes,
+  no leftover netns/iptables rules (the live suites assert this and
+  passed).
+- Engine now depends on `zod` (workspace-hoisted, same version as the
+  API) — justified by the repo-wide Zod-at-boundaries rule; lockfile
+  updated.
 
-- peer-disconnect/partition remain BLOCKED until topology wiring (spawn
-  mode on NodeConfig) and/or an operator-authorization model exist — the
-  injector cannot run them and does not pretend to (RSK-24 stays open,
-  mitigation updated).
-- A cleanup-failed pause requires operator reconciliation (RSK-25);
-  quarantine + reconcile + shutdown-sweep mitigate, but a silently
-  undelivered SIGCONT still needs a human.
-- REST fault execution sits behind the existing loopback-trust model with
-  no authentication (RSK-26, DEC-019); equal-or-lesser power than
-  stop/purge, browser invocation blocked, but binding beyond loopback
-  would require authorization first.
-- Fault records accumulate without a retention policy (RSK-27).
-- Unit tests use a stand-in node, not `portaldot_dev`; live coverage is 5
-  tests on a two-node network (long-horizon holds >60 s not exercised
-  live; hold max is enforced and unit-tested).
+## 10. Confirmation: authoring cannot execute faults
 
-## 11. Acceptance criteria
+By construction and by test: `ScenarioService` has no reference to the
+injector's execution methods (it receives only `describeMechanisms()`);
+CRUD/validate touch only the `scenarios` table; the API exposes no
+execute/run/replay route (404 by absence, test-asserted); the full
+CRUD+validate flow leaves zero fault events, zero fault records, and zero
+active faults; and reading a saved scenario emits nothing (it is inert
+data). The blocked-adapter statuses in the registry mean even the future
+executor cannot treat `peer-disconnect`/`partition` as executable without
+the recorded unblock work landing in the engine first.
 
-| Criterion | Result | Evidence |
-|-----------|--------|----------|
-| Integrated into shared engine, narrow typed adapters only, no generic exec surface | **PASS** | `engine.faults` wiring; adapter interfaces; no shell/signal/firewall API exists (§3–5) |
-| Only R-22-supported mechanisms; unsupported fail typed with reason + unblock, never substituted | **PASS** | blocked adapters; live 409s; unit assertions on `unblock` content (§6) |
-| Dry-run default; execute separate + full fresh-read revalidation | **PASS** | gate test incl. identity drift between preflight and execute; REST `mode:"execute"` 400 test |
-| Full lifecycle with enforced transitions; no duplicate/concurrent faults | **PASS** | lifecycle truth table test; conflict test → `FAULT_CONFLICT` |
-| Separate claims; bounded polling/timeouts; cleanup on all paths | **PASS** | claim/equality assertions; scripted timeout + unobserved-effect + cleanup-throw tests |
-| Unverified cleanup ⇒ cleanup-failed + quarantine + high-severity event; reconcile on proof only | **PASS** | cleanup-failure/quarantine/reconcile unit test (lying observer) |
-| Structured evidence, redaction, auditable records, typed events, no browser host commands, no sudo | **PASS** | redaction tests; faults table + `fault.state` events; DEC-019 §5 |
-| Tests: extensive unit + live only for verified mechanisms (pause, terminate) | **PASS** | 23 unit + 5 live (§7) |
-| Gates: typecheck/lint/build/npm test/live integration with honest counts | **PASS** | §7 exact results |
-| Docs: research/architecture/plan/progress/testing/risks/decisions/report/README updated | **PASS** | §12 |
-| Git hygiene: scoped diff, no secrets/node data, single additive commit | **PASS** (pending commit at time of writing — verified by secret-scan below) | §13 |
+## 11. Next Task
 
-## 12. Documentation updates
-
-- `docs/PHASE_REPORT.md` — this report (Phase 3A archived verbatim to
-  `docs/reports/PHASE_03A_REPORT.md`).
-- `docs/TECHNICAL_RESEARCH.md` — R-22 gains a "T-3.2 implementation
-  status" table (implemented/blocked per mechanism with live evidence);
-  summary matrix row updated.
-- `docs/ARCHITECTURE.md` — §6 fault-injection section rewritten from
-  planned to implemented (adapters, safety boundary, lifecycle, claims,
-  cleanup); §8 blast-radius gate references the injector enforcement.
-- `docs/IMPLEMENTATION_PLAN.md` — T-3.2 → VERIFIED with evidence cells;
-  roadmap (T-3.3+) intact.
-- `docs/PROGRESS.md` — Phase 3B entry (built, statuses, gates, bugs caught,
-  decisions, next step).
-- `docs/TESTING.md` — §11 (unit/live layers, commands, results).
-- `docs/RISKS.md` — RSK-25/26/27 added; RSK-24 mitigation updated.
-- `docs/DECISIONS.md` — DEC-019 (injector boundary + API authorization
-  posture).
-- `README.md` — Phase 3B status line + engine fault-injection bullet +
-  honest "what remains".
-
-## 13. Git diff & hygiene checks
-
-- Files: 16 modified (13 source/test/docs + `README.md` +
-  `docs/PHASE_REPORT.md`) and 4 added (`docs/reports/PHASE_03A_REPORT.md`,
-  `packages/engine/src/fault/` (9 files), `packages/engine/test/fault.test.ts`,
-  `test/integration/faults.int.test.ts`), ~725 insertions in modified files
-  plus the new fault module/tests — all task-scoped to T-3.2.
-- Secret scan of the diff (node keys, keystore passwords, credentials,
-  PEM blocks, machine-specific paths): **clean** — the only key-shaped
-  strings are redaction test fixtures (`hunter2` markers) and test
-  fixtures under `os.tmpdir()`; no `.kaizen/` state, no captured node
-  data, no logs committed (R-22 logs stay in `/tmp/opencode`).
-- Additive commit only; no history rewrite; no `docs/PHASE_REPORT.md`
-  content lost (archived byte-identical, verified with `diff`).
-
-## 14. Exact next task & remaining roadmap
-
-- **Next**: T-3.3 — scenario model + authoring (ordered actions, delays,
-  conditions; CRUD + validation) on top of `engine.faults` +
-  `engine.networks`, keeping the same dry-run/gate discipline. Then
-  T-3.4 execution, T-3.5 diagnostics/recovery (T-4.4), T-3.6 CLI/UI
-  surfaces, T-4 incident timelines, T-5 validator ops, T-6 Docker/K8s
-  (P2 wow-factor, stays in scope).
+**T-3.4** — ScenarioEngine execution with per-action recording
+(timestamps, results, errors) and cancellation, consuming this model
+unchanged and executing ONLY through the FailureInjector's existing
+dry-run→execute gate discipline against designated test networks. T-3.5
+(replay) and T-3.6 (CLI/UI) follow per the roadmap; the Failure Lab is
+NOT finished — this phase delivered its authoring foundation only.

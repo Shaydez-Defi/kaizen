@@ -111,6 +111,30 @@ export interface KaizenEventMap {
     message: string;
     at: string;
   };
+  /** Scenario authoring audit (T-3.3). NEVER implies execution: creating,
+   *  updating, or deleting a scenario never runs anything. */
+  'scenario.created': {
+    scenarioId: string;
+    name: string;
+    validationStatus: 'valid' | 'warning';
+    steps: number;
+    actor: string;
+    at: string;
+  };
+  'scenario.updated': {
+    scenarioId: string;
+    name: string;
+    validationStatus: 'valid' | 'warning';
+    steps: number;
+    actor: string;
+    at: string;
+  };
+  'scenario.deleted': {
+    scenarioId: string;
+    name: string;
+    actor: string;
+    at: string;
+  };
 }
 
 export type KaizenEventName = keyof KaizenEventMap;

@@ -107,3 +107,79 @@ describe('KaizenApiClient', () => {
     expect(res.result.error?.code).toBe('BINARY_NOT_AVAILABLE');
   });
 });
+
+describe('KaizenApiClient scenario methods (T-3.3 contract)', () => {
+  const scenarioInput = {
+    name: 'client-drill',
+    steps: [
+      {
+        operation: { type: 'pause', config: { node: 'alice' } },
+        preconditions: [],
+        postconditions: [],
+      },
+    ],
+  };
+
+  it('lists scenarios with query parameters', async () => {
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
+      jsonResponse({ ok: true, scenarios: [], malformed: [], total: 0, limit: 50, offset: 0 }),
+    );
+    const client = new KaizenApiClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    await client.listScenarios({ tag: 'network', limit: 10 });
+    const url = fetchImpl.mock.calls[0]![0] as string;
+    expect(url).toContain('/api/scenarios?');
+    expect(url).toContain('tag=network');
+    expect(url).toContain('limit=10');
+  });
+
+  it('validates without saving via POST /api/scenarios/validate', async () => {
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
+      jsonResponse({ ok: true, result: { valid: true, issues: [] } }),
+    );
+    const client = new KaizenApiClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const res = await client.validateScenario(scenarioInput);
+    expect(res.result.valid).toBe(true);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe('/api/scenarios/validate');
+    expect(init?.method).toBe('POST');
+  });
+
+  it('updates via PUT and deletes via DELETE', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) =>
+      jsonResponse(
+        init?.method === 'PUT'
+          ? { ok: true, scenario: { id: 'scn_1' } }
+          : { ok: true, removed: 'scn_1' },
+      ),
+    );
+    const client = new KaizenApiClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const updated = await client.updateScenario('scn_1', { description: 'edited' });
+    expect(updated.scenario.id).toBe('scn_1');
+    expect(fetchImpl.mock.calls[0]![0]).toBe('/api/scenarios/scn_1');
+    expect(fetchImpl.mock.calls[0]![1]?.method).toBe('PUT');
+    const removed = await client.deleteScenario('scn_1');
+    expect(removed.removed).toBe('scn_1');
+    expect(fetchImpl.mock.calls[1]![1]?.method).toBe('DELETE');
+  });
+
+  it('surfaces SCENARIO_INVALID errors with structured issues', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(
+        {
+          ok: false,
+          error: {
+            code: 'SCENARIO_INVALID',
+            message: 'Scenario validation failed with 1 error(s)',
+            details: { issues: [{ code: 'SCENARIO_NO_STEPS', path: 'steps' }] },
+          },
+        },
+        400,
+      ),
+    );
+    const client = new KaizenApiClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const err = (await client.createScenario(scenarioInput).catch((e) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.code).toBe('SCENARIO_INVALID');
+    expect(err.status).toBe(400);
+  });
+});

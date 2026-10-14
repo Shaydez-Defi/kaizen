@@ -370,3 +370,54 @@ Format: context → decision → alternatives → consequences. Newest entries a
   partition) fail with typed `FAULT_NOT_SUPPORTED` results naming the
   unblock path, and cleanup-failed targets stay quarantined until
   reconciled — the injector cannot report success over an unproven rollback.
+
+## DEC-020 — Scenario authoring: descriptive registry, deterministic validation, no execution surface
+
+- **Date**: 2026-10-14 (Phase 3C, T-3.3)
+- **Context**: The Failure Lab needs reusable scenarios (ordered actions
+  with timing, conditions, and explicit failure semantics) that authors
+  can create/validate/save today, while execution (T-3.4 ScenarioEngine)
+  does not exist yet. Two dangers: (a) authoring surfaces drifting from
+  what the FailureInjector actually supports (e.g. making partition look
+  executable), and (b) a "saved scenario" quietly gaining execution power
+  before its executor and its gates exist.
+- **Decision**:
+  1. The **safe operation registry is derived at runtime from the
+     injector's `describeMechanisms()`** (static adapter `support`
+     declarations added for this) — never a hand-maintained list. Blocked
+     mechanisms (peer-disconnect, partition) appear with status `blocked`
+     plus the adapters' unblock paths verbatim; `node-restart` is listed
+     as `planned`. The registry is descriptive: it cannot grant execution,
+     and T-3.4 must still revalidate through the injector's gates.
+  2. **Blocked/planned operations are authorable only as warnings**
+     (scenario saves with `validationStatus: 'warning'`); unknown
+     operations, invalid configs, contradictory/impossible conditions,
+     and un-evaluable condition kinds are errors (not savable). Conditions
+     the architecture cannot yet evaluate (finality progression, runtime
+     events) exist in the model with evaluability `planned` and are
+     rejected — the model never pretends a condition is checkable.
+  3. **Designated-test targeting is enforced at authoring time**
+     (`requires.designatedTest=false` → `SAFETY_DESIGNATED_TEST_REQUIRED`
+     error; the default is true) — scenarios are DEC-008 artifacts by
+     construction, and the executor re-checks at run time.
+  4. **The authoring surface has zero execution affordance**: no
+     execute/run/replay routes exist (asserted by test), CRUD and
+     validate-only never emit fault events or create fault records, and a
+     saved scenario never auto-runs. Validation is a pure engine function
+     (deterministic, timestamp-free results) shared by API/CLI.
+  5. Scenario authoring inherits the DEC-019 loopback-trust posture
+     unchanged: it carries no more power than existing lifecycle routes
+     (it cannot touch processes at all). RSK-26 still gates any future
+     non-loopback exposure.
+- **Alternatives**: letting scenarios store raw command/script steps —
+  rejected (unreviewable, unauditable, breaks the engine-operations-only
+  boundary); eagerly marking blocked mechanisms as savable-without-status
+  — rejected (would misrepresent the injector); auto-normalizing explicit
+  step `order` fields silently — rejected (position is authoritative and
+  a mismatch is an authoring error, not something to guess about).
+- **Consequences**: what an author can express is exactly what the engine
+  can eventually execute through its existing services; drift is
+  impossible by construction (registry mirrors adapters). The cost is
+  deliberate friction: draft scenarios may save with warnings, and new
+  operation types must be added to the engine (registry + typed union)
+  before any scenario can reference them.

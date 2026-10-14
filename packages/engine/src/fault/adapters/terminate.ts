@@ -44,6 +44,7 @@ function targetAlive(ctx: FaultAdapterContext): boolean {
 export const terminateAdapter: FaultAdapter = {
   type: 'terminate',
   mechanism: 'engine stopNode (SIGTERM→SIGKILL) with restore via engine startNode (R-22 D)',
+  support: { status: 'supported' },
   privileges: 'none',
   reversible: false, // the process is gone; removal RESTORES a new process
   expectedEffect:

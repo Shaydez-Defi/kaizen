@@ -78,7 +78,9 @@ export type {
   FaultAdapterContext,
   FaultNetworkOps,
   AdapterPreflight,
+  AdapterSupport,
   AdapterTimeouts,
+  FaultMechanismInfo,
   FaultApplyResult,
   FaultRemoveResult,
 } from './fault/adapter';
@@ -110,6 +112,32 @@ export { redactSecrets as redactFaultSecrets, redactDeep as redactFaultDeep } fr
 
 export { createHttpSampler } from './monitor/sampler';
 export type { NodeSampler, RpcNodeObservation, HttpSamplerOptions } from './monitor/sampler';
+
+// Scenarios (T-3.3) — authoring model, safe operation registry, validation,
+// and the CRUD service. Nothing here executes anything.
+export { ScenarioService } from './scenario/service';
+export type {
+  ScenarioServiceOptions,
+  ScenarioListFilter,
+  ScenarioPage,
+} from './scenario/service';
+export {
+  buildOperationRegistry,
+  serializeOperationDefinition,
+  SCENARIO_CONDITION_DEFINITIONS,
+  EVALUABLE_CONDITION_KINDS,
+  pauseConfigSchema,
+  nodeTargetConfigSchema,
+} from './scenario/operations';
+export type {
+  OperationDefinition,
+  OperationSupportStatus,
+  ScenarioOperationRegistry,
+  SerializedOperationDefinition,
+  ConditionDefinition,
+} from './scenario/operations';
+export { validateScenarioInput, prepareScenario, scenarioInputSchema } from './scenario/validate';
+export * from './scenario/types';
 
 export { evaluateNodeHealth, DEFAULT_HEALTH_OPTIONS } from './monitor/health';
 export type { HealthEvalInput, HealthEvalOutput, HealthEvalOptions } from './monitor/health';

@@ -10,7 +10,13 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'apps/web/src/**/*.test.{ts,tsx}'],
+    include: [
+      'packages/*/test/**/*.test.ts',
+      'apps/web/src/**/*.test.{ts,tsx}',
+      // API integration tests: real Fastify app + real SQLite via app.inject
+      // (no portaldot binary needed — they never start or fault a node).
+      'apps/api/test/**/*.test.ts',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**', 'test/integration/**'],
     environment: 'node',
     reporters: ['default'],

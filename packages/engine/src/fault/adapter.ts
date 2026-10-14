@@ -53,6 +53,30 @@ export interface AdapterPreflight {
   checks: FaultCheck[];
 }
 
+/**
+ * STATIC support declaration (T-3.3): whether this mechanism can execute
+ * through the injector at all today. Target-eligibility still comes from
+ * `preflight()` — this is the always-true-per-adapter fact consumers (e.g.
+ * the scenario operation registry) read WITHOUT needing a target context.
+ * Blocked entries carry the exact reason/unblock text preflight reports, so
+ * there is one source of truth for "why not, and what unblocks it".
+ */
+export type AdapterSupport =
+  | { status: 'supported' }
+  | { status: 'blocked'; reason: string; unblock: string };
+
+/** Serializable description of one registered mechanism (read-only). */
+export interface FaultMechanismInfo {
+  type: FaultType;
+  mechanism: string;
+  privileges: FaultPrivileges;
+  reversible: boolean;
+  expectedEffect: string;
+  cleanupDescription: string;
+  timeouts: AdapterTimeouts;
+  support: AdapterSupport;
+}
+
 export interface AdapterTimeouts {
   applyMs: number;
   verifyEffectMs: number;
@@ -74,6 +98,8 @@ export interface FaultAdapter {
   readonly type: FaultType;
   /** Human description of the mechanism (audited in evidence, no argv). */
   readonly mechanism: string;
+  /** Static support status (blocked adapters fail before any effect). */
+  readonly support: AdapterSupport;
   /** Minimum permissions required by this adapter. */
   readonly privileges: FaultPrivileges;
   /** True when the fault is rolled back by a removal action (pause). */

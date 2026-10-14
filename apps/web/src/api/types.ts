@@ -21,6 +21,11 @@ import type {
   NodeStatus,
   OperationResult,
   CustomTopologyNodeInput,
+  ScenarioInput,
+  ScenarioMalformedEntry,
+  ScenarioRecord,
+  ScenarioValidationResult,
+  SerializedOperationDefinition,
 } from '@kaizen/engine';
 
 export type {
@@ -37,6 +42,11 @@ export type {
   NodeRole,
   NodeStatus,
   OperationResult,
+  ScenarioInput,
+  ScenarioMalformedEntry,
+  ScenarioRecord,
+  ScenarioValidationResult,
+  SerializedOperationDefinition,
 };
 
 /** Envelope for structured API errors ({ ok: false, error }). */
@@ -107,4 +117,39 @@ export interface CreateNetworkInput {
   name: string;
   preset: NetworkPreset;
   custom?: { nodes: CustomTopologyNodeInput[] };
+}
+
+// ---------------------------------------------------------------------------
+// Scenarios (T-3.3 authoring surface). Client contract only — the Failure
+// Lab UI is a later phase (T-3.6); these methods exist so CLI/UI work can
+// consume the same typed model.
+
+export interface ScenarioListResponse {
+  ok: boolean;
+  scenarios: ScenarioRecord[];
+  malformed: ScenarioMalformedEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ScenarioResponse {
+  ok: boolean;
+  scenario: ScenarioRecord;
+}
+
+/** POST /api/scenarios/validate answers 200 with validity + structured result. */
+export interface ScenarioValidateResponse {
+  ok: boolean;
+  result: ScenarioValidationResult;
+}
+
+export interface ScenarioOperationsResponse {
+  ok: boolean;
+  operations: SerializedOperationDefinition[];
+}
+
+export interface ScenarioDeleteResponse {
+  ok: boolean;
+  removed: string;
 }
