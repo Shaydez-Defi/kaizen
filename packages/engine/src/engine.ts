@@ -15,6 +15,7 @@ import { NetworkService } from './network/service';
 import { NodeProcessManager } from './process/manager';
 import { PortAllocator } from './process/ports';
 import { ScenarioService } from './scenario/service';
+import { ScenarioEngine } from './scenario/runner';
 import { StateStore } from './state/store';
 
 export const KAIZEN_VERSION = '0.1.0';
@@ -49,9 +50,12 @@ export interface KaizenEngine {
    *  (DEC-008/DEC-018). Dry-run by default; execute() revalidates. */
   faults: FailureInjector;
   /** Scenario authoring (T-3.3): CRUD + deterministic validation over the
-   *  safe operation registry. Pure data service — it never executes faults;
-   *  scenario execution is the future ScenarioEngine (T-3.4). */
+   *  safe operation registry. Pure data service — it never executes faults. */
   scenarios: ScenarioService;
+  /** Scenario execution (T-3.4): gated, auditable runs of saved scenarios
+   *  through the FailureInjector. Runs are created only by an explicit
+   *  execute() request; saving a scenario NEVER runs it. */
+  scenarioRuns: ScenarioEngine;
   /** WS RPC url of a node in a network (by node id). */
   wsUrlForNode(nodeId: string): string;
   /** Release engine resources. Managed node processes are NOT killed —
@@ -124,6 +128,17 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     // never a separate list that could contradict it (T-3.3).
     mechanisms: faults.describeMechanisms(),
   });
+  const scenarioRuns = new ScenarioEngine({
+    store,
+    events,
+    scenarios,
+    faults,
+    monitoring,
+  });
+  // Crash recovery (T-3.4): terminalize runs interrupted by a previous
+  // process and reconcile their stuck faults. Idempotent, never rejects,
+  // NEVER resumes execution. (Kicked off now; awaited in close().)
+  void scenarioRuns.reconcileOnStartup();
 
   return {
     dataDir,
@@ -136,11 +151,15 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     monitoring,
     faults,
     scenarios,
+    scenarioRuns,
     wsUrlForNode(nodeId: string): string {
       const node = store.getNode(nodeId);
       return `ws://127.0.0.1:${node.ports.ws}`;
     },
     async close(): Promise<void> {
+      // Runs first: cancel active runs through the normal cleanup-then-stop
+      // path while the injector is still alive, then roll back faults.
+      await scenarioRuns.close();
       await faults.shutdown();
       monitoring.stopAll();
       store.close();

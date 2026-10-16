@@ -256,6 +256,66 @@ Key properties:
   `SCENARIO_MALFORMED`), never silently dropped. Authoring mutations emit
   `scenario.created|updated|deleted` audit events.
 
+**Scenario execution (`engine.scenarioRuns` — ScenarioEngine, T-3.4):**
+runs are explicit, sequential, and fully recorded. Key properties:
+
+- **Explicit request, never automatic** — a saved scenario never executes
+  by itself; only `execute({ scenarioId, networkIdOrName, mode:
+  'execute' })` (API: `POST /api/scenarios/:id/execute`, DEC-021) starts
+  a run, and CRUD/validate/loading/viewing never touch the injector.
+  Each run persists an **immutable snapshot** of the definition (later
+  authoring edits cannot change a running or historical run) and resolved
+  target nodes; run/step records live in SQLite tables
+  `scenario_runs`/`scenario_run_steps` (schemaVersion 15, migration 11),
+  transitions are atomic through the store's single writer, and evidence
+  is redacted — no secrets are ever stored in run records.
+- **Fail-closed pre-execution gates** — before a run may leave
+  `validating`, the engine enforces, with fresh reads and in order: (1)
+  revalidation of the stored definition (RSK-28), (2) operation support
+  right now (blocked/planned refused), (3) exact target resolution, (4)
+  DEC-008 safety posture re-checked (`designatedTest`, chain scope,
+  preset match, `minNodes`, capabilities), (5) label→managed-node
+  resolution for every operation and condition target, (6) quarantine
+  (unreconciled cleanup failure blocks conflicting runs), (7) conflict
+  checks (no concurrent run per target/scenario, no active fault on a
+  target node). A refusal persists a `rejected` run with its structured
+  gate error FIRST, then throws — audit without execution.
+- **Ordered per-step pipeline** — persist `running` → bounded,
+  cancel-aware delays → preconditions (independent RPC/process/health
+  observations, honest `satisfied`/`not-satisfied`/`inconclusive`
+  verdicts with per-condition budgets) → failure policy → injector
+  `preflight` → `injector.execute` (the ONLY fault path — there is no
+  bypass) → record result + evidence → postconditions → verification →
+  cleanup check → persist. States are typed (13 run / 11 step states)
+  with legal-transition maps enforced on every write; events
+  (`scenario-run.created|state|step|verification|cancelled|cleanup-failed|
+  finished`) mirror every transition.
+- **Failure policies are data, re-validated at run time** —
+  `onPreconditionFailed: abort-run|skip-step|cancel-run`,
+  `onStepFailed: abort-run|continue|cancel-run`,
+  `onVerificationInconclusive: fail-step|warn-and-continue`,
+  `onStepTimeout: fail-step|cancel-run`, `onCleanupFailed: cancel-run`
+  (fixed). `continue` after a failure additionally requires PROOF the
+  target is safe (no active fault, no unreconciled quarantine, no
+  contradicting claims) — otherwise the run fails closed. Cleanup
+  failure always ends `cleanup-failed`: target quarantined + high-severity
+  event, never claimed as recovered.
+- **Cancellation, timeout, cleanup** — explicit `cancel(runId)` (API
+  route) is persisted as `cancel-requested` before anything is
+  interrupted; interruption happens ONLY via `injector.cancel` inside a
+  bounded wait; the cleanup path runs on every finish path with a bounded
+  wait, and unconfirmed cleanup degrades to `cleanup-failed` +
+  quarantine. Step/run deadlines report `STEP_TIMEOUT` honestly (an
+  exhausted condition budget is never fabricated into a verdict).
+- **Durability & crash reconciliation** — history survives restarts
+  (paginated `listScenarioRuns` with per-row `SCENARIO_RUN_MALFORMED`
+  entries); on startup `reconcileOnStartup()` (idempotent) terminalizes
+  unfinished runs as `INTERRUPTED` (never resumes them), reconciles
+  stuck execute-mode faults (SIGCONT sweep → quarantine when not
+  provable → `reconcile()` only on evidence), and leaves dry-run records
+  alone; `engine.close()` cancels in-flight faults before shutting the
+  injector down.
+
 ## 7. Data & Event Flow (monitoring)
 
 ```mermaid

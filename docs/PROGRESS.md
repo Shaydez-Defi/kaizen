@@ -875,3 +875,151 @@ orphaned `portaldot_dev` processes, no leftover netns/iptables rules
 - Next: **T-3.4** — ScenarioEngine execution with per-action recording and
   cancellation, reusing this model unchanged and executing ONLY through
   the FailureInjector's existing gates (dry-run→execute discipline).
+
+---
+
+## 2026-10-16 — PHASE 3D: Scenario Execution Engine (T-3.4)
+
+**Phase/Task IDs**: Phase 3D — T-3.4 only. Replay (T-3.5), CLI/UI
+surfaces (T-3.6), Failure Lab UI, diagnostics (Phase 4), K8s — explicitly
+NOT started, roadmap untouched.
+
+### 1. What was built
+
+- **`ScenarioEngine` (`packages/engine/src/scenario/runner.ts`, new)** —
+  `engine.scenarioRuns`: `execute()` / `get()` / `list()` / `cancel()` /
+  `wait()` / `active()` / `reconcileOnStartup()` / `close()`. Sequential
+  execution of a validated scenario snapshot **only** through the
+  FailureInjector (preflight → execute; no parallel execution path, no
+  weakening of T-3.2 controls). Per-step pipeline: persist `running` →
+  bounded cancel-aware delays → preconditions (independent observations,
+  honest satisfied/not-satisfied/inconclusive with per-condition budgets)
+  → failure policy → injector preflight → `injector.execute` → record
+  evidence → postconditions → verification → cleanup → persist. Cancellation
+  interrupts only via `injector.cancel` inside a bounded wait; cleanup runs
+  on every finish path; unconfirmed cleanup → `cleanup-failed` + high-sev
+  event + quarantine (never claimed recovered); step/run deadlines report
+  `STEP_TIMEOUT` honestly.
+- **`scenario/run-types.ts` (new)** — 13 run states / 11 step states with
+  full legal-transition maps + predicates, `ScenarioRunRecord` /
+  `ScenarioStepRun` (per-condition verdicts, claims, policy applied,
+  warnings, error taxonomy incl. `INTERNAL`), `ScenarioRunReconcileReport`,
+  `toRunSummary`. No secrets in records (redaction at persistence).
+- **`scenario/conditions.ts` (new)** — run-time condition evaluators:
+  rpc-reachable, process-state (alive pid), health-state (monitoring
+  snapshot; inconclusive when monitoring is inert — never guessed),
+  peers/syncing (inconclusive when RPC down), chain-progress (head increase
+  / documented 15 s stall window), recovery-verified (reads the executed
+  fault record's own claims); 1 s poll cadence (`SCENARIO_CONDITION_POLL_MS`).
+- **Pre-execution gates (fail closed, evaluated before leaving
+  `validating`)**: fresh revalidation of the stored definition (RSK-28),
+  operation support (blocked/planned refused), exact target resolution,
+  designatedTest/chain/preset/minNodes/capability checks, label→managed-
+  node resolution for every operation+condition target, quarantine,
+  conflict checks (no concurrent run per target/scenario; no active fault
+  on a target). A refusal **persists a `rejected` run with its precise
+  structured error first**, then throws.
+- **Persistence (`state/store.ts`)** — migration 11 (schemaVersion
+  **15**): `scenario_runs` + `scenario_run_steps` tables with JSON rows,
+  atomic state transitions through the single writer, paginated
+  list/filter with per-row `SCENARIO_RUN_MALFORMED` entries; raw
+  `updateScenario`/`insertFault` helpers for crafted test/reconcile rows.
+- **Crash reconciliation** — `injector.recoverInterrupted()` (new):
+  execute-mode stuck faults → SIGCONT sweep where needed → terminalized →
+  `reconcile()` only releases on fresh proof; dry-run records untouched.
+  `ScenarioEngine.reconcileOnStartup()` (idempotent, non-rejecting)
+  terminalizes unfinished runs as `INTERRUPTED` (never resumes them) and
+  quarantines unproven cleanup failures. `engine.close()` order: runs
+  closed (bounded cancel of in-flight faults) → faults.shutdown() →
+  monitoring → store.
+- **API (`apps/api/src/server.ts`)** — `POST /api/scenarios/:id/execute`
+  (202 + run; body requires literal `mode:"execute"` + explicit target),
+  `GET /api/scenarios/runs/:runId`, `GET /api/scenarios/runs`
+  (filters + limit/offset/total + malformed), `POST /api/scenarios/runs/
+  :runId/cancel`; `statusFor` gained 403/404/409 codes. Web client gained
+  typed `executeScenario` / `getScenarioRun` / `listScenarioRuns` /
+  `cancelScenarioRun` methods + response types — **no UI built** (T-3.6).
+- **Errors/events** — new `SCENARIO_RUN_NOT_FOUND` (404),
+  `SCENARIO_RUN_CONFLICT` (409), `SCENARIO_EXEC_NOT_ALLOWED` (403),
+  `FAULT_INTERRUPTED`; typed `scenario-run.created|state|step|verification|
+  cancelled|cleanup-failed|finished` events mirroring every transition.
+- **Run authorization** recorded as **DEC-021**: DEC-019 loopback trust +
+  literal mode marker + explicit target + engine-side fail-closed gates;
+  authenticated non-loopback identity remains T-7.3 (RSK-26 untouched).
+
+### 2. Gates (commands + actual results, 2026-10-16)
+
+```bash
+npm run typecheck        # pass (engine, cli, api, web)
+npm run lint             # pass
+npm run build            # pass
+npm test                 # 248/248 passed (23 files) — 202 prior + 46 new:
+                         #   packages/engine/test/scenario-run.test.ts 37,
+                         #   apps/api/test/scenario-runs.test.ts 9;
+                         #   per-layer: engine 185, api 27, web 36
+TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
+  KAIZEN_TEST_LIVE=1 npm run test:integration
+                         # 43/43 passed (10 files, 317 s) — 35 prior + 8 new
+                         # live scenario-run checks; T-3.2 fault suites intact
+```
+
+Live evidence (8/8 in `test/integration/scenario-runs.int.test.ts`,
+real `portaldot_dev` two-node network, independent test-side observation
+for every claim): pause run w/ effect observed while held + independent
+recovery (same pid, RPC back, head advanced); two sequential steps with
+distinct fault records; precondition abort (zero faults, node untouched);
+live skip-step continuing to a real execution; cancellation during the
+hold via `injector.cancel` w/ verified rollback; STEP_TIMEOUT with no
+fault created; phantom non-designated/mainnet targets refused fail-closed
+with persisted rejections; unresolvable label refused. CLI: no new CLI
+surface (T-3.6 owns it); no orphaned `portaldot_dev` processes after the
+run.
+
+### 3. Files
+
+- New: `packages/engine/src/scenario/{runner,run-types,conditions}.ts`;
+  `packages/engine/test/scenario-run.test.ts`;
+  `apps/api/test/scenario-runs.test.ts`;
+  `test/integration/scenario-runs.int.test.ts`;
+  `docs/reports/PHASE_03C_REPORT.md` (3C archived verbatim);
+  `docs/PHASE_REPORT.md` overwritten with the 3D report.
+- Modified: `fault/injector.ts` (`recoverInterrupted`);
+  `state/store.ts` (migration 11 + run CRUD + raw update/insert);
+  `scenario/validate.ts` (`scenarioRecordToInput` exported);
+  `errors.ts` (4 codes); `events/bus.ts` (7 scenario-run events);
+  `engine.ts` (wiring + eager reconcile + close order); `index.ts`
+  (exports); `apps/api/src/server.ts` (4 routes + statusFor);
+  `apps/web/src/api/{client,types}.ts`; `apps/api/test/scenarios.test.ts`
+  (posture updated for T-3.4: no implicit execution, execute demands
+  marker+target, refusal persists a rejected run);
+  `packages/engine/test/store.test.ts` (schemaVersion 15);
+  docs (PLAN/RISKS/ARCHITECTURE/TESTING/DECISIONS/PROGRESS).
+
+### 4. Problems, decisions, remaining work
+
+- **Defect found & fixed in the new executor**: `execute()`'s catch block
+  overwrote the gate's structured error (e.g. `UNSUPPORTED_OPERATION`
+  with step details) with a generic mapping of the thrown code
+  (`GATE_REFUSED`) — fixed to preserve `record.error` set by the gates;
+  regression-covered by the gate tests asserting exact codes.
+- **Validation facts pinned down by tests** (no spec change): every fault
+  step requires BOTH `rpc-reachable{expect:true}` and
+  `process-state{expect:['running']}` baselines for its target (error if
+  absent), preset membership uses `nameSuffix` labels (two-node =
+  alice/bob), scenario names reject parentheses — the T-3.4 tests were
+  authored to the real rules rather than relaxing them.
+- **Poll semantics**: a conclusively-false precondition keeps polling
+  until its authored budget (that is correct — states recover); tests
+  therefore author tight condition budgets (e.g. 300–500 ms) instead of
+  waiting out the 30 s default.
+- **Run record's `faultId` is persisted after the fault finishes**, so
+  live tests observe in-flight faults through `injector.activeFaults()`
+  (the live truth channel) rather than the record — documented in the
+  test comments; no schema change was needed.
+- **DEC-021** recorded (see above); no existing decision changed.
+- **Not started (per instruction)**: T-3.5 replay, T-3.6 CLI/UI surfaces
+  (Failure Lab UI), diagnostics, K8s — the roadmap is unchanged and no
+  phase report claims them.
+- Next: **STOP after T-3.4** per instruction. When resumed, the next
+  roadmap task is T-3.5 (replay), which must reuse
+  `engine.scenarioRuns.execute()` and never add a second executor.

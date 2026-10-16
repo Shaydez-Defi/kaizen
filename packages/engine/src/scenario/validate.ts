@@ -965,3 +965,31 @@ export function prepareScenario(
   };
   return { result, record };
 }
+
+/**
+ * Convert a persisted scenario record back into authoring-input shape. Used
+ * by the ScenarioEngine (T-3.4) to REVALIDATE the exact stored definition
+ * through the same validation pipeline at run time (RSK-28's gate) — the
+ * executor never trusts the authoring-time result alone.
+ */
+export function scenarioRecordToInput(record: ScenarioRecord): ScenarioInput {
+  return {
+    name: record.name,
+    description: record.description,
+    tags: [...record.tags],
+    execution: { ...record.execution },
+    requires: { ...record.requires },
+    steps: record.steps.map((step) => ({
+      id: step.id,
+      order: step.order,
+      ...(step.description !== undefined ? { description: step.description } : {}),
+      operation: { type: step.operation.type, config: { ...step.operation.config } },
+      delayBeforeMs: step.delayBeforeMs,
+      delayAfterMs: step.delayAfterMs,
+      timeoutMs: step.timeoutMs,
+      preconditions: step.preconditions.map((c) => ({ ...c })),
+      postconditions: step.postconditions.map((c) => ({ ...c })),
+    })),
+    schemaVersion: record.schemaVersion,
+  };
+}

@@ -24,6 +24,11 @@ import type {
   ScenarioInput,
   ScenarioMalformedEntry,
   ScenarioRecord,
+  ScenarioRunMalformedEntry,
+  ScenarioRunRecord,
+  ScenarioRunState,
+  ScenarioRunSummary,
+  ScenarioStepRun,
   ScenarioValidationResult,
   SerializedOperationDefinition,
 } from '@kaizen/engine';
@@ -45,6 +50,11 @@ export type {
   ScenarioInput,
   ScenarioMalformedEntry,
   ScenarioRecord,
+  ScenarioRunMalformedEntry,
+  ScenarioRunRecord,
+  ScenarioRunState,
+  ScenarioRunSummary,
+  ScenarioStepRun,
   ScenarioValidationResult,
   SerializedOperationDefinition,
 };
@@ -152,4 +162,30 @@ export interface ScenarioOperationsResponse {
 export interface ScenarioDeleteResponse {
   ok: boolean;
   removed: string;
+}
+
+// ---------------------------------------------------------------------------
+// Scenario runs (T-3.4 execution surface). Typed contracts only — the
+// Failure Lab UI is a later phase (T-3.6). Runs are created ONLY by an
+// explicit execute request (mode:'execute' + selected target); these
+// methods never imply that saving a scenario runs it.
+
+/** POST /api/scenarios/:id/execute answers 202 with the persisted run. */
+export interface ScenarioExecuteResponse {
+  ok: boolean;
+  run: ScenarioRunRecord;
+}
+
+export interface ScenarioRunResponse {
+  ok: boolean;
+  run: ScenarioRunRecord;
+}
+
+export interface ScenarioRunListResponse {
+  ok: boolean;
+  runs: ScenarioRunSummary[];
+  malformed: ScenarioRunMalformedEntry[];
+  total: number;
+  limit: number;
+  offset: number;
 }

@@ -22,10 +22,14 @@ import type {
   NodeLogsResponse,
   OperationResponse,
   ScenarioDeleteResponse,
+  ScenarioExecuteResponse,
   ScenarioInput,
   ScenarioListResponse,
   ScenarioOperationsResponse,
   ScenarioResponse,
+  ScenarioRunListResponse,
+  ScenarioRunResponse,
+  ScenarioRunState,
   ScenarioValidateResponse,
 } from './types';
 
@@ -223,7 +227,8 @@ export class KaizenApiClient {
     );
   }
 
-  // ---- scenarios (T-3.3 authoring surface; no execution endpoints exist) ---
+  // ---- scenarios (T-3.3 authoring surface: CRUD + validate only; saving a
+  // scenario never executes anything) --------------------------------------
   listScenarios(
     filter: { q?: string; tag?: string; status?: 'valid' | 'warning'; limit?: number; offset?: number } = {},
   ): Promise<ScenarioListResponse> {
@@ -261,6 +266,60 @@ export class KaizenApiClient {
 
   deleteScenario(id: string): Promise<ScenarioDeleteResponse> {
     return this.request('DELETE', `/api/scenarios/${encodeURIComponent(id)}`);
+  }
+
+  // ---- scenario runs (T-3.4 execution surface) -----------------------------
+  // Explicit, target-selected requests only (mode:'execute'). The backend
+  // enforces every gate server-side; the client passes no operational
+  // parameters beyond the target and audit actor.
+
+  /**
+   * Request execution of a saved scenario against an explicit target
+   * network. Answers 202: the run is persisted BEFORE any side effect and
+   * executes in the background — poll getScenarioRun, or cancelScenarioRun.
+   */
+  executeScenario(
+    scenarioId: string,
+    request: { networkIdOrName: string; requestedBy?: string },
+  ): Promise<ScenarioExecuteResponse> {
+    return this.request('POST', `/api/scenarios/${encodeURIComponent(scenarioId)}/execute`, {
+      body: { mode: 'execute', ...request },
+    });
+  }
+
+  /** Full run record: immutable snapshot, per-step evidence, cleanup, error. */
+  getScenarioRun(runId: string): Promise<ScenarioRunResponse> {
+    return this.request('GET', `/api/scenarios/runs/${encodeURIComponent(runId)}`);
+  }
+
+  /** Paginated run history (summaries without the snapshot payload). */
+  listScenarioRuns(
+    filter: {
+      scenarioId?: string;
+      networkId?: string;
+      state?: ScenarioRunState;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<ScenarioRunListResponse> {
+    const params = new URLSearchParams();
+    if (filter.scenarioId !== undefined) params.set('scenarioId', filter.scenarioId);
+    if (filter.networkId !== undefined) params.set('networkId', filter.networkId);
+    if (filter.state !== undefined) params.set('state', filter.state);
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    if (filter.offset !== undefined) params.set('offset', String(filter.offset));
+    const qs = params.toString();
+    return this.request('GET', `/api/scenarios/runs${qs ? `?${qs}` : ''}`);
+  }
+
+  /**
+   * Request cancellation: explicit, persisted, and interruptive only via
+   * the injector's supported cancellation (rollback first, then stop).
+   */
+  cancelScenarioRun(runId: string, requestedBy?: string): Promise<ScenarioRunResponse> {
+    return this.request('POST', `/api/scenarios/runs/${encodeURIComponent(runId)}/cancel`, {
+      body: requestedBy !== undefined ? { requestedBy } : {},
+    });
   }
 }
 

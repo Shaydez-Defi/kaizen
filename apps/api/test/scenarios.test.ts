@@ -346,17 +346,20 @@ describe('Scenario authoring API (real app + real SQLite)', () => {
     expect(faultEvents).toEqual([]);
     expect(engine.store.listFaults({ limit: 100 })).toEqual([]);
     expect(engine.faults.activeFaults()).toEqual([]);
+    // Authoring also never creates RUN records: only an explicit execute
+    // request (T-3.4) can do that.
+    expect(engine.scenarioRuns.list().total).toBe(0);
   });
 
-  it('has no execution/replay routes at all (404 by absence)', async () => {
+  it('has no implicit-execution or replay routes (404 by absence); execute demands mode+target', async () => {
     const create = await app.inject({
       method: 'POST',
       url: '/api/scenarios',
       payload: validScenario('api-no-routes'),
     });
     const id = (create.json() as { scenario: { id: string } }).scenario.id;
+    // No implicit/replay variants exist at all.
     for (const url of [
-      `/api/scenarios/${id}/execute`,
       `/api/scenarios/${id}/run`,
       `/api/scenarios/${id}/replay`,
       '/api/scenarios/run',
@@ -364,6 +367,34 @@ describe('Scenario authoring API (real app + real SQLite)', () => {
       const res = await app.inject({ method: 'POST', url, payload: {} });
       expect(res.statusCode).toBe(404);
     }
+    // The ONE execute route refuses anything short of an explicit
+    // mode:'execute' + target — and a refused request still executes nothing.
+    faultEvents.length = 0;
+    for (const payload of [{}, { mode: 'execute' }]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/scenarios/${id}/execute`,
+        payload,
+      });
+      // missing marker or missing explicit target → structured 400
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('INVALID_INPUT');
+    }
+    // Marker + explicit-but-unknown target: the gate refuses with 404 and
+    // the refusal is PERSISTED as a rejected run (audit before the throw).
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/${id}/execute`,
+      payload: { mode: 'execute', networkIdOrName: 'net-x' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('NETWORK_NOT_FOUND');
+    const runs = engine.scenarioRuns.list();
+    expect(runs.total).toBe(1);
+    expect(runs.runs[0]?.state).toBe('rejected');
+    expect(runs.runs[0]?.error?.code).toBe('TARGET_UNRESOLVED');
+    expect(faultEvents).toEqual([]);
+    expect(engine.store.listFaults({ limit: 100 })).toEqual([]);
   });
 
   it('keeps the DEC-019 posture: loopback host only, structured errors without stack leaks', async () => {

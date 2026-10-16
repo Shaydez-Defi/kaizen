@@ -43,6 +43,12 @@ export type KaizenErrorCode =
   | 'SCENARIO_INVALID'
   | 'SCENARIO_MALFORMED'
   | 'SCENARIO_VERSION_UNSUPPORTED'
+  // scenario execution (T-3.4)
+  | 'SCENARIO_RUN_NOT_FOUND'
+  | 'SCENARIO_RUN_CONFLICT'
+  | 'SCENARIO_EXEC_NOT_ALLOWED'
+  // fault interruption recovery (T-3.4 startup reconciliation)
+  | 'FAULT_INTERRUPTED'
   | 'INTERNAL';
 
 export interface KaizenErrorJson {

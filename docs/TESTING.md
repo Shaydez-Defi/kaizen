@@ -522,3 +522,130 @@ TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
   engine dist); `zod` is now an engine dependency (workspace-hoisted, same
   version as the API); the API test suite runs in the unit config (real
   Fastify app + temp SQLite — never spawns portaldot).
+
+## 13. Tests Executed in Phase 3D — Scenario Execution Engine (T-3.4)
+
+### 13.1 Engine unit suite — `packages/engine/test/scenario-run.test.ts`
+
+**37 tests** (new), run against a real SQLite store, real EventBus, real
+FailureInjector, and **real stand-in node processes** (fake JSON-RPC HTTP
+servers, the same R-22 A pattern as `fault.test.ts`) — no live portaldot,
+no mocked injector. Covered:
+
+- **State machines**: every legal run transition (13 states) and step
+  transition (11 states) accepted; phase-skipping and terminal
+  resurrection rejected; terminal-state classification.
+- **Execution core**: steps run in declared order through the injector
+  (exactly one execute-mode fault record per fault step — no bypass);
+  full per-step evidence (pre/post verdicts with details, claims,
+  outcome, verification, cleanup); immutable snapshot survives later
+  authoring edits; run history survives store reopen; event ordering
+  (`created` first, `finished` last, exact state-chain sequence).
+- **All 10 pre-execution gates**, each asserted as a persisted `rejected`
+  run with a precise error code (VALIDATION_FAILED / UNSUPPORTED_OPERATION
+  / TARGET_UNRESOLVED / GATE_REFUSED / CONFLICT) and **zero fault
+  records**: mode marker + unknown scenario, unregistered target,
+  non-designated target, blocked/planned operations, unresolvable labels,
+  preset mismatch, freshness (drifted definition), secret-tampered
+  definition (secret never echoed into the record), concurrent/active
+  conflicts, quarantine.
+- **Preconditions/postconditions/failure policies**: skip-step records the
+  reason and continues; abort-run stops with PRECONDITION_FAILED;
+  cancel-run path; failed postcondition → verification failed → policy;
+  INCONCLUSIVE postcondition is never fabricated (warn-and-continue →
+  `completed-with-warnings`, fail-step → run failed); no authored
+  postconditions → `not-required` + warning; policy validated at run time.
+- **Timeouts**: condition budget exhaustion during preconditions →
+  STEP_TIMEOUT (no fault created); in-operation step deadline via a slow
+  scripted adapter.
+- **Cancellation**: before side effects (no fault ever created), during
+  the operation (via `injector.cancel` only, rollback verified), between
+  steps, cancel of a finished run → SCENARIO_RUN_CONFLICT; persisted
+  `cancel-requested`.
+- **Cleanup failure**: unconfirmed cleanup → run `cleanup-failed` +
+  `scenario-run.cleanup-failed` high-severity event + target quarantine
+  blocking new runs + reconcile releasing only on proof; a lying observer
+  keeps the quarantine.
+- **Startup reconciliation**: unfinished runs terminalized as INTERRUPTED
+  from every non-terminal state (NEVER resumed, steps untouched),
+  stuck faults SIGCONT-swept then reconciled or quarantined, ready-state
+  faults → `cancelled`, pre-execution interruptions emit no run events,
+  idempotent across calls.
+- **Shutdown**: `close()` cancels in-flight runs through the cleanup path
+  and then refuses new runs.
+
+### 13.2 API unit suite — `apps/api/test/scenario-runs.test.ts`
+
+**9 tests** (new suite, real Fastify app + real SQLite via
+`app.inject`, never spawns portaldot). Execute validation (missing mode
+marker / target → 400, unknown scenario → 404 with no run persisted);
+gate refusals as structured 4xx (403 non-designated, 404 unknown target)
+**with the rejected run persisted as audit and zero fault events/records**;
+the full 202 → background run → terminal flow through a legitimately
+skip-step scenario (per-step evidence served over the wire,
+`onPreconditionFailed=skip-step` recorded, skipped step never reaches the
+injector); run status endpoint; paginated + filtered history (limit/
+offset/total/malformed + invalid query → 400 + unknown run → 404
+SCENARIO_RUN_NOT_FOUND); cancellation (202 → `cancel-requested` persisted
+→ terminal `cancelled`, no side effects) and cancel of a finished run →
+409 / unknown run → 404; DEC-019 posture (structured errors, no stack
+leaks). The T-3.3 suite's "no execution routes" test was updated to its
+T-3.4 truth: no implicit-execution/replay routes; execute demands the
+explicit marker + target; refusal persists a rejected run.
+
+### 13.3 LIVE integration — `test/integration/scenario-runs.int.test.ts`
+
+**8/8 passed** against REAL `portaldot_dev` two-node network
+(disposable, designatedTest — DEC-008; independent test-side RPC/process
+observation for every claim):
+
+1. **Pause run with independent verification**: victim unreachable while
+   the run's fault is held (sampled by the test itself), then same pid +
+   RPC back + head advanced; run `completed`, claims all true, cleanup
+   verified, no quarantine, injector's active list empty.
+2. **Two sequential pause steps** in declared order, distinct fault
+   records, monotonic `requestedAt`, both terminal, independent recovery.
+3. **Precondition failure aborts**: peers-gte-999 never holds → run
+   `failed` with PRECONDITION_FAILED, `faultId` null, zero new fault
+   records, node untouched (same pid, chain producing blocks).
+4. **skip-step live**: unmet step skipped with its recorded reason while
+   the next step executes FOR REAL (fault record exists, recovery
+   verified) — run `completed-with-warnings`.
+5. **Cancellation during the hold**: fault observed active, victim
+   unreachable independently, cancel requested → `cancelled` with
+   `recoveryVerified: true`, cleanup verified, same pid, RPC back, chain
+   resumed, no leaked/paused process.
+6. **Step-deadline exhaustion**: authored condition budget (8 s chain-
+   progress 'stalled') exceeds the step budget (5 s) → honest
+   `STEP_TIMEOUT`, `faultId` null, zero faults, node never touched.
+7. **Phantom targets fail closed**: directly-inserted non-designated
+   network and simulated `mainnet`-chain network both refused
+   (SCENARIO_EXEC_NOT_ALLOWED, messages cite the gate) with persisted
+   rejected runs and zero faults.
+8. **Unresolvable label**: scenario saved as a warning (no preset) is
+   refused at run time with a persisted rejection; live nodes untouched.
+
+### 13.4 Commands and actual results (2026-10-16)
+
+```bash
+npm run typecheck        # pass (engine, cli, api, web)
+npm run lint             # pass (incl. new test files)
+npm run build            # pass
+npm test                 # 248/248 passed (23 files) — 202 prior + 46 new:
+                         #   scenario-run.test.ts 37, scenario-runs.test.ts 9
+                         #   per-layer: engine 185, api 27, web 36
+TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
+  KAIZEN_TEST_LIVE=1 npm run test:integration
+                         # 43/43 passed (10 files, 317 s) — 35 prior + 8 new
+                         # scenario-run live checks; T-3.2 fault suites intact
+```
+
+- **CLI smoke**: no new CLI surface in T-3.4 (run commands are T-3.6,
+  which will call `engine.scenarioRuns` exactly like the API does); CLI
+  typecheck/build are covered by the shared gates.
+- **Hygiene after the live run**: no orphaned `portaldot_dev` processes
+  (the suites tear down their networks and assert cleanup themselves).
+- **Not faked anywhere**: inconclusive conditions stay `inconclusive`,
+  unproven cleanup stays `cleanup-failed` + quarantined, interrupted runs
+  stay INTERRUPTED — no test asserts a recovery the engine did not
+  observe.

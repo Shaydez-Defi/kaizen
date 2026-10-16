@@ -8,6 +8,7 @@
  */
 
 import type { FaultState, FaultType } from '../fault/types';
+import type { ScenarioRunState, ScenarioStepState } from '../scenario/run-types';
 import type {
   NetworkMonitorSnapshot,
   NetworkPreset,
@@ -133,6 +134,71 @@ export interface KaizenEventMap {
     scenarioId: string;
     name: string;
     actor: string;
+    at: string;
+  };
+  /** A scenario run was accepted (gates passed) — execution is starting.
+   *  Runs are ONLY created by ScenarioEngine.execute() with an explicit
+   *  mode:'execute' request; saving/updating a scenario never emits this. */
+  'scenario-run.created': {
+    runId: string;
+    scenarioId: string;
+    scenarioName: string;
+    networkId: string;
+    requestedBy: string;
+    steps: number;
+    at: string;
+  };
+  /** Run lifecycle transition (every state change is audited). */
+  'scenario-run.state': {
+    runId: string;
+    scenarioId: string;
+    networkId: string;
+    from: ScenarioRunState;
+    to: ScenarioRunState;
+    at: string;
+  };
+  /** Step lifecycle transition within a run. */
+  'scenario-run.step': {
+    runId: string;
+    stepId: string;
+    order: number;
+    operation: string;
+    from: ScenarioStepState;
+    to: ScenarioStepState;
+    at: string;
+  };
+  /** Final condition-verification outcome for one step phase. */
+  'scenario-run.verification': {
+    runId: string;
+    stepId: string;
+    phase: 'precondition' | 'postcondition';
+    verdict: 'satisfied' | 'failed' | 'inconclusive' | 'not-required';
+    detail: string;
+    at: string;
+  };
+  /** Cancellation was requested for a run (cleanup-then-stop). */
+  'scenario-run.cancelled': {
+    runId: string;
+    requestedBy: string;
+    at: string;
+  };
+  /** High severity: a run could not confirm cleanup — the target is
+   *  quarantined until reconcile() proves the effect is gone. */
+  'scenario-run.cleanup-failed': {
+    runId: string;
+    networkId: string;
+    severity: 'high';
+    message: string;
+    at: string;
+  };
+  /** Terminal run outcome (any final state, including rejected). */
+  'scenario-run.finished': {
+    runId: string;
+    scenarioId: string;
+    networkId: string;
+    state: ScenarioRunState;
+    stepCount: number;
+    warnings: number;
     at: string;
   };
 }

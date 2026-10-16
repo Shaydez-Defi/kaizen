@@ -21,6 +21,17 @@ import type {
   ScenarioTargetRequirements,
   ScenarioValidationResult,
 } from '../scenario/types';
+import {
+  SCENARIO_RUN_STATES,
+  type ScenarioRunCancellation,
+  type ScenarioRunCleanup,
+  type ScenarioRunError,
+  type ScenarioRunListResult,
+  type ScenarioRunRecord,
+  type ScenarioRunState,
+  type ScenarioStepRun,
+  type ScenarioRunTargetNode,
+} from '../scenario/run-types';
 import type {
   KaizenErrorJson,
 } from '../errors';
@@ -130,6 +141,37 @@ const MIGRATIONS: string[] = [
    );`,
   // 10: recency index for list ordering
   `CREATE INDEX IF NOT EXISTS scenarios_updated_idx ON scenarios(updated_at);`,
+  // 11: scenario RUNS (T-3.4 ScenarioEngine audit trail). Deliberately no FK
+  //     to scenarios: execution history must survive scenario edits/deletes
+  //     (the snapshot column is immutable). No FK to networks either, same as
+  //     the faults audit table.
+  `CREATE TABLE IF NOT EXISTS scenario_runs (
+     id TEXT PRIMARY KEY,
+     scenario_id TEXT NOT NULL,
+     scenario_name TEXT NOT NULL,
+     scenario_schema_version INTEGER NOT NULL,
+     network_id TEXT NOT NULL DEFAULT '',
+     network_name TEXT NOT NULL DEFAULT '',
+     state TEXT NOT NULL,
+     current_step_id TEXT,
+     requested_by TEXT NOT NULL,
+     snapshot TEXT NOT NULL,
+     target_nodes TEXT NOT NULL DEFAULT '[]',
+     steps TEXT NOT NULL DEFAULT '[]',
+     validation TEXT,
+     warnings TEXT NOT NULL DEFAULT '[]',
+     error TEXT,
+     cleanup TEXT,
+     cancellation TEXT,
+     created_at TEXT NOT NULL,
+     started_at TEXT,
+     updated_at TEXT NOT NULL,
+     finished_at TEXT
+   );`,
+  `CREATE INDEX IF NOT EXISTS scenario_runs_created_idx ON scenario_runs(created_at);`,
+  `CREATE INDEX IF NOT EXISTS scenario_runs_scenario_idx ON scenario_runs(scenario_id);`,
+  `CREATE INDEX IF NOT EXISTS scenario_runs_network_idx ON scenario_runs(network_id);`,
+  `CREATE INDEX IF NOT EXISTS scenario_runs_state_idx ON scenario_runs(state);`,
 ];
 
 interface NetworkRow {
@@ -216,6 +258,30 @@ interface ScenarioRow {
   updated_by: string;
   created_at: string;
   updated_at: string;
+}
+
+interface ScenarioRunRow {
+  id: string;
+  scenario_id: string;
+  scenario_name: string;
+  scenario_schema_version: number;
+  network_id: string;
+  network_name: string;
+  state: string;
+  current_step_id: string | null;
+  requested_by: string;
+  snapshot: string;
+  target_nodes: string;
+  steps: string;
+  validation: string | null;
+  warnings: string;
+  error: string | null;
+  cleanup: string | null;
+  cancellation: string | null;
+  created_at: string;
+  started_at: string | null;
+  updated_at: string;
+  finished_at: string | null;
 }
 
 export interface InsertNetworkInput {
@@ -761,6 +827,177 @@ export class StateStore {
     return Number(result.changes) > 0;
   }
 
+  // -------------------------------------------------------------------------
+  // Scenario runs (T-3.4) — durable execution audit. Every state transition
+  // rewrites the whole row in ONE statement (state + steps + timestamps
+  // together), so a run record is never half-updated. No FK to scenarios:
+  // history survives scenario edits and deletion.
+
+  insertScenarioRun(record: ScenarioRunRecord): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO scenario_runs
+           (id, scenario_id, scenario_name, scenario_schema_version, network_id, network_name,
+            state, current_step_id, requested_by, snapshot, target_nodes, steps, validation,
+            warnings, error, cleanup, cancellation, created_at, started_at, updated_at, finished_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.id,
+          record.scenarioId,
+          record.scenarioName,
+          record.scenarioSchemaVersion,
+          record.networkId,
+          record.networkName,
+          record.state,
+          record.currentStepId,
+          record.requestedBy,
+          JSON.stringify(record.snapshot),
+          JSON.stringify(record.targetNodes),
+          JSON.stringify(record.steps),
+          record.validation ? JSON.stringify(record.validation) : null,
+          JSON.stringify(record.warnings),
+          record.error ? JSON.stringify(record.error) : null,
+          record.cleanup ? JSON.stringify(record.cleanup) : null,
+          record.cancellation ? JSON.stringify(record.cancellation) : null,
+          record.createdAt,
+          record.startedAt,
+          record.updatedAt,
+          record.finishedAt,
+        );
+    } catch (e) {
+      throw translateScenarioRunConstraint(e, record.id);
+    }
+  }
+
+  /** Atomic full-row rewrite (single statement — no partial transitions). */
+  updateScenarioRun(record: ScenarioRunRecord): void {
+    let changes = 0;
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE scenario_runs SET
+             scenario_name = ?, scenario_schema_version = ?, network_id = ?, network_name = ?,
+             state = ?, current_step_id = ?, snapshot = ?, target_nodes = ?, steps = ?,
+             validation = ?, warnings = ?, error = ?, cleanup = ?, cancellation = ?,
+             started_at = ?, updated_at = ?, finished_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          record.scenarioName,
+          record.scenarioSchemaVersion,
+          record.networkId,
+          record.networkName,
+          record.state,
+          record.currentStepId,
+          JSON.stringify(record.snapshot),
+          JSON.stringify(record.targetNodes),
+          JSON.stringify(record.steps),
+          record.validation ? JSON.stringify(record.validation) : null,
+          JSON.stringify(record.warnings),
+          record.error ? JSON.stringify(record.error) : null,
+          record.cleanup ? JSON.stringify(record.cleanup) : null,
+          record.cancellation ? JSON.stringify(record.cancellation) : null,
+          record.startedAt,
+          record.updatedAt,
+          record.finishedAt,
+          record.id,
+        );
+      changes = Number(result.changes);
+    } catch (e) {
+      throw translateScenarioRunConstraint(e, record.id);
+    }
+    if (changes === 0) {
+      throw new KaizenError('SCENARIO_RUN_NOT_FOUND', `Scenario run ${record.id} not found`, {
+        runId: record.id,
+      });
+    }
+  }
+
+  /** Throws SCENARIO_RUN_NOT_FOUND (missing) or SCENARIO_MALFORMED (corrupt). */
+  getScenarioRun(id: string): ScenarioRunRecord {
+    const row = this.db.prepare('SELECT * FROM scenario_runs WHERE id = ?').get(id) as
+      | ScenarioRunRow
+      | undefined;
+    if (!row) {
+      throw new KaizenError('SCENARIO_RUN_NOT_FOUND', `Scenario run ${id} not found`, {
+        runId: id,
+      });
+    }
+    return mapScenarioRunRow(row);
+  }
+
+  tryGetScenarioRun(id: string): ScenarioRunRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM scenario_runs WHERE id = ?').get(id) as
+      | ScenarioRunRow
+      | undefined;
+    return row ? mapScenarioRunRow(row) : undefined;
+  }
+
+  /** Newest-first; unparseable rows are surfaced, never silently dropped. */
+  listScenarioRuns(
+    filter: {
+      scenarioId?: string;
+      networkId?: string;
+      state?: ScenarioRunState;
+      unfinishedOnly?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): ScenarioRunListResult {
+    const { whereSql, params } = scenarioRunFilterWhere(filter);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM scenario_runs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, filter.limit ?? 50, filter.offset ?? 0) as unknown as ScenarioRunRow[];
+    const runs: ScenarioRunRecord[] = [];
+    const malformed: ScenarioRunListResult['malformed'] = [];
+    for (const row of rows) {
+      try {
+        runs.push(mapScenarioRunRow(row));
+      } catch (e) {
+        malformed.push({
+          id: row.id,
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return { runs, malformed };
+  }
+
+  countScenarioRuns(
+    filter: { scenarioId?: string; networkId?: string; state?: ScenarioRunState } = {},
+  ): number {
+    const { whereSql, params } = scenarioRunFilterWhere(filter);
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM scenario_runs ${whereSql}`)
+      .get(...params) as { n: number };
+    return row.n;
+  }
+
+  /** Runs that never reached a terminal state (i.e. interrupted by a crash). */
+  listUnfinishedScenarioRuns(): ScenarioRunRecord[] {
+    const terminals = TERMINAL_SCENARIO_RUN_SQL_LIST;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM scenario_runs WHERE state NOT IN (${terminals}) ORDER BY created_at, id`,
+      )
+      .all() as unknown as ScenarioRunRow[];
+    const runs: ScenarioRunRecord[] = [];
+    for (const row of rows) {
+      try {
+        runs.push(mapScenarioRunRow(row));
+      } catch {
+        // A corrupt unfinished row cannot be reconciled — surfaced via
+        // listScenarioRuns; skipping here keeps reconciliation honest
+        // (it only ever touches rows it can actually read).
+      }
+    }
+    return runs;
+  }
+
   private closed = false;
 
   close(): void {
@@ -882,6 +1119,124 @@ function mapScenarioRow(row: ScenarioRow): ScenarioRecord {
       'SCENARIO_MALFORMED',
       `Scenario ${row.id} cannot be parsed by this build: ${e instanceof Error ? e.message : String(e)}`,
       { scenarioId: row.id },
+    );
+  }
+}
+
+// --- scenario runs (T-3.4) ------------------------------------------------
+
+/** SQL literal list of terminal run states (for unfinished-run queries). */
+const TERMINAL_SCENARIO_RUN_SQL_LIST = (
+  [
+    'rejected',
+    'completed',
+    'completed-with-warnings',
+    'failed',
+    'cancelled',
+    'cleanup-failed',
+  ] as const
+)
+  .map((s) => `'${s}'`)
+  .join(', ');
+
+function translateScenarioRunConstraint(e: unknown, id: string): KaizenError {
+  if (e instanceof KaizenError) return e;
+  return new KaizenError(
+    'SCENARIO_MALFORMED',
+    `Scenario run ${id} could not be persisted: ${e instanceof Error ? e.message : String(e)}`,
+    { runId: id },
+  );
+}
+
+function scenarioRunFilterWhere(filter: {
+  scenarioId?: string;
+  networkId?: string;
+  state?: ScenarioRunState;
+  unfinishedOnly?: boolean;
+}): { whereSql: string; params: string[] } {
+  const where: string[] = [];
+  const params: string[] = [];
+  if (filter.scenarioId !== undefined) {
+    where.push('scenario_id = ?');
+    params.push(filter.scenarioId);
+  }
+  if (filter.networkId !== undefined) {
+    where.push('network_id = ?');
+    params.push(filter.networkId);
+  }
+  if (filter.state !== undefined) {
+    where.push('state = ?');
+    params.push(filter.state);
+  }
+  if (filter.unfinishedOnly === true) {
+    where.push(`state NOT IN (${TERMINAL_SCENARIO_RUN_SQL_LIST})`);
+  }
+  return { whereSql: where.length > 0 ? `WHERE ${where.join(' AND ')}` : '', params };
+}
+
+/**
+ * Map one scenario_runs row. Corrupt/unknown-shaped rows throw structured
+ * errors instead of returning half-parsed data (list collects them per row).
+ * Run rows are NOT version-rejected on scenario schema changes: the snapshot
+ * is immutable execution history and must stay readable by later builds.
+ */
+function mapScenarioRunRow(row: ScenarioRunRow): ScenarioRunRecord {
+  try {
+    const snapshot = JSON.parse(row.snapshot) as unknown;
+    const targetNodes = JSON.parse(row.target_nodes) as unknown;
+    const steps = JSON.parse(row.steps) as unknown;
+    const warnings = JSON.parse(row.warnings) as unknown;
+    const validation = row.validation ? (JSON.parse(row.validation) as unknown) : null;
+    const error = row.error ? (JSON.parse(row.error) as unknown) : null;
+    const cleanup = row.cleanup ? (JSON.parse(row.cleanup) as unknown) : null;
+    const cancellation = row.cancellation ? (JSON.parse(row.cancellation) as unknown) : null;
+    const basicShapeOk =
+      snapshot !== null &&
+      typeof snapshot === 'object' &&
+      Array.isArray(targetNodes) &&
+      Array.isArray(steps) &&
+      steps.every((s) => s !== null && typeof s === 'object') &&
+      Array.isArray(warnings) &&
+      warnings.every((w) => typeof w === 'string') &&
+      (validation === null || (typeof validation === 'object' && validation !== null)) &&
+      (error === null || (typeof error === 'object' && error !== null)) &&
+      (cleanup === null || (typeof cleanup === 'object' && cleanup !== null)) &&
+      (cancellation === null || (typeof cancellation === 'object' && cancellation !== null)) &&
+      (SCENARIO_RUN_STATES as readonly string[]).includes(row.state);
+    if (!basicShapeOk) {
+      throw new Error('stored scenario run columns do not match the expected shape');
+    }
+    return {
+      id: row.id,
+      scenarioId: row.scenario_id,
+      scenarioName: row.scenario_name,
+      scenarioSchemaVersion: row.scenario_schema_version,
+      snapshot: snapshot as ScenarioRecord,
+      networkId: row.network_id,
+      networkName: row.network_name,
+      state: row.state as ScenarioRunState,
+      currentStepId: row.current_step_id,
+      targetNodes: targetNodes as ScenarioRunTargetNode[],
+      requestedBy: row.requested_by,
+      steps: steps as ScenarioStepRun[],
+      validation: validation as ScenarioValidationResult | null,
+      warnings: warnings as string[],
+      error: error as ScenarioRunError | null,
+      cleanup: cleanup as ScenarioRunCleanup | null,
+      cancellation: cancellation as ScenarioRunCancellation | null,
+      createdAt: row.created_at,
+      startedAt: row.started_at,
+      updatedAt: row.updated_at,
+      finishedAt: row.finished_at,
+      currentStepOrder:
+        (steps as ScenarioStepRun[]).find((s) => s.stepId === row.current_step_id)?.order ?? null,
+    };
+  } catch (e) {
+    if (e instanceof KaizenError) throw e;
+    throw new KaizenError(
+      'SCENARIO_MALFORMED',
+      `Scenario run ${row.id} cannot be parsed by this build: ${e instanceof Error ? e.message : String(e)}`,
+      { runId: row.id },
     );
   }
 }

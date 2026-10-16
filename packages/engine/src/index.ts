@@ -136,8 +136,51 @@ export type {
   SerializedOperationDefinition,
   ConditionDefinition,
 } from './scenario/operations';
-export { validateScenarioInput, prepareScenario, scenarioInputSchema } from './scenario/validate';
+export { validateScenarioInput, prepareScenario, scenarioInputSchema, scenarioRecordToInput } from './scenario/validate';
 export * from './scenario/types';
+export { ScenarioEngine, scenarioRunRequestSchema } from './scenario/runner';
+export type {
+  ActiveScenarioRun,
+  ScenarioEngineOptions,
+  ScenarioRunListFilter,
+  ScenarioRunPage,
+  ScenarioRunRequest,
+} from './scenario/runner';
+export {
+  SCENARIO_RUN_ERROR_CODES,
+  SCENARIO_RUN_STATES,
+  SCENARIO_RUN_TRANSITIONS,
+  SCENARIO_STEP_STATES,
+  SCENARIO_STEP_TRANSITIONS,
+  TERMINAL_SCENARIO_RUN_STATES,
+  TERMINAL_SCENARIO_STEP_STATES,
+  canTransitionRun,
+  canTransitionStep,
+  isTerminalScenarioRunState,
+  isTerminalScenarioStepState,
+  toRunSummary,
+} from './scenario/run-types';
+export type {
+  InterruptedFaultOutcome,
+  InterruptedRunOutcome,
+  ScenarioConditionEval,
+  ScenarioConditionVerdict,
+  ScenarioRunCancellation,
+  ScenarioRunCleanup,
+  ScenarioRunCleanupAction,
+  ScenarioRunError,
+  ScenarioRunErrorCode,
+  ScenarioRunListResult,
+  ScenarioRunMalformedEntry,
+  ScenarioRunRecord,
+  ScenarioRunReconcileReport,
+  ScenarioRunState,
+  ScenarioRunSummary,
+  ScenarioRunTargetNode,
+  ScenarioStepRun,
+  ScenarioStepState,
+  ScenarioStepVerification,
+} from './scenario/run-types';
 
 export { evaluateNodeHealth, DEFAULT_HEALTH_OPTIONS } from './monitor/health';
 export type { HealthEvalInput, HealthEvalOutput, HealthEvalOptions } from './monitor/health';

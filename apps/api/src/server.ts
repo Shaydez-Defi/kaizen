@@ -19,6 +19,7 @@ import { z } from 'zod';
 import {
   isKaizenError,
   KAIZEN_VERSION,
+  SCENARIO_RUN_STATES,
   type KaizenEngine,
   type KaizenEventName,
 } from '@kaizen/engine';
@@ -73,17 +74,40 @@ const faultExecuteBody = faultBody.extend({ mode: z.literal('execute') });
 const faultIdParam = z.object({ faultId: z.string().min(1) });
 const faultListQuery = z.object({ nodeId: z.string().min(1).optional() });
 
+// Scenario execution requests (T-3.4). The engine re-validates EVERYTHING
+// server-side with fresh reads (stored definition, DEC-008 target gates,
+// label → node resolution, quarantine, conflicting executions, and the
+// injector's own preflight) — these schemas only bound the wire format.
+// Execution demands an explicit mode:'execute' marker plus an explicitly
+// selected target: a saved scenario is never authorization to run it.
+const runIdParam = z.object({ runId: z.string().min(1) });
+const executeRunBody = z.object({
+  mode: z.literal('execute'),
+  networkIdOrName: z.string().min(1).max(64),
+  requestedBy: z.string().min(1).max(64).optional(),
+});
+const runListQuery = z.object({
+  scenarioId: z.string().min(1).max(64).optional(),
+  networkId: z.string().min(1).max(64).optional(),
+  state: z.enum(SCENARIO_RUN_STATES).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+const cancelRunBody = z.object({ requestedBy: z.string().min(1).max(64).optional() });
+
 function statusFor(code: string): number {
   switch (code) {
     case 'INVALID_INPUT':
     case 'SCENARIO_INVALID':
       return 400;
     case 'FAULT_NOT_ALLOWED':
+    case 'SCENARIO_EXEC_NOT_ALLOWED':
       return 403;
     case 'NETWORK_NOT_FOUND':
     case 'NODE_NOT_FOUND':
     case 'FAULT_NOT_FOUND':
     case 'SCENARIO_NOT_FOUND':
+    case 'SCENARIO_RUN_NOT_FOUND':
       return 404;
     case 'NETWORK_ALREADY_EXISTS':
     case 'NETWORK_ALREADY_RUNNING':
@@ -94,6 +118,7 @@ function statusFor(code: string): number {
     case 'FAULT_NOT_SUPPORTED':
     case 'SCENARIO_ALREADY_EXISTS':
     case 'SCENARIO_VERSION_UNSUPPORTED':
+    case 'SCENARIO_RUN_CONFLICT':
       return 409;
     default:
       return 500;
@@ -400,11 +425,12 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
     });
 
     // ---- scenarios (authoring, T-3.3) --------------------------------------
-    // CRUD + validate ONLY. There is intentionally no execute/run/replay
-    // route: saving, updating, or validating a scenario NEVER runs anything.
-    // Execution is the future ScenarioEngine (T-3.4), through the injector's
-    // own preflight/gates — never through authoring endpoints. Authorization
-    // is the existing DEC-019 posture: loopback-only binding, JSON-only, no
+    // CRUD + validate ONLY. Saving, updating, or validating a scenario NEVER
+    // runs anything: authoring endpoints have no execution path, no fault
+    // target, and no process power. Execution lives in the separate T-3.4
+    // run endpoints below — always through the engine's own gates + the
+    // FailureInjector (never through an authoring route). Authorization is
+    // the existing DEC-019 posture: loopback-only binding, JSON-only, no
     // browser invocation; scenario endpoints add no host-execution power.
 
     const scenarioListQuery = z.object({
@@ -467,6 +493,81 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
       if (!params) return;
       engine.scenarios.remove(params.id, 'api');
       reply.send({ ok: true, removed: params.id });
+    });
+
+    // ---- scenario runs (T-3.4, execution surface) --------------------------
+    // Separate from authoring on purpose: an execute request is an explicit,
+    // target-selected action (mode:'execute'), the run is persisted BEFORE
+    // any side effect, and gate failures come back as structured 4xx with
+    // the rejected run id — never as an executed fault. Runs execute in the
+    // background (bounded); clients poll run status or cancel — no held
+    // connections, no arbitrary parameters, no registry bypass.
+
+    scope.post('/api/scenarios/:id/execute', async (req, reply) => {
+      const params = requireParam(idParam, req.params, reply);
+      if (!params) return;
+      const body = executeRunBody.safeParse(req.body);
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid scenario execution request',
+            details: {
+              issues: body.error.issues,
+              hint: 'execution requires mode:"execute" and an explicit networkIdOrName target',
+            },
+          },
+        });
+        return;
+      }
+      const run = engine.scenarioRuns.execute({
+        scenarioId: params.id,
+        ...body.data,
+      });
+      // 202: the run is persisted and executing in the background.
+      reply.status(202).send({ ok: true, run });
+    });
+
+    scope.get('/api/scenarios/runs', async (req, reply) => {
+      const query = runListQuery.safeParse(req.query);
+      if (!query.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid scenario run query',
+            details: { issues: query.error.issues },
+          },
+        });
+        return;
+      }
+      reply.send({ ok: true, ...engine.scenarioRuns.list(query.data) });
+    });
+
+    scope.get('/api/scenarios/runs/:runId', async (req, reply) => {
+      const params = requireParam(runIdParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, run: engine.scenarioRuns.get(params.runId) });
+    });
+
+    scope.post('/api/scenarios/runs/:runId/cancel', async (req, reply) => {
+      const params = requireParam(runIdParam, req.params, reply);
+      if (!params) return;
+      const body = cancelRunBody.safeParse(req.body ?? {});
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid cancellation request',
+            details: { issues: body.error.issues },
+          },
+        });
+        return;
+      }
+      const run = await engine.scenarioRuns.cancel(params.runId, body.data.requestedBy ?? 'api');
+      reply.send({ ok: true, run });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an

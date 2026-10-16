@@ -47,7 +47,7 @@ import {
   type FaultMechanismInfo,
   type FaultNetworkOps,
 } from './adapter';
-import { assertTransition, canTransition } from './lifecycle';
+import { assertTransition, canTransition, isTerminalFaultState } from './lifecycle';
 import { createRpcObserver, type FaultObserver } from './observer';
 import { redactDeep } from './redact';
 import type {
@@ -548,6 +548,83 @@ export class FailureInjector {
       `Fault ${faultId} is not cancellable (state=${record.state}); it is terminal or executing in another process`,
       { faultId, state: record.state },
     );
+  }
+
+  /**
+   * Startup recovery for a fault record whose executing process died
+   * (T-3.4 crash reconciliation). The lifecycle machine persisted each
+   * state BEFORE its side effect, so the stuck record's state proves what
+   * may have happened:
+   *  - requested/validating/ready (mode=execute): no mechanism was applied —
+   *    terminalize as rejected/cancelled (audited as interrupted).
+   *  - executing/verifying/cleaning-up: cleanup can NEVER be confirmed by a
+   *    dead process → quarantine (cleanup-failed) first, then reconcile()
+   *    against fresh evidence. The quarantine is released only when the
+   *    effect is provably gone.
+   * Dry-run previews are left untouched (they end at 'ready' by design and
+   * never applied anything).
+   */
+  async recoverInterrupted(faultId: string): Promise<FaultRecord> {
+    const record = this.mustGet(faultId);
+    if (isTerminalFaultState(record.state)) return this.get(faultId);
+    if (record.mode === 'dry-run') return this.get(faultId);
+
+    const interrupted = (message: string): KaizenErrorJson => ({
+      code: 'FAULT_INTERRUPTED',
+      message,
+    });
+
+    if (record.state === 'requested' || record.state === 'validating') {
+      if (record.state === 'requested') this.transition(record, 'validating');
+      record.error = interrupted(
+        'fault execution was interrupted by a process restart before any mechanism was applied (the state machine persists each state before its side effect)',
+      );
+      this.transition(record, 'rejected');
+      this.finishRecord(record);
+      return this.get(faultId);
+    }
+    if (record.state === 'ready') {
+      record.error = interrupted(
+        'fault execution was interrupted by a process restart while still pre-execution (state=ready) — no mechanism was applied',
+      );
+      this.transition(record, 'cancelled');
+      this.finishRecord(record);
+      return this.get(faultId);
+    }
+
+    // Mid-execution crash: the mechanism may still be active (e.g. a paused
+    // process). Best-effort safe resume first (SIGCONT on the verified pid is
+    // a no-op on a running process — the same sweep shutdown() performs).
+    if (record.type === 'pause') {
+      const node = this.store.tryGetNode(record.nodeId);
+      if (node?.pid && isPidAlive(node.pid)) {
+        try {
+          process.kill(node.pid, 'SIGCONT');
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    if (record.state !== 'cleaning-up') this.transition(record, 'cleaning-up');
+    record.error = interrupted(
+      'fault execution was interrupted by a process restart while the mechanism may have been active — cleanup could not be confirmed; the target is quarantined until reconcile() proves the effect gone',
+    );
+    this.transition(record, 'cleanup-failed');
+    this.finishRecord(record);
+    const message = `Fault ${record.type} on ${record.nodeName} (${record.nodeId}) was interrupted by a process restart — cleanup unconfirmed, target quarantined until reconcile`;
+    this.events.emit('fault.cleanup-failed', {
+      faultId: record.id,
+      networkId: record.networkId,
+      nodeId: record.nodeId,
+      nodeName: record.nodeName,
+      type: record.type,
+      severity: 'high',
+      message,
+      at: new Date().toISOString(),
+    });
+    // Existing safe mechanism: reconcile against fresh process/RPC evidence —
+    // releases the quarantine only when the effect is provably gone.
+    return this.reconcile(faultId);
   }
 
   /**

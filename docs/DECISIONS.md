@@ -421,3 +421,47 @@ Format: context → decision → alternatives → consequences. Newest entries a
   deliberate friction: draft scenarios may save with warnings, and new
   operation types must be added to the engine (registry + typed union)
   before any scenario can reference them.
+
+## DEC-021 — Scenario run authorization: DEC-019 loopback trust + explicit mode + server-side gates
+
+- **Date**: 2026-10-16 (Phase 3D, T-3.4)
+- **Context**: T-3.4 adds the first way to make a saved scenario *do*
+  something: `POST /api/scenarios/:id/execute`. Execution faults real
+  (designated-test) processes, so the question is not only "does the
+  engine gate it?" (DEC-008/DEC-020 cover that server-side) but "who may
+  ask for it, and can they ask by accident?". The API today has no
+  authentication — it trusts loopback (DEC-019), equal-or-lesser power to
+  the existing stop/purge/fault routes.
+- **Decision**:
+  1. **A run request must carry the literal marker `mode: "execute"` and
+     an explicit target** (`networkIdOrName`). Anything else is a 400
+     `INVALID_INPUT` before any run record exists. Preview/save/validate
+     shapes cannot be coerced into execution by adding fields, and
+     execution cannot happen implicitly against "the only network".
+  2. **Authorization equals DEC-019 loopback trust plus the engine's
+     server-side gates** — the API layer does no permission logic of its
+     own; it forwards the request and the ScenarioEngine enforces, fail
+     closed: fresh revalidation of the stored definition (RSK-28),
+     operation support, exact target resolution, designatedTest/chain/
+     preset/minNodes/capability checks, label→node resolution,
+     quarantine, and conflict checks — in that order — BEFORE the run
+     record may reach `running` (the rejected record is persisted first
+     as audit).
+  3. **The missing control (authenticated non-loopback identity) stays
+     out of scope and visible**: RSK-26 remains OPEN and T-7.3 owns the
+     audit/authorization model. Nothing in T-3.4 widens DEC-019 — the new
+     endpoints expose exactly one power (run scenarios on designated-test
+     networks) that the loopback surface already had via fault routes.
+- **Alternatives**: an ad-hoc role/token check just for execute — rejected
+  (two half-trust models, still nothing for non-loopback); requiring CLI
+  attestation or a confirmation token in the body — rejected (the API
+  server cannot distinguish a CLI from any other local client; theater,
+  not control); defaulting execute to dry-run unless overridden —
+  rejected (a "dry-run mode" for whole-scenario execution does not exist
+  in the model; fake states are worse than absent ones).
+- **Consequences**: local callers get one unambiguous, explicit, fully
+  audited way to run a scenario; every refusal still leaves a persisted
+  `rejected` run with its gate error. Until T-7.3, anyone with local HTTP
+  access to the loopback port can start a run on a designated-test
+  network — identical to the existing stop/purge posture, documented in
+  RSK-26.
