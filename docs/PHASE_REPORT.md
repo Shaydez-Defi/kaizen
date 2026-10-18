@@ -1,296 +1,296 @@
-# Phase 3D Report — Scenario Execution Engine (T-3.4)
+# Phase 3E Report — Scenario Replay (T-3.5)
 
-**Date**: 2026-10-16
-**Tasks**: T-3.4 only. Replay (T-3.5), CLI/UI surfaces for the Failure Lab
-(T-3.6), Failure Lab UI, diagnostics (Phase 4), recovery orchestration,
-and Kubernetes were explicitly NOT started — this report stops at the
-backend execution engine + API + tests, per instruction. The previous
-report (Phase 3C, T-3.3 Scenario Model & Authoring) is archived verbatim
-at `docs/reports/PHASE_03C_REPORT.md`; Phase 3B/3A remain at
-`docs/reports/PHASE_03B_REPORT.md` / `PHASE_03A_REPORT.md`.
+**Date**: 2026-10-18
+**Tasks**: T-3.5 only. CLI/UI surfaces for the Failure Lab (T-3.6),
+Failure Lab UI, diagnostics (Phase 4), recovery orchestration, and
+Kubernetes were explicitly NOT started — this report stops at replay
+(engine + API + typed client methods + tests), per instruction. The
+previous report (Phase 3D, T-3.4 Scenario Execution Engine) is archived
+verbatim at `docs/reports/PHASE_03D_REPORT.md`; Phase 3C/3B/3A remain at
+`docs/reports/PHASE_03C_REPORT.md` / `PHASE_03B_REPORT.md` /
+`PHASE_03A_REPORT.md`.
 
 ## 1. Scope & Exclusions
 
 **In scope (delivered):**
 
-- `ScenarioEngine` (`engine.scenarioRuns`): explicit, sequential,
-  fully-recorded execution of a validated scenario through the existing
-  FailureInjector — pre-execution gate chain, per-step evidence, typed
-  failure policies, cancellation/timeout/cleanup, persistent run history,
-  crash reconciliation, typed lifecycle events, and a minimal
-  server-side REST surface (+ typed web-client methods only).
-- Run/step model with explicit states and legal transitions; immutable
-  scenario snapshot per run; SQLite run/step persistence with atomic
-  transitions and honest malformed-row handling.
-- Tests: exhaustive engine unit suite, API-layer suite, and LIVE
-  portaldot integration suite; full unit + live regression with exact
-  counts below.
+- `ScenarioEngine.replay()` (`engine.scenarioRuns.replay`): re-executes
+  a finished run's recorded action sequence (its immutable snapshot) as
+  a NEW run through the SAME execution path as `execute()` — same
+  pre-execution gates, same FailureInjector pipeline, same evidence,
+  cancellation, cleanup, and quarantine semantics. No second executor
+  exists anywhere.
+- Replay provenance (`replayOfRunId`) persisted in run history
+  (new indexed column, schemaVersion 17) and queryable
+  (`list({ replayOf })` / `GET /api/scenarios/runs?replayOf=`).
+- API route `POST /api/scenarios/runs/:runId/replay` (202) with the
+  execute-grade authorization posture (literal `mode: 'execute'` +
+  explicitly confirmed target) and an inline `replayNote` stating the
+  honest semantics; typed web-client method `replayScenarioRun()`.
+- Tests: dedicated engine unit suite, API-layer additions, one new
+  LIVE portaldot check; full unit + live regression with exact counts
+  below.
 
 **Explicitly out of scope (sequencing boundary, not scope reduction):**
 
-- No replay/deterministic action replay (T-3.5), no CLI commands
-  (T-3.6 owns CLI), no Failure Lab UI/screens (T-3.6), no diagnostics or
-  recovery orchestration (Phase 4), no Kubernetes (planned scope intact).
-- No second execution subsystem: every fault path goes through
-  `FailureInjector.preflight/execute/cancel` — the injector's T-3.2
-  gates, dry-run→execute discipline, and quarantine semantics are
-  unchanged and were not weakened.
-- No authentication work: run authorization = DEC-019 loopback trust +
-  explicit mode marker + engine gates (new **DEC-021**); authenticated
-  non-loopback identity remains T-7.3 / RSK-26.
+- No CLI commands (T-3.6 owns CLI), no UI/screens (T-3.6 +
+  prebuilt-UI integration), no second execution subsystem, no new
+  monitoring/diagnostics/recovery/validator workflows, no Kubernetes.
+- No authentication work: the replay endpoint inherits DEC-019
+  loopback trust + DEC-021 exactly; authenticated non-loopback identity
+  remains T-7.3 / RSK-26. No execution surface was exposed remotely.
 
-## 2. Files
+## 2. Architecture & Replay Contract Decisions
 
-**New**
+Inspecting the actual T-3.4 implementation (not the report) established
+the contract; the notable decisions are recorded as **DEC-022**:
 
-- `packages/engine/src/scenario/runner.ts` — `ScenarioEngine`:
-  `execute/get/list/cancel/wait/active/reconcileOnStartup/close`.
-- `packages/engine/src/scenario/run-types.ts` — 13 run states / 11 step
-  states + legal-transition maps, run/step records, error taxonomy,
-  reconcile report, summaries.
-- `packages/engine/src/scenario/conditions.ts` — run-time condition
-  evaluators (rpc-reachable, process-state, health-state, peers, syncing,
-  chain-progress, recovery-verified).
-- `packages/engine/test/scenario-run.test.ts` — **37** engine unit tests.
-- `apps/api/test/scenario-runs.test.ts` — **9** API unit tests.
-- `test/integration/scenario-runs.int.test.ts` — **8** LIVE tests.
-- `docs/reports/PHASE_03C_REPORT.md` — 3C archived verbatim (this file
-  overwrites `docs/PHASE_REPORT.md`).
+1. **Replay = re-execution from the source run's snapshot via the same
+   internal path.** `execute()` was refactored into a shared private
+   `startRun(scenario, req, replayOfRunId)`; `execute()` loads the
+   CURRENT stored definition, `replay()` loads the SOURCE run and passes
+   its immutable `snapshot` record. Gate 1 revalidates that snapshot
+   against the CURRENT operation registry (stale capabilities fail
+   closed), and every other gate is re-evaluated with current state. If
+   the snapshot is unusable (missing/empty steps), replay is refused
+   (`SCENARIO_RUN_NOT_REPLAYABLE`) before any run record exists — the
+   engine never invents missing values and never substitutes the
+   scenario's current definition.
+2. **Provenance is not authorization.** The replay request repeats the
+   execute posture (`mode: 'execute'` + explicit `networkIdOrName`);
+   targets are never inherited from the source run. A historical run is
+   audit, not a token.
+3. **Eligible source states** (`REPLAYABLE_SCENARIO_RUN_STATES`):
+   `completed`, `completed-with-warnings`, `failed`, `cancelled`,
+   `cleanup-failed` — terminal execution states only. `rejected` never
+   executed an action (the actionable message directs to `execute()`);
+   unfinished states are never resumed or replayed (the architecture
+   terminalizes interrupted runs first). `cleanup-failed` is allowed
+   because the CURRENT quarantine gate decides: an unreconciled target
+   is still refused fail-closed; a proven-reconciled one may proceed.
+4. **Honesty is structural, not decorative.** `replayOfRunId` on the
+   record/summary + `scenarioRunReplayNote()` + the 202 response's
+   `replayNote` state "repeats the recorded actions; identical outcomes
+   are NOT guaranteed; evidence was freshly observed". The note is NOT
+   a `warnings` entry — a clean replay must reach plain `completed`
+   exactly like a clean original (a design iteration caught during
+   testing: warnings drive `completed-with-warnings`).
+5. **Append-only history.** Replay writes only its own row; the source
+   run, its snapshot, steps, and evidence are never rewritten. The
+   provenance column (`replay_of_run_id`, migration 12, indexed) is set
+   once at insert and untouched by updates. Refused gate attempts are
+   persisted as `rejected` replay runs WITH provenance (same audit
+   posture as `execute()`); pre-run validation refusals (bad request,
+   unknown/ineligible source, unusable snapshot) create no phantom rows.
 
-**Modified**
+## 3. Files Added / Changed / Removed
 
-- `fault/injector.ts` — `recoverInterrupted()` (execute-mode stuck faults
-  → SIGCONT sweep → terminalize → `reconcile()` only on proof; dry-run
-  untouched).
-- `state/store.ts` — migration 11 (schemaVersion **15**): `scenario_runs`
-  + `scenario_run_steps`; run CRUD with atomic transitions; paginated
-  list/filter; raw `updateScenario`/`insertFault` helpers.
-- `scenario/validate.ts` — `scenarioRecordToInput` exported (run-time
-  revalidation of the stored record).
-- `errors.ts` — `SCENARIO_RUN_NOT_FOUND` (404), `SCENARIO_RUN_CONFLICT`
-  (409), `SCENARIO_EXEC_NOT_ALLOWED` (403), `FAULT_INTERRUPTED`;
-  `statusFor` updated.
-- `events/bus.ts` — typed `scenario-run.created|state|step|verification|
-  cancelled|cleanup-failed|finished`.
-- `engine.ts` — wiring (`engine.scenarioRuns`), eager startup reconcile,
-  close order (runs → injector → monitoring → store).
-- `index.ts` — exports (engine, types, predicates, schemas).
-- `apps/api/src/server.ts` — 4 run routes (execute → 202 + run; run
-  status; paginated history; cancel), Zod request/query schemas.
-- `apps/web/src/api/{client,types}.ts` — typed `executeScenario`,
-  `getScenarioRun`, `listScenarioRuns`, `cancelScenarioRun` + response
-  types (contract only — no UI).
-- `apps/api/test/scenarios.test.ts` (T-3.3 posture updated for T-3.4:
-  no implicit-execution/replay routes; execute demands marker + target;
-  refusal persists a rejected run) and
-  `packages/engine/test/store.test.ts` (schemaVersion 15).
-- Docs: `IMPLEMENTATION_PLAN.md` (T-3.4 → VERIFIED), `RISKS.md`
-  (RSK-28 → MITIGATED), `ARCHITECTURE.md` (§6 scenario execution),
-  `TESTING.md` (§13), `DECISIONS.md` (DEC-021), `PROGRESS.md`.
+**Added:**
 
-## 3. Executor Design
+- `packages/engine/test/scenario-replay.test.ts` — 10 unit tests.
+- `packages/engine/test/scenario-harness.ts` — the real-stand-in-node
+  test harness extracted from `scenario-run.test.ts` so both engine
+  suites share it (not a vitest suite itself).
+- `docs/reports/PHASE_03D_REPORT.md` — the Phase 3D report archived
+  verbatim before this overwrite.
 
-**Run lifecycle.** `execute()` parses the request (literal
-`mode:"execute"` + explicit target, else 400 before anything exists),
-loads the scenario, **persists a run record** (`queued→validating`) and
-emits `scenario-run.created` — before any side effect — then evaluates
-the gate chain synchronously (no interleaving possible). Gates, in
-order, all fail closed and all persist a `rejected` run with a precise
-error before throwing:
+**Changed:**
 
-1. **Fresh revalidation of the STORED definition** (RSK-28) — the
-   authoring-time result stored on the row is evidence, never the gate
-   (`VALIDATION_FAILED`).
-2. **Operation support right now** — blocked/planned operations refused
-   even if authoring once accepted them as warnings
-   (`UNSUPPORTED_OPERATION`).
-3. **Exact target resolution** — unknown network id/name
-   (`TARGET_UNRESOLVED`, thrown before a run row exists → clean 404).
-4. **DEC-008 safety posture re-checked with fresh reads** —
-   `designatedTest`, chain scope (`dev|local-spec`), preset match,
-   `minNodes`, capabilities (`GATE_REFUSED`).
-5. **Label→managed-node resolution** for every operation and condition
-   target (unresolved labels refused).
-6. **Quarantine** — an unreconciled `cleanup-failed` fault on any target
-   node blocks the run.
-7. **Conflicts** — no concurrent run for the same target/scenario; no
-   active injector fault on a target node (`CONFLICT`, 409).
+- `packages/engine/src/scenario/runner.ts` — `scenarioReplayRequestSchema`,
+  `replay()`, shared `startRun()` (execute + replay), provenance in
+  `newRunRecord()`, `replayOf` in the list filter, created-event
+  provenance.
+- `packages/engine/src/scenario/run-types.ts` — `REPLAYABLE_SCENARIO_RUN_STATES`
+  + `isReplayableScenarioRunState()`, `replayOfRunId` on record/summary,
+  `scenarioRunReplayNote()`.
+- `packages/engine/src/errors.ts` — new code `SCENARIO_RUN_NOT_REPLAYABLE`.
+- `packages/engine/src/events/bus.ts` — optional `replayOfRunId` on
+  `scenario-run.created`.
+- `packages/engine/src/state/store.ts` — migration 12 (ALTER TABLE
+  `scenario_runs` + index; schemaVersion 16→17), row/insert/mapping,
+  `replayOf` filter in list/count.
+- `packages/engine/src/index.ts` — exports.
+- `apps/api/src/server.ts` — replay route (202 `{ ok, run, replayNote }`),
+  `?replayOf=` query param, `SCENARIO_RUN_NOT_REPLAYABLE` → 409.
+- `apps/web/src/api/client.ts`, `apps/web/src/api/types.ts` —
+  `replayScenarioRun()`, `ScenarioReplayResponse`, `replayOf` filter.
+- `packages/engine/test/scenario-run.test.ts` — imports the extracted
+  harness (37 tests unchanged in behavior); reconcile-test helper
+  updated for the new record field.
+- `packages/engine/test/store.test.ts` — schemaVersion assertion 17.
+- `apps/api/test/scenario-runs.test.ts` — 4 new replay tests (9→13).
+- `test/integration/scenario-runs.int.test.ts` — 1 new live replay
+  check (8→9).
+- `docs/PROGRESS.md`, `docs/IMPLEMENTATION_PLAN.md`,
+  `docs/ARCHITECTURE.md` (§6 replay contract), `docs/DECISIONS.md`
+  (DEC-022), `docs/TESTING.md` (§14).
 
-**Per-step pipeline** (sequential, one step at a time): persist
-`running` → bounded cancel-aware `delayBefore` → **preconditions** (each
-with its own authored budget; verdicts `satisfied` / `not-satisfied` /
-`inconclusive`, always with observed detail) → **failure policy** →
-injector **`preflight`** → **`injector.execute`** (the only fault path)
-→ record result + `claims`/evidence → **postconditions** →
-**verification** → cleanup verification → persist. Cancellation checked
-after preflight so a cancellation during revalidation creates no fault.
+**Removed:** none (the harness was extracted, not deleted).
 
-**Honesty rules enforced in code and tests:** an exhausted condition
-budget is `STEP_TIMEOUT`, never a verdict; missing monitoring data makes
-health-state `INCONCLUSIVE`, never a guess; no authored postconditions →
-verification `not-required` + `completed-with-warnings`; unconfirmed
-cleanup → `cleanup-failed` + high-severity event + quarantine, never
-"recovered"; `continue` after a failure additionally requires proof the
-target is safe (no active fault, no unreconciled quarantine, no
-contradicting claim) or the run fails closed.
+## 4. Replay Semantics & Source-Run Provenance
 
-**Cancellation / timeout / cleanup.** `cancel(runId)` persists
-`cancel-requested` first, then interrupts only via `injector.cancel`
-inside a bounded wait; cleanup is attempted on every finish path with a
-bounded wait. Step deadline = authored `timeoutMs`; run deadline =
-fresh-validation `worstCaseDurationMs`. `close()` cancels in-flight
-faults (bounded) before the injector shuts down.
+- **Replay repeats ACTIONS; it does not reproduce outcomes.** Chain
+  state, node health, peers, timing, finality, and runtime events may
+  differ between runs. This is stated in the API response
+  (`replayNote`), the client method docs, ARCHITECTURE §6, DEC-022,
+  and asserted in tests.
+- **No source evidence is reused.** A replay gets its own run id,
+  timestamps, step records, fault ids, precondition/postcondition
+  verdicts, claims, verification results, and cleanup record; unit and
+  live tests assert the new fault ids differ and that the serialized
+  replay steps never contain a source fault id.
+- **Provenance is queryable in both directions** without corrupting
+  history: every run summary exposes `replayOfRunId` (null = original),
+  and `?replayOf=<runId>` lists every replay attempt from a source —
+  including refused attempts (persisted as `rejected` with
+  provenance), which is intentional audit surface.
+- **Blocked replays report why they were blocked** (persisted
+  `rejected` run with the structured gate error) and never report
+  successful execution. Timeout, inconclusive-verification,
+  cleanup-failed, and quarantine semantics are the executor's,
+  unchanged — covered for replays by dedicated tests.
 
-**Durability & crash reconciliation.** Run/step rows are atomic
-(single-writer SQLite); history survives reopen with paginated filters
-and per-row `SCENARIO_RUN_MALFORMED` entries. On startup,
-`reconcileOnStartup()` (idempotent) terminalizes unfinished runs as
-`INTERRUPTED` — **never resumes them** — and reconciles stuck
-execute-mode faults: SIGCONT sweep → quarantine when recovery cannot be
-proven → `reconcile()` releases only on fresh proof.
+## 5. API Routes, Request/Response, Authorization
 
-## 4. API, Events, Authorization
+- `POST /api/scenarios/runs/:runId/replay` — body
+  `{ mode: 'execute', networkIdOrName, requestedBy? }` (strict Zod
+  schema, same conventions as execute). Success: **202**
+  `{ ok: true, run, replayNote }` where `run` is the NEW persisted run
+  (own id, `replayOfRunId` set, initial state) and `replayNote` states
+  the honest contract. Errors: 400 `INVALID_INPUT` (missing marker or
+  target / malformed body), 404 `SCENARIO_RUN_NOT_FOUND` (unknown
+  source) and `NETWORK_NOT_FOUND` (unresolved target; persisted
+  rejected replay), 403 `SCENARIO_EXEC_NOT_ALLOWED` (current gate
+  refusal e.g. DEC-008; persisted rejected replay), 409
+  `SCENARIO_RUN_NOT_REPLAYABLE` (ineligible state / unusable snapshot)
+  and `SCENARIO_RUN_CONFLICT` (concurrent same-scenario/target run).
+  Error bodies follow the existing structured envelope; nothing leaks
+  secrets (the engine's redaction applies to runs as before).
+- `GET /api/scenarios/runs?replayOf=<runId>` — paginated provenance
+  query (existing list conventions).
+- **Authorization**: DEC-019 loopback trust + DEC-021 exactly —
+  read-only GETs never start a replay (test-asserted); execution
+  requires the literal marker and an explicit target; authenticated
+  non-loopback identity stays deferred to T-7.3 (RSK-26 OPEN).
+- **Typed web client**: `replayScenarioRun(runId, { networkIdOrName,
+  requestedBy? }) → ScenarioReplayResponse`; `listScenarioRuns` gained
+  the `replayOf` filter. No UI screens were built (per instruction).
 
-- `POST /api/scenarios/:id/execute` → **202** + run record (or a
-  structured 400/403/404/409; refusals leave a persisted `rejected` run
-  as audit).
-- `GET /api/scenarios/runs/:runId` — full record incl. per-step
-  evidence; `GET /api/scenarios/runs` — summaries with
-  `scenarioId/networkId/state` filters + `limit/offset/total`;
-- `POST /api/scenarios/runs/:runId/cancel` — 200 + run; 409 for
-  terminal runs; 404 unknown.
-- Typed `scenario-run.*` lifecycle events mirror every state/step/
-  verification/cleanup transition (same payload discipline as
-  `fault.*`: structured, redacted, no secrets).
-- **DEC-021**: authorization = DEC-019 loopback trust + literal
-  `mode:"execute"` + explicit target + engine-side fail-closed gates;
-  no arbitrary params, no registry bypass, server-side revalidation
-  always. The missing authenticated identity control stays visible in
-  RSK-26/T-7.3. **No screens were built.**
+## 6. Safety Gates & Failure Handling
 
-## 5. Test Results (counts by layer)
+Replay re-runs the ENTIRE current gate chain through `startRun()`:
+fresh snapshot revalidation (RSK-28 posture, now against the CURRENT
+registry), operation support (planned/blocked refused — a past success
+grants nothing), exact target resolution, DEC-008 (`designatedTest`,
+chain scope, preset, `minNodes`, capabilities), label→node resolution,
+quarantine (an unreconciled cleanup failure still blocks the target),
+and conflict prevention (no concurrent run per scenario/target — a
+second replay while one is in flight → 409, test-asserted at both
+engine and API level). Every gate refusal persists a `rejected` run
+(with `replayOfRunId`) before throwing. Cancellation of a replay goes
+through `injector.cancel` with verified rollback; step deadlines report
+`STEP_TIMEOUT` with no fault; unconfirmed cleanup remains
+`cleanup-failed` + quarantine. T-3.2/T-3.3/T-3.4 safety behavior was
+not modified — their suites pass unchanged.
 
-```bash
-npm run typecheck        # pass (engine, cli, api, web)
-npm run lint             # pass
-npm run build            # pass
-npm test                 # 248/248 passed (23 files) — 202 prior + 46 new
-                         #   engine 185 (scenario-run 37 new),
-                         #   api 27 (scenario-runs 9 new), web 36
-KAIZEN_TEST_LIVE=1 KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin TMPDIR=/tmp/opencode \
-  npm run test:integration
-                         # 43/43 passed (10 files, 317 s) — 35 prior + 8 new
-```
+## 7. Exact Commands & Results (2026-10-18)
 
-- **Engine unit (37)**: state machines (legal/illegal transitions);
-  execution core (declared order, one execute-mode fault per step — no
-  bypass, immutable snapshot, durability across reopen, exact event
-  chain); all 10 gates as persisted refusals with exact error codes and
-  **zero fault records**; precondition/postcondition policies incl.
-  inconclusive never fabricated; step/run timeouts; cancellation before
-  side effects / during the operation / between steps / refuse on
-  terminal; cleanup-failure quarantine + proof-gated reconcile; startup
-  reconciliation (terminalize-never-resume, quarantine path, idempotency,
-  every unfinished state); shutdown.
-- **API unit (9)**: execute validation, gate refusals as 4xx + persisted
-  rejected runs, full 202→terminal flow via a legitimately skipped run
-  (no injector invocation asserted), status/pagination/filters, cancel
-  semantics (200/409/404), DEC-019 error posture, and the hard
-  guarantee that refusal/skip never emits fault events or records.
-- **LIVE (8/8)**, real `portaldot_dev` two-node network, every claim
-  independently observed by the test: pause run (unreachable while held →
-  same pid + RPC back + head advanced); two sequential steps with
-  distinct terminal fault records; precondition abort (node untouched);
-  live skip-step then a real execution; cancellation during the hold
-  (rollback verified, no leak); STEP_TIMEOUT with zero faults; phantom
-  non-designated/`mainnet` targets refused fail-closed; unresolvable
-  label refused. Hygiene after the run: no orphaned `portaldot_dev`
-  processes (suites assert teardown).
-- **T-3.3 verification**: the T-3.3 suites (scenario 32,
-  scenario-store 11, api/scenarios 18) re-ran green inside the 248 — no
-  T-3.3 defect required fixing; the only T-3.3 test edits were the
-  documented schemaVersion bump (10→15) and the API posture test updated
-  to its T-3.4 truth (routes now exist, but only with explicit
-  marker+target and persisted refusals).
-- **CLI smoke**: no new CLI surface in T-3.4 (T-3.6 will call
-  `engine.scenarioRuns` exactly like the API does); CLI typecheck/build
-  covered by the shared gates.
+| Command | Result |
+|---|---|
+| `npm run typecheck` | PASS (exit 0) |
+| `npm run lint` | PASS (exit 0) |
+| `npm run build` | PASS (exit 0) |
+| `npm test` | **PASS — 262/262 tests, 24 files** (engine 195, api 31, web 36) |
+| `KAIZEN_TEST_LIVE=1 KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin TMPDIR=/tmp/opencode npm run test:integration` | **PASS — 44/44 tests, 10 files, 336.85 s**, real `portaldot_dev` |
+| `… npx vitest run --config vitest.integration.config.mts test/integration/scenario-runs.int.test.ts` (targeted rerun) | PASS — 9/9 (replay check 14.6 s) |
+| `pgrep -af portaldot` (after suites) | no processes — no orphans |
 
-## 6. Acceptance Criteria
+## 8. Results by Layer (mocked vs live, reported separately)
 
-| Requirement | Status | Evidence |
+- **Engine unit (scripted mechanism doubles + REAL stand-in node
+  processes)**: `scenario-replay.test.ts` **10/10**. The 37 T-3.4
+  engine tests pass unchanged after the harness extraction
+  (`scenario-run.test.ts` 37/37). Scripted coverage is labeled unit and
+  is never presented as live evidence.
+- **API/persistence (real Fastify + real SQLite, no injector)**:
+  `apps/api/test/scenario-runs.test.ts` **13/13** (4 new replay tests);
+  `apps/api/test/scenarios.test.ts` 18/18 unchanged.
+- **LIVE integration (real portaldot_dev, disposable designated-test
+  networks)**: `scenario-runs.int.test.ts` **9/9**, including the new
+  replay check: execute a real pause run → replay it with an explicit
+  target → the TEST itself independently samples RPC (victim
+  unreachable while the replay's fault is held), asserts a fresh fault
+  record + fresh claims, re-verifies recovery (same pid, RPC back),
+  confirms the source run byte-identical, queries provenance, and
+  confirms ineligible/unknown-target refusals execute nothing. Full
+  live suite 44/44 with T-3.2/T-3.3/T-3.4 suites intact.
+
+## 9. Acceptance Criteria
+
+| Criterion | Verdict | Evidence |
 |---|---|---|
-| Saved scenario never executes automatically; CRUD/validate/view never fault | MET | API/engine tests: zero fault events/records on authoring paths; execute requires explicit request (DEC-021) |
-| Typed run/step states with legal transitions | MET | `run-types.ts` transition maps; state-machine tests |
-| Immutable scenario snapshot per run; no secrets in records | MET | snapshot immutability test; redaction test (tampered secret persisted as `[redacted]`) |
-| 10 mandatory pre-execution gates, fail closed, run persisted before first side effect | MET | gate chain §3; every gate asserted as a persisted `rejected` run with exact code + zero faults |
-| Ordered per-step pipeline through the injector; no bypass | MET | execution-core test (one execute-mode fault per step); live runs |
-| Honest inconclusive / timeout outcomes | MET | inconclusive-policy tests; live STEP_TIMEOUT check |
-| Failure policies validated at authoring AND run time | MET | policy tests incl. safety-proof requirement for `continue` |
-| Cancellation/timeout/cleanup; unconfirmed cleanup → quarantine, never claimed recovered | MET | cancellation + cleanup-failure tests; live cancel check |
-| Persistence: atomic transitions, no duplicate/concurrent runs, crash reconciliation without resume | MET | durability + conflict + reconciliation tests (terminalize-never-resume) |
-| API: execute/status/history/cancel, typed events, no arbitrary params, no registry bypass, no screens | MET | 9 API tests; typed events; web client methods only |
-| Testing: unit + integration + live 8 checks + full regression + CLI smoke where supported | MET | §5 counts (248 unit / 43 live) |
-| Docs updated; roadmap intact | MET | §8; IMPLEMENTATION_PLAN unchanged except T-3.4 status |
+| Replay re-executes the source run's recorded sequence as a NEW run | PASS | unit test 1 (distinct id, snapshot deep-equal, steps order); live replay check |
+| Reuses the existing engine + FailureInjector path (no second executor) | PASS | `startRun()` shared by `execute()`/`replay()`; fault records asserted through the injector in unit + live |
+| Original run + evidence immutable | PASS | unit byte-identical JSON before/after; live byte-identical check |
+| Uses the original snapshot even if the scenario is later edited | PASS | unit test 3 (edited + deleted scenario, snapshot wins) |
+| Deleted-scenario replay behavior defined | PASS | unit test 3 (replay works; `execute()` of the deleted scenario throws) |
+| Missing/malformed snapshots fail safely | PASS | unit test 3 (empty/absent steps → `SCENARIO_RUN_NOT_REPLAYABLE`, no run created) |
+| Ineligible source states rejected | PASS | unit test 3 (`rejected`, unfinished, unknown); API 409 test |
+| Explicit target + execution authorization enforced | PASS | unit test 4 (marker/target 400s; unknown/non-designated refusals with provenance); API tests |
+| Current safety gates re-evaluated (quarantine, conflicts, unsupported ops) | PASS | unit tests 5–6 (conflict, planted quarantine, planned-op snapshot) |
+| Same engine/FailureInjector path, correct sequence, fresh evidence | PASS | unit test 1 (new fault ids, no copied evidence); live check |
+| Failure/cancel/timeout/cleanup semantics reused | PASS | unit tests 7–9 (failed-source replay, cancel during hold w/ verified rollback, STEP_TIMEOUT w/ no fault) |
+| Read-only requests never execute; duplicate requests prevented | PASS | unit test 10; API duplicate-replay test (exactly one 202 + one 409) |
+| API validation/status codes/errors/provenance correct | PASS | API tests 10–13 |
+| Replay never claims deterministic outcomes; no source evidence reused | PASS | `replayNote` in 202 + assertions (warnings empty, state `completed`, serialized steps contain no source fault id) |
+| Typed web-client method + types added; no UI screens | PASS | `replayScenarioRun` + `ScenarioReplayResponse`; no `.tsx` changes |
+| Live replay on a disposable designated-test network, source unchanged, cleanup clean | PASS | live check (9/9 file, 44/44 suite; `pgrep` clean) |
+| Full regression green, no tests weakened/deleted | PASS | 262/262 unit; 44/44 live; suites only extended (harness extraction behavior-neutral) |
 
-## 7. Limitations & Risks
+## 10. Known Limitations, Risks, Deferred Work
 
-- **Authorization** (RSK-26/DEC-021): loopback trust only — equal-or-
-  lesser power to the existing stop/purge/fault routes; T-7.3 owns the
-  audit/authorization model before any non-loopback exposure.
-- **`faultId` appears on a step record after the fault finishes**; an
-  in-flight fault is observed through `injector.activeFaults()`/events.
-  Adequate for audit (the run record still holds the final id + claims);
-  revisit if live UI needs the id mid-flight (T-3.6).
-- **One run at a time per target** (by design, conflict-gated) — no
-  parallel execution; fine for single-host failure drills.
-- **Unproven SIGCONT delivery** still requires operator action
-  (RSK-25 residual) — the run honestly ends `cleanup-failed` +
-  quarantined rather than assuming recovery.
-- **Condition breadth**: health-state depends on monitoring having a
-  report (else `inconclusive`); chain-progress 'stalled' needs the
-  documented 15 s window; `finality-progress`/`runtime-event` remain
-  planned and un-evaluable (rejected at authoring, per DEC-020).
-- **RSK-28** is now **MITIGATED** (executor exists and is tested), not
-  eliminated: enforcement lives in the engine, so any future execution
-  path must go through `engine.scenarioRuns` (DEC-021).
+- **Loopback-only authorization** on the replay endpoint (DEC-019/021);
+  RSK-26 OPEN, T-7.3 owns authenticated non-loopback identity. Nothing
+  was exposed remotely.
+- **`rejected` runs are intentionally not replayable** (they never
+  executed actions) — the actionable error directs to `execute()`.
+- **Refused replay attempts are queryable via `?replayOf=`** by design
+  (audit); consumers must filter on `state` when they want successful
+  replays only.
+- **`replayNote` is not yet rendered by any UI** (no UI in this phase);
+  T-3.6+ surfaces must show it alongside run provenance.
+- **Live replay coverage** exercises a completed pause run end-to-end;
+  failed/cancelled/timeout replays are covered by the engine unit
+  suite (the execution path is shared, only the source state differs).
+- No new risks introduced; RISKS.md unchanged this phase.
 
-## 8. Documentation
+## 11. Real Portaldot Infrastructure Exercised?
 
-`IMPLEMENTATION_PLAN.md` (T-3.4 → VERIFIED with evidence), `PROGRESS.md`
-(2026-10-16 entry: files, gates, problems, next step), `ARCHITECTURE.md`
-(§6 scenario execution properties), `TESTING.md` (§13 with exact
-commands/counts), `RISKS.md` (RSK-28 → MITIGATED with residual),
-`DECISIONS.md` (DEC-021), this report (3C archived verbatim at
-`docs/reports/PHASE_03C_REPORT.md`).
+**Yes.** The live integration suite ran against real `portaldot_dev`
+binaries on disposable, Kaizen-created designated-test networks
+(DEC-008). The new replay check faulted a real node process (pause via
+the injector) twice — once as the source run, once as the replay — with
+the effect and recovery independently observed by the test. No
+destructive operation touched mainnet or any unapproved network.
 
-## 9. Hygiene
+## 12. Cleanup & Process Lifecycle
 
-- New tests are real-data tests (real SQLite/EventBus/injector/real
-  stand-in processes; live tests use disposable designated-test networks
-  only); no orphaned processes or netns/iptables leftovers after runs.
-- No secrets, keys, or machine-specific paths committed; `.kaizen/`
-  ignored; add-only changes (additive commits; no history rewrite).
-- No fabricated data anywhere: every UI/CLI/API field served is real
-  persistence or real observation; unimplemented surfaces (replay,
-  screens, CLI run commands) are absent, not faked.
+- The replay check re-verifies recovery itself (same pid, RPC back)
+  and asserts `engine.faults.activeFaults()` is empty after both runs.
+- Full live suite teardown: networks stopped, no orphaned
+  `portaldot_dev` processes (`pgrep -af portaldot` after the suites →
+  none).
+- No secrets/keys/chain data committed; the diff contains only source,
+  tests, and docs (pre-commit secret scan clean).
 
-## 10. Confirmation: execution cannot happen outside the gates
+## 13. Remaining Work & Next Task
 
-The ONLY code path that starts a fault from a scenario is
-`ScenarioEngine → injector.preflight → injector.execute`. There is no
-second executor, no raw-process path, no shell surface, and no API
-parameter that reaches the injector other than the validated run request.
-Authoring remains execution-free (T-3.3 guarantees re-asserted by the
-updated API tests). Every refusal — including malformed requests and
-gate failures — either never reaches the engine or persists a
-`rejected` run before throwing; a rejected/skipped/cancelled run has
-`faultId: null` and leaves zero fault records.
-
-## 11. Next Task
-
-**STOP after T-3.4** per instruction. Roadmap order when resumed:
-**T-3.5 Replay** — must reuse `engine.scenarioRuns.execute()` and never
-introduce a second executor; replay semantics must state
-replay ≠ identical-outcome. Failure Lab UI, CLI surfaces, diagnostics,
-and Kubernetes remain planned and untouched.
+- **This phase stops after T-3.5** per instruction.
+- **Next: T-3.6 — Failure Lab CLI/API and UI integration surfaces.**
+  CLI run/replay commands must call `engine.scenarioRuns.execute()` /
+  `.replay()` exactly like the API does (no duplicated operation
+  logic), and UI wiring must surface run provenance + `replayNote`
+  (replay ≠ identical outcome) with real events.
+- Roadmap intact: Phase 4 (diagnostics/incident evidence/recovery),
+  Phase 5 (validator workflows), Phase 6 (Docker/K8s/Helm), Phase 7
+  (security hardening, demo readiness).

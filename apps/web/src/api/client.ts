@@ -26,6 +26,7 @@ import type {
   ScenarioInput,
   ScenarioListResponse,
   ScenarioOperationsResponse,
+  ScenarioReplayResponse,
   ScenarioResponse,
   ScenarioRunListResponse,
   ScenarioRunResponse,
@@ -298,6 +299,8 @@ export class KaizenApiClient {
       scenarioId?: string;
       networkId?: string;
       state?: ScenarioRunState;
+      /** Only runs replayed FROM this source run (T-3.5 provenance). */
+      replayOf?: string;
       limit?: number;
       offset?: number;
     } = {},
@@ -306,6 +309,7 @@ export class KaizenApiClient {
     if (filter.scenarioId !== undefined) params.set('scenarioId', filter.scenarioId);
     if (filter.networkId !== undefined) params.set('networkId', filter.networkId);
     if (filter.state !== undefined) params.set('state', filter.state);
+    if (filter.replayOf !== undefined) params.set('replayOf', filter.replayOf);
     if (filter.limit !== undefined) params.set('limit', String(filter.limit));
     if (filter.offset !== undefined) params.set('offset', String(filter.offset));
     const qs = params.toString();
@@ -319,6 +323,22 @@ export class KaizenApiClient {
   cancelScenarioRun(runId: string, requestedBy?: string): Promise<ScenarioRunResponse> {
     return this.request('POST', `/api/scenarios/runs/${encodeURIComponent(runId)}/cancel`, {
       body: requestedBy !== undefined ? { requestedBy } : {},
+    });
+  }
+
+  /**
+   * Replay a finished run's recorded actions as a NEW run (T-3.5): same
+   * engine path, same gates, fresh evidence. The target must be confirmed
+   * explicitly again (same mode:'execute' posture); replay repeats actions
+   * and never claims identical outcomes. Poll getScenarioRun for the new
+   * run id, or cancelScenarioRun to stop it.
+   */
+  replayScenarioRun(
+    runId: string,
+    request: { networkIdOrName: string; requestedBy?: string },
+  ): Promise<ScenarioReplayResponse> {
+    return this.request('POST', `/api/scenarios/runs/${encodeURIComponent(runId)}/replay`, {
+      body: { mode: 'execute', ...request },
     });
   }
 }

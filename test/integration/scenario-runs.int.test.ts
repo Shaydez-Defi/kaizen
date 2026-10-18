@@ -23,6 +23,10 @@
  *  - gates:          phantom networks (non-designated, non-local chain) and
  *                    unresolvable labels are refused fail-closed with a
  *                    persisted rejected run — and execute nothing
+ *  - replay:         a finished run is replayed as a NEW run on the same
+ *                    engine path: fresh effect + fresh fault id observed by
+ *                    the test itself, the source run stays byte-identical,
+ *                    and ineligible sources are refused before any side effect
  *
  * Nothing here ever touches mainnet; destructive/failure paths are gated to
  * designated test networks (DEC-008 / DEC-009).
@@ -33,6 +37,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createEngine,
   isPidAlive,
+  scenarioRunReplayNote,
   type KaizenEngine,
   type NodeConfig,
   type ScenarioInput,
@@ -526,4 +531,112 @@ describe.runIf(LIVE)('ScenarioEngine (live, real networks)', () => {
     expect(isPidAlive(engine.store.getNode(aliceId).pid!)).toBe(true);
     expect(await ping(alicePort)).toBe(true);
   }, 60_000);
+
+  it('replays a finished run as a NEW run: fresh effect and fault, source immutable, provenance queryable', async () => {
+    const pidBefore = engine.store.getNode(aliceId).pid!;
+
+    // Source: a real pause run against alice (short hold).
+    const { run: accepted } = createRun('live replay source', [
+      pauseStep('s1', aliceLabel, { durationMs: 4_000, timeoutMs: 70_000 }),
+    ]);
+    const source = await waitTerminal(accepted.id);
+    expect(source.state).toBe('completed');
+    expect(source.replayOfRunId).toBeNull();
+    const sourceJson = JSON.stringify(source);
+    const sourceFaultId = source.steps[0]!.faultId!;
+
+    // Replay re-enters the engine path with an EXPLICITLY confirmed target
+    // and the mode marker — never inherited from the source run.
+    const replayed = engine.scenarioRuns.replay({
+      runId: source.id,
+      networkIdOrName: networkId,
+      mode: 'execute',
+      requestedBy: 'it',
+    });
+    expect(replayed.id).not.toBe(source.id);
+    expect(replayed.replayOfRunId).toBe(source.id);
+    expect(replayed.warnings).toEqual([]);
+    expect(scenarioRunReplayNote(replayed)).toContain('identical outcomes are NOT guaranteed');
+    expect(replayed.snapshot).toEqual(source.snapshot); // same recorded actions
+
+    // Independent observation of the REPLAY's OWN effect (sampled by the
+    // test, not read from the run record): the victim stops answering RPC
+    // while the replay's fault is held.
+    const samples: boolean[] = [];
+    const watcher = (async () => {
+      for (;;) {
+        samples.push(await ping(alicePort));
+        const fresh = engine.scenarioRuns.get(replayed.id);
+        if (TERMINAL.includes(fresh.state)) return;
+        await sleep(500);
+      }
+    })();
+    const run = await waitTerminal(replayed.id);
+    await watcher;
+
+    expect(run.state).toBe('completed');
+    const step = run.steps[0]!;
+    expect(step.state).toBe('completed');
+    expect(step.claims).toMatchObject({
+      applied: true,
+      effectObserved: true,
+      faultRemoved: true,
+      recovered: true,
+      recoveryVerified: true,
+    });
+    expect(run.cleanup).toMatchObject({ verified: true, quarantined: false });
+    // The replay genuinely re-executed: its own fresh effect and a fresh
+    // fault record — the source's evidence was never reused.
+    expect(samples.some((r) => !r)).toBe(true);
+    expect(step.faultId).toBeTruthy();
+    expect(step.faultId).not.toBe(sourceFaultId);
+    expect(JSON.stringify(run.steps)).not.toContain(sourceFaultId);
+    expect(['completed', 'cancelled']).toContain(engine.store.getFault(step.faultId!).state);
+
+    // Recovery is independently re-verified: same pid, RPC back.
+    expect(engine.store.getNode(aliceId).pid).toBe(pidBefore);
+    expect(isPidAlive(pidBefore)).toBe(true);
+    await waitFor(async () => ((await ping(alicePort)) ? true : null), {
+      timeoutMs: 30_000,
+      label: 'alice RPC back after the replay',
+    });
+
+    // The source run remains byte-identical immutable history.
+    expect(JSON.stringify(engine.scenarioRuns.get(source.id))).toBe(sourceJson);
+
+    // Provenance is queryable; nothing leaked from either run.
+    const replays = engine.scenarioRuns.list({ replayOf: source.id, limit: 10 });
+    expect(replays.total).toBe(1);
+    expect(replays.runs[0]?.id).toBe(run.id);
+    expect(engine.faults.activeFaults()).toEqual([]);
+
+    // Ineligible sources are refused BEFORE any side effect: unknown run,
+    // and the rejected ghost-label run persisted by the test above.
+    expect(() =>
+      engine.scenarioRuns.replay({
+        runId: 'run_ghost',
+        networkIdOrName: networkId,
+        mode: 'execute',
+      }),
+    ).toThrowError(/not found/i);
+    const rejected = engine.scenarioRuns.list({ state: 'rejected', limit: 20 }).runs[0];
+    expect(rejected).toBeTruthy(); // persisted by the gate tests above
+    expect(() =>
+      engine.scenarioRuns.replay({
+        runId: rejected!.id,
+        networkIdOrName: networkId,
+        mode: 'execute',
+      }),
+    ).toThrowError(/never executed/);
+    // …and an explicitly requested unknown target still fails closed.
+    expect(() =>
+      engine.scenarioRuns.replay({
+        runId: source.id,
+        networkIdOrName: 'ghost-net',
+        mode: 'execute',
+      }),
+    ).toThrowError(/not registered/);
+    expect(engine.faults.activeFaults()).toEqual([]);
+    expect(isPidAlive(engine.store.getNode(aliceId).pid!)).toBe(true);
+  }, 240_000);
 });

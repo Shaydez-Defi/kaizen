@@ -47,6 +47,7 @@ export type KaizenErrorCode =
   | 'SCENARIO_RUN_NOT_FOUND'
   | 'SCENARIO_RUN_CONFLICT'
   | 'SCENARIO_EXEC_NOT_ALLOWED'
+  | 'SCENARIO_RUN_NOT_REPLAYABLE'
   // fault interruption recovery (T-3.4 startup reconciliation)
   | 'FAULT_INTERRUPTED'
   | 'INTERNAL';

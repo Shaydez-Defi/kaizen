@@ -20,6 +20,7 @@ import {
   isKaizenError,
   KAIZEN_VERSION,
   SCENARIO_RUN_STATES,
+  scenarioRunReplayNote,
   type KaizenEngine,
   type KaizenEventName,
 } from '@kaizen/engine';
@@ -90,6 +91,8 @@ const runListQuery = z.object({
   scenarioId: z.string().min(1).max(64).optional(),
   networkId: z.string().min(1).max(64).optional(),
   state: z.enum(SCENARIO_RUN_STATES).optional(),
+  /** Only runs replayed FROM this source run (T-3.5 provenance query). */
+  replayOf: z.string().min(1).max(64).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
@@ -119,6 +122,7 @@ function statusFor(code: string): number {
     case 'SCENARIO_ALREADY_EXISTS':
     case 'SCENARIO_VERSION_UNSUPPORTED':
     case 'SCENARIO_RUN_CONFLICT':
+    case 'SCENARIO_RUN_NOT_REPLAYABLE':
       return 409;
     default:
       return 500;
@@ -568,6 +572,42 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
       }
       const run = await engine.scenarioRuns.cancel(params.runId, body.data.requestedBy ?? 'api');
       reply.send({ ok: true, run });
+    });
+
+    // ---- scenario run replay (T-3.5) ---------------------------------------
+    // Re-executes the SOURCE run's immutable snapshot as a NEW run through
+    // the same engine path (gates -> injector -> evidence). The target must
+    // be explicitly confirmed again (same mode:'execute' posture as
+    // execute): a historical run is provenance, never authorization. Replay
+    // repeats actions — it does not promise identical outcomes, and the
+    // response carries the NEW run (fresh evidence), never a copy of the
+    // source run's results.
+    scope.post('/api/scenarios/runs/:runId/replay', async (req, reply) => {
+      const params = requireParam(runIdParam, req.params, reply);
+      if (!params) return;
+      const body = executeRunBody.safeParse(req.body);
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid replay request',
+            details: { issues: body.error.issues },
+          },
+        });
+        return;
+      }
+      const run = engine.scenarioRuns.replay({
+        runId: params.runId,
+        networkIdOrName: body.data.networkIdOrName,
+        mode: 'execute',
+        ...(body.data.requestedBy !== undefined ? { requestedBy: body.data.requestedBy } : {}),
+      });
+      // 202: the NEW run is persisted and executing in the background.
+      // `replayNote` states the honest contract inline: replay repeats the
+      // source run's actions; it never promises identical outcomes, and the
+      // run's evidence is freshly observed (never a copy of the source).
+      reply.status(202).send({ ok: true, run, replayNote: scenarioRunReplayNote(run) });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an

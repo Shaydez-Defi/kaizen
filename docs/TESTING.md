@@ -649,3 +649,76 @@ TMPDIR=/tmp/opencode KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin \
   unproven cleanup stays `cleanup-failed` + quarantined, interrupted runs
   stay INTERRUPTED — no test asserts a recovery the engine did not
   observe.
+
+## 14. Tests Executed in Phase 3E — Scenario Replay (T-3.5)
+
+### 14.1 Engine unit suite — `packages/engine/test/scenario-replay.test.ts`
+
+**10 tests** (new), on the shared harness (`test/scenario-harness.ts`,
+extracted from `scenario-run.test.ts`): REAL stand-in node processes +
+scripted FaultAdapter doubles. Covered:
+
+- **Distinct run + provenance + freshness**: replay creates a new run
+  id with `replayOfRunId`, the same snapshot (deep-equal), new fault
+  ids, real claims/verification, verified cleanup; the source run
+  record is byte-identical afterwards; provenance survives store
+  reopen; the `scenario-run.created` event carries `replayOfRunId`;
+  honesty is the `replayNote` helper, not a `warnings` entry.
+- **Snapshot independence**: after the scenario is edited AND deleted,
+  replay still executes the recorded snapshot (execute() of the
+  deleted scenario throws SCENARIO_NOT_FOUND — contrast).
+- **Eligibility**: `rejected` (message: never executed), unfinished
+  (`running`), unknown run ids, and malformed snapshots (empty or
+  missing steps) all refused without creating any run record.
+- **Authorization posture**: missing `mode`/target → INVALID_INPUT
+  (no run); unknown target → NETWORK_NOT_FOUND with a persisted
+  rejected run carrying provenance; non-designated target (DEC-008)
+  → SCENARIO_EXEC_NOT_ALLOWED, also with provenance.
+- **Current gates re-evaluated**: an active same-scenario run →
+  SCENARIO_RUN_CONFLICT; a cleanup-failed quarantine planted AFTER
+  the source run → refused 'quarantined'; a snapshot containing a
+  planned operation (`node-restart`) → UNSUPPORTED_OPERATION with
+  `validation.valid=true` (authoring warns, run gates refuse).
+- **Failure/cancel/timeout semantics reused**: replaying a failed
+  source run fails again with the same VERIFICATION_FAILED code but
+  fresh evidence; cancelling a replay mid-hold interrupts via
+  injector.cancel with verified rollback (same pid, no leak); a 5s
+  step deadline vs a 60s condition budget reports STEP_TIMEOUT with
+  `faultId: null` and no fault.
+- **Duplicates & read-only**: get/list never create runs; two
+  synchronous replays → exactly one starts, the second throws
+  CONFLICT; after terminal, a new replay is allowed; every attempt
+  (including the refused one) is queryable via `list({ replayOf })`.
+
+### 14.2 API suite — `apps/api/test/scenario-runs.test.ts` (now 13)
+
+Four new tests on the real Fastify app + real SQLite (no injector):
+202 replay with `replayNote` + source immutable over the wire +
+`?replayOf=` history query + read-only requests never executing;
+400 (missing mode/target) and 404 (unknown source); 409 ineligible
+source (a persisted rejected run) and gate re-evaluation (unknown
+target → 404 persisted rejection with provenance, non-designated →
+403, both queryable via `?replayOf=&state=rejected`); concurrent
+duplicate replays → exactly one 202 and one 409, and a new replay is
+allowed once terminal.
+
+### 14.3 LIVE integration — `test/integration/scenario-runs.int.test.ts` (now 9/9)
+
+One new live check on a disposable designated-test `portaldot_dev`
+network: a real pause run is executed, then replayed with an explicit
+target + marker; the test independently samples RPC during the replay
+(the victim stops answering while held), asserts a NEW fault record
+and fresh claims, re-verifies recovery itself (same pid, RPC back),
+confirms the source run is byte-identical, queries provenance, and
+confirms ineligible sources (unknown id, persisted rejected run) and
+unknown targets are refused before any side effect. Runs the full
+suite: **44/44 across 10 files** (T-3.2/T-3.3/T-3.4 suites intact).
+
+- **CLI smoke**: no new CLI surface in T-3.5 (run/replay commands are
+  T-3.6, which will call `engine.scenarioRuns.replay()` exactly like
+  the API does); CLI typecheck/build are covered by the shared gates.
+- **Hygiene after the live run**: no orphaned `portaldot_dev`
+  processes (`pgrep -af portaldot` → none).
+- **Not faked anywhere**: mocked/scripted coverage is labeled unit;
+  the live replay's effect and recovery are observed by the test
+  itself, not read from the run record.

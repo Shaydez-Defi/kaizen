@@ -172,6 +172,11 @@ const MIGRATIONS: string[] = [
   `CREATE INDEX IF NOT EXISTS scenario_runs_scenario_idx ON scenario_runs(scenario_id);`,
   `CREATE INDEX IF NOT EXISTS scenario_runs_network_idx ON scenario_runs(network_id);`,
   `CREATE INDEX IF NOT EXISTS scenario_runs_state_idx ON scenario_runs(state);`,
+  // 12: run provenance (T-3.5 replay). A replay run records the source run
+  //     it re-executes; original rows are never rewritten by a replay, so
+  //     history stays append-only and both directions stay queryable.
+  `ALTER TABLE scenario_runs ADD COLUMN replay_of_run_id TEXT;`,
+  `CREATE INDEX IF NOT EXISTS scenario_runs_replay_idx ON scenario_runs(replay_of_run_id);`,
 ];
 
 interface NetworkRow {
@@ -278,6 +283,7 @@ interface ScenarioRunRow {
   error: string | null;
   cleanup: string | null;
   cancellation: string | null;
+  replay_of_run_id: string | null;
   created_at: string;
   started_at: string | null;
   updated_at: string;
@@ -840,8 +846,9 @@ export class StateStore {
           `INSERT INTO scenario_runs
            (id, scenario_id, scenario_name, scenario_schema_version, network_id, network_name,
             state, current_step_id, requested_by, snapshot, target_nodes, steps, validation,
-            warnings, error, cleanup, cancellation, created_at, started_at, updated_at, finished_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            warnings, error, cleanup, cancellation, replay_of_run_id,
+            created_at, started_at, updated_at, finished_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           record.id,
@@ -861,6 +868,9 @@ export class StateStore {
           record.error ? JSON.stringify(record.error) : null,
           record.cleanup ? JSON.stringify(record.cleanup) : null,
           record.cancellation ? JSON.stringify(record.cancellation) : null,
+          // provenance is immutable and set once at insert (a replay never
+          // rewrites the SOURCE row; the update statement does not touch it)
+          record.replayOfRunId,
           record.createdAt,
           record.startedAt,
           record.updatedAt,
@@ -941,6 +951,7 @@ export class StateStore {
       scenarioId?: string;
       networkId?: string;
       state?: ScenarioRunState;
+      replayOf?: string;
       unfinishedOnly?: boolean;
       limit?: number;
       offset?: number;
@@ -968,7 +979,12 @@ export class StateStore {
   }
 
   countScenarioRuns(
-    filter: { scenarioId?: string; networkId?: string; state?: ScenarioRunState } = {},
+    filter: {
+      scenarioId?: string;
+      networkId?: string;
+      state?: ScenarioRunState;
+      replayOf?: string;
+    } = {},
   ): number {
     const { whereSql, params } = scenarioRunFilterWhere(filter);
     const row = this.db
@@ -1152,6 +1168,7 @@ function scenarioRunFilterWhere(filter: {
   scenarioId?: string;
   networkId?: string;
   state?: ScenarioRunState;
+  replayOf?: string;
   unfinishedOnly?: boolean;
 }): { whereSql: string; params: string[] } {
   const where: string[] = [];
@@ -1167,6 +1184,10 @@ function scenarioRunFilterWhere(filter: {
   if (filter.state !== undefined) {
     where.push('state = ?');
     params.push(filter.state);
+  }
+  if (filter.replayOf !== undefined) {
+    where.push('replay_of_run_id = ?');
+    params.push(filter.replayOf);
   }
   if (filter.unfinishedOnly === true) {
     where.push(`state NOT IN (${TERMINAL_SCENARIO_RUN_SQL_LIST})`);
@@ -1218,6 +1239,7 @@ function mapScenarioRunRow(row: ScenarioRunRow): ScenarioRunRecord {
       currentStepId: row.current_step_id,
       targetNodes: targetNodes as ScenarioRunTargetNode[],
       requestedBy: row.requested_by,
+      replayOfRunId: row.replay_of_run_id ?? null,
       steps: steps as ScenarioStepRun[],
       validation: validation as ScenarioValidationResult | null,
       warnings: warnings as string[],

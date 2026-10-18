@@ -316,6 +316,48 @@ runs are explicit, sequential, and fully recorded. Key properties:
   alone; `engine.close()` cancels in-flight faults before shutting the
   injector down.
 
+**Scenario replay (`engine.scenarioRuns.replay` — T-3.5, DEC-022):**
+a replay re-executes a finished run's recorded actions as a NEW run
+(API: `POST /api/scenarios/runs/:runId/replay`). Key properties:
+
+- **One executor, snapshot-sourced** — replay re-enters the exact same
+  run-start path as `execute()` (same gate chain → same injector →
+  same evidence pipeline; there is no second executor anywhere). The
+  new run executes the SOURCE run's immutable `snapshot` — never the
+  scenario's current (possibly edited or deleted) definition — and if
+  the snapshot cannot be used (missing/empty steps) the replay is
+  refused with `SCENARIO_RUN_NOT_REPLAYABLE` before any run record
+  exists.
+- **Explicit target, explicit marker — provenance is not
+  authorization** — the replay request carries its own `mode:
+  'execute'` and its own `networkIdOrName`; a target is never inherited
+  from the source run. Every gate is re-evaluated with CURRENT state
+  (fresh definition revalidation against the CURRENT registry,
+  operation support, DEC-008 target posture, label resolution,
+  quarantine, conflicts): an operation that succeeded in the source run
+  earns nothing.
+- **Eligible sources** — terminal execution states only:
+  `completed`, `completed-with-warnings`, `failed`, `cancelled`,
+  `cleanup-failed` (`rejected` never executed an action → use
+  `execute()`; unfinished states are never resumed or replayed).
+  Refusals happen BEFORE any run record exists for source problems, or
+  persist a `rejected` replay run (with provenance) for gate problems —
+  same audit posture as `execute()`.
+- **Provenance, append-only** — `replayOfRunId` (nullable) on the run
+  record and summary, stored in `scenario_runs.replay_of_run_id`
+  (schemaVersion 17, migration 12, indexed); the source run row is
+  never rewritten; `GET /api/scenarios/runs?replayOf=<runId>` queries
+  every replay attempt from a source. A clean replay reaches plain
+  `completed` — replay honesty is carried by `replayOfRunId` and the
+  explicit `replayNote` in the 202 response ("repeats the recorded
+  actions; identical outcomes are NOT guaranteed; evidence was freshly
+  observed"), not by degrading the state via `warnings`.
+- **Fresh everything** — replay steps get new step records, new fault
+  ids, and new evidence; no source-run evidence is ever copied. A
+  blocked replay reports why it was blocked (persisted rejection), and
+  timeout/inconclusive/cleanup-failed/quarantine semantics are the
+  executor's, unchanged.
+
 ## 7. Data & Event Flow (monitoring)
 
 ```mermaid

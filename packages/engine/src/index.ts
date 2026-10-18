@@ -138,15 +138,21 @@ export type {
 } from './scenario/operations';
 export { validateScenarioInput, prepareScenario, scenarioInputSchema, scenarioRecordToInput } from './scenario/validate';
 export * from './scenario/types';
-export { ScenarioEngine, scenarioRunRequestSchema } from './scenario/runner';
+export {
+  ScenarioEngine,
+  scenarioRunRequestSchema,
+  scenarioReplayRequestSchema,
+} from './scenario/runner';
 export type {
   ActiveScenarioRun,
   ScenarioEngineOptions,
+  ScenarioReplayRequest,
   ScenarioRunListFilter,
   ScenarioRunPage,
   ScenarioRunRequest,
 } from './scenario/runner';
 export {
+  REPLAYABLE_SCENARIO_RUN_STATES,
   SCENARIO_RUN_ERROR_CODES,
   SCENARIO_RUN_STATES,
   SCENARIO_RUN_TRANSITIONS,
@@ -156,8 +162,10 @@ export {
   TERMINAL_SCENARIO_STEP_STATES,
   canTransitionRun,
   canTransitionStep,
+  isReplayableScenarioRunState,
   isTerminalScenarioRunState,
   isTerminalScenarioStepState,
+  scenarioRunReplayNote,
   toRunSummary,
 } from './scenario/run-types';
 export type {

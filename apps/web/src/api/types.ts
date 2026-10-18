@@ -176,6 +176,16 @@ export interface ScenarioExecuteResponse {
   run: ScenarioRunRecord;
 }
 
+/**
+ * POST /api/scenarios/runs/:runId/replay answers 202 with the NEW run.
+ * `replayNote` states the contract inline: replay repeats the source run's
+ * actions; identical outcomes are NOT guaranteed and every piece of evidence
+ * in the run was freshly observed (null safety for original executions).
+ */
+export interface ScenarioReplayResponse extends ScenarioExecuteResponse {
+  replayNote: string | null;
+}
+
 export interface ScenarioRunResponse {
   ok: boolean;
   run: ScenarioRunRecord;

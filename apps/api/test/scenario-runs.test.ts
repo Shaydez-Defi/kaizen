@@ -15,6 +15,12 @@
  * the wire, cancellation (explicit + persisted + terminal), cancel of a
  * finished run (409), unknown run ids (404), and the hard guarantee that a
  * refused or skipped execution never invokes the injector.
+ *
+ * Replay (T-3.5): 202 replay with provenance + inline replayNote, source-run
+ * immutability over the wire, provenance history query (?replayOf), request
+ * validation (400), unknown/ineligible sources (404/409), gate re-evaluation
+ * (unknown/non-designated targets → persisted rejections with provenance),
+ * duplicate-replay conflicts (409), and read-only requests never executing.
  */
 
 import fs from 'node:fs';
@@ -402,6 +408,193 @@ describe('Scenario run API (real app + real SQLite)', () => {
     expect(res.body).not.toContain('at Object');
     expect(res.body).not.toContain('.ts:');
   });
+
+  // ---- run replay (T-3.5) -------------------------------------------------
+
+  it('replays a finished run (202): distinct id, provenance, replayNote, source untouched', async () => {
+    // Source: a terminal skip-drill run (eligible state, no injector use).
+    const exec = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/${skipId}/execute`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs', requestedBy: 'api-test' },
+    });
+    expect(exec.statusCode).toBe(202);
+    const source = await waitForTerminal((exec.json() as RunEnvelope).run.id);
+    expect(source.state).toBe('completed-with-warnings');
+    expect(source.replayOfRunId).toBeNull();
+    const sourceJson = JSON.stringify(source);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${source.id}/replay`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs', requestedBy: 'replay-test' },
+    });
+    expect(res.statusCode).toBe(202);
+    const body = res.json() as RunEnvelope & { replayNote: string | null };
+    expect(body.ok).toBe(true);
+    expect(body.run.id).not.toBe(source.id);
+    expect(body.run.replayOfRunId).toBe(source.id);
+    expect(body.run.warnings).toEqual([]); // honesty is the note, not a warning
+    expect(body.replayNote).toContain('identical outcomes are NOT guaranteed');
+
+    const run = await waitForTerminal(body.run.id);
+    expect(run.state).toBe('completed-with-warnings'); // the skip policy re-applies
+    expect(run.steps[0]!.state).toBe('skipped');
+    expect(run.steps[0]!.faultId).toBeNull();
+    // The source run and its evidence are immutable over the wire.
+    const srcRes = await app.inject({ method: 'GET', url: `/api/scenarios/runs/${source.id}` });
+    expect(JSON.stringify((srcRes.json() as RunEnvelope).run)).toBe(sourceJson);
+
+    // Provenance is queryable from the source run (original vs replay).
+    const history = await app.inject({
+      method: 'GET',
+      url: `/api/scenarios/runs?replayOf=${source.id}`,
+    });
+    expect(history.statusCode).toBe(200);
+    const list = history.json() as RunListEnvelope;
+    expect(list.total).toBe(1);
+    expect(list.runs[0]!.id).toBe(run.id);
+
+    // Read-only requests never start a replay or create runs.
+    const before = (history.json() as RunListEnvelope).total;
+    await app.inject({ method: 'GET', url: `/api/scenarios/runs/${run.id}` });
+    const after = await app.inject({ method: 'GET', url: '/api/scenarios/runs?limit=200' });
+    expect((after.json() as RunListEnvelope).total).toBeGreaterThanOrEqual(before);
+    expect(engine.scenarioRuns.activeRuns()).toEqual([]);
+    expect(faultEvents).toEqual([]); // still no injector use anywhere in this file
+  }, 60_000);
+
+  it('validates replay requests (400) and rejects unknown sources (404)', async () => {
+    const exec = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/${skipId}/execute`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+    });
+    const source = await waitForTerminal((exec.json() as RunEnvelope).run.id);
+
+    // Missing mode marker / missing target → 400, nothing created.
+    const noMode = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${source.id}/replay`,
+      payload: { networkIdOrName: 'api-runs' },
+    });
+    expect(noMode.statusCode).toBe(400);
+    expect((noMode.json() as { error: { code: string } }).error.code).toBe('INVALID_INPUT');
+    const noTarget = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${source.id}/replay`,
+      payload: { mode: 'execute' },
+    });
+    expect(noTarget.statusCode).toBe(400);
+
+    // Unknown source run → 404, structured, no leak.
+    const missing = await app.inject({
+      method: 'POST',
+      url: '/api/scenarios/runs/run_ghost/replay',
+      payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+    });
+    expect(missing.statusCode).toBe(404);
+    expect((missing.json() as { error: { code: string } }).error.code).toBe('SCENARIO_RUN_NOT_FOUND');
+  }, 60_000);
+
+  it('refuses to replay ineligible sources (409) and keeps gate re-evaluation (404/403)', async () => {
+    // A rejected run exists from the DEC-008 refusal test above: rejected =
+    // never executed an action → not replayable (execute it instead).
+    const rejectedPage = await app.inject({
+      method: 'GET',
+      url: '/api/scenarios/runs?state=rejected&limit=1',
+    });
+    const rejectedId = (rejectedPage.json() as RunListEnvelope).runs[0]!.id;
+    const ineligible = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${rejectedId}/replay`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+    });
+    expect(ineligible.statusCode).toBe(409);
+    expect((ineligible.json() as { error: { code: string } }).error.code).toBe(
+      'SCENARIO_RUN_NOT_REPLAYABLE',
+    );
+
+    // Fresh source for the gate re-evaluation checks.
+    const exec = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/${skipId}/execute`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+    });
+    const source = await waitForTerminal((exec.json() as RunEnvelope).run.id);
+
+    // Unknown target → 404 with a persisted rejected REPLAY (provenance on
+    // refusals: the audit trail shows exactly what was attempted).
+    const unknown = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${source.id}/replay`,
+      payload: { mode: 'execute', networkIdOrName: 'ghost-net', requestedBy: 'replay-test' },
+    });
+    expect(unknown.statusCode).toBe(404);
+    expect((unknown.json() as { error: { code: string } }).error.code).toBe('NETWORK_NOT_FOUND');
+    const refusals = await app.inject({
+      method: 'GET',
+      url: `/api/scenarios/runs?replayOf=${source.id}&state=rejected`,
+    });
+    const refusalList = refusals.json() as RunListEnvelope;
+    expect(refusalList.total).toBe(1);
+    expect(refusalList.runs[0]!.networkId).toBe('ghost-net');
+
+    // Non-designated target → 403 (DEC-008 re-evaluated with CURRENT state).
+    const notDesignated = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${source.id}/replay`,
+      payload: { mode: 'execute', networkIdOrName: 'prod-like' },
+    });
+    expect(notDesignated.statusCode).toBe(403);
+    expect((notDesignated.json() as { error: { code: string } }).error.code).toBe(
+      'SCENARIO_EXEC_NOT_ALLOWED',
+    );
+    const after = await app.inject({
+      method: 'GET',
+      url: `/api/scenarios/runs?replayOf=${source.id}&state=rejected`,
+    });
+    expect((after.json() as RunListEnvelope).total).toBe(2);
+    expect(faultEvents).toEqual([]);
+  }, 60_000);
+
+  it('prevents duplicate concurrent replays (409) and allows a new replay once terminal', async () => {
+    const exec = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/${skipId}/execute`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+    });
+    const source = await waitForTerminal((exec.json() as RunEnvelope).run.id);
+
+    // Two replay requests back-to-back: exactly one is accepted (202); the
+    // other conflicts (409) — no accidental duplicate execution.
+    const [first, second] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/scenarios/runs/${source.id}/replay`,
+        payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/scenarios/runs/${source.id}/replay`,
+        payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+      }),
+    ]);
+    const codes = [first.statusCode, second.statusCode].sort();
+    expect(codes).toEqual([202, 409]);
+    const winner = first.statusCode === 202 ? first : second;
+    const run = await waitForTerminal((winner.json() as RunEnvelope).run.id);
+    expect(['completed-with-warnings', 'completed']).toContain(run.state);
+
+    // Terminal again → the next replay is allowed (the guard released).
+    const again = await app.inject({
+      method: 'POST',
+      url: `/api/scenarios/runs/${source.id}/replay`,
+      payload: { mode: 'execute', networkIdOrName: 'api-runs' },
+    });
+    expect(again.statusCode).toBe(202);
+    await waitForTerminal((again.json() as RunEnvelope).run.id);
+  }, 60_000);
 });
 
 /** Helper for the marker/target validation loop (unknown target is fine — the

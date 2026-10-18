@@ -145,6 +145,8 @@ export interface KaizenEventMap {
     scenarioName: string;
     networkId: string;
     requestedBy: string;
+    /** Present only on replays: the source run being re-executed (T-3.5). */
+    replayOfRunId?: string;
     steps: number;
     at: string;
   };

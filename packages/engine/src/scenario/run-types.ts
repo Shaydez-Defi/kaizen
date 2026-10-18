@@ -124,6 +124,43 @@ export function isTerminalScenarioRunState(state: ScenarioRunState): boolean {
   return TERMINAL_SCENARIO_RUN_STATES.includes(state);
 }
 
+/**
+ * States whose recorded actions may be replayed (T-3.5). Deliberately
+ * EXCLUDES `rejected` (the run never executed any action — replay it by
+ * executing the scenario, not by replaying a refusal) and every unfinished
+ * state (the architecture never resumes unfinished runs — a crash-interrupted
+ * run is reconciled to a terminal state first). `cleanup-failed` is included
+ * because replay re-runs the current gates: an unreconciled quarantine still
+ * blocks the target fail-closed.
+ */
+export const REPLAYABLE_SCENARIO_RUN_STATES = [
+  'completed',
+  'completed-with-warnings',
+  'failed',
+  'cancelled',
+  'cleanup-failed',
+] as const satisfies readonly ScenarioRunState[];
+
+export function isReplayableScenarioRunState(state: ScenarioRunState): boolean {
+  return (REPLAYABLE_SCENARIO_RUN_STATES as readonly ScenarioRunState[]).includes(state);
+}
+
+/**
+ * Honest replay semantics for API responses and UI (T-3.5): a replay repeats
+ * the source run's ACTIONS; it never claims identical outcomes (chain state,
+ * node health, peers, timing, finality, and runtime events may differ), and
+ * every piece of its evidence was freshly observed. Null for original runs.
+ * Deliberately not a `warnings` entry — a clean replay must still reach
+ * plain 'completed'.
+ */
+export function scenarioRunReplayNote(
+  run: Pick<ScenarioRunRecord, 'replayOfRunId'>,
+): string | null {
+  return run.replayOfRunId !== null
+    ? `Replay of run ${run.replayOfRunId}: repeats the recorded actions as a NEW run — identical outcomes are NOT guaranteed (chain state, peers, timing, finality, and runtime events may differ); every piece of evidence was freshly observed.`
+    : null;
+}
+
 export function canTransitionRun(from: ScenarioRunState, to: ScenarioRunState): boolean {
   return SCENARIO_RUN_TRANSITIONS[from].includes(to);
 }
@@ -343,6 +380,8 @@ export interface ScenarioRunRecord {
   targetNodes: ScenarioRunTargetNode[];
   /** Audit actor ('api', 'cli', 'test', …). */
   requestedBy: string;
+  /** Source run this run REPLAYS (null for original executions, T-3.5). */
+  replayOfRunId: string | null;
   state: ScenarioRunState;
   currentStepId: string | null;
   currentStepOrder: number | null;
@@ -373,6 +412,7 @@ export interface ScenarioRunSummary {
   stepCount: number;
   completedSteps: number;
   requestedBy: string;
+  replayOfRunId: string | null;
   warnings: number;
   error: ScenarioRunError | null;
   cancellation: ScenarioRunCancellation | null;
@@ -438,6 +478,7 @@ export function toRunSummary(record: ScenarioRunRecord): ScenarioRunSummary {
       (s) => s.state === 'completed' || s.state === 'completed-with-warnings',
     ).length,
     requestedBy: record.requestedBy,
+    replayOfRunId: record.replayOfRunId,
     warnings: record.warnings.length,
     error: record.error,
     cancellation: record.cancellation,

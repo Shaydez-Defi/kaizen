@@ -465,3 +465,53 @@ Format: context → decision → alternatives → consequences. Newest entries a
   access to the loopback port can start a run on a designated-test
   network — identical to the existing stop/purge posture, documented in
   RSK-26.
+
+## DEC-022 — Replay re-executes a run's snapshot through the same executor; provenance is not authorization
+
+- **Context**: T-3.5 adds replay: re-executing the action sequence
+  captured in an earlier run. Two failure modes had to be designed
+  away: (a) replay silently substituting the scenario's CURRENT
+  (edited/deleted) definition, and (b) a historical run acting as
+  implicit authorization to fault a target again. Blockchain outcomes
+  are not deterministic, so "replay" must also never imply identical
+  results.
+- **Decision**:
+  1. **Replay = re-execution from the source run's immutable snapshot
+     via the same internal run-start path as `execute()`** — one
+     executor, one gate chain, one injector pipeline. If the snapshot
+     lacks the information needed for a safe replay (missing/empty
+     steps), the request is refused (`SCENARIO_RUN_NOT_REPLAYABLE`)
+     rather than inventing values or falling back to the current
+     definition.
+  2. **Provenance is not authorization.** The replay request repeats
+     the execute posture exactly (literal `mode: "execute"` + an
+     explicit `networkIdOrName`); targets are never inherited from the
+     source run, and every gate is re-evaluated with current state —
+     current registry support, DEC-008 target posture, label
+     resolution, quarantine, conflicts. Prior success grants nothing.
+  3. **Eligible sources are terminal execution states only**
+     (`completed`, `completed-with-warnings`, `failed`, `cancelled`,
+     `cleanup-failed`). `rejected` never executed an action (execute
+     the scenario instead); unfinished states are never resumed or
+     replayed (crash-interrupted runs are reconciled to a terminal
+     state first).
+  4. **Replay is honest about semantics**: it repeats ACTIONS, not
+     outcomes. `replayOfRunId` provenance + the explicit `replayNote`
+     in the 202 response state this in the API itself; no source-run
+     evidence is copied (fresh step records, fault ids, and
+     verification), and a clean replay still reaches plain
+     `completed` (the note does not ride the `warnings` channel).
+- **Alternatives**: a dedicated replay executor/pipeline — rejected
+  (duplicate safety logic is exactly the bug class this project
+  forbids); defaulting the replay target to the source run's network —
+  rejected (implicit authorization; DEC-008 posture could have changed
+  since); replaying `rejected` runs "for convenience" — rejected (no
+  recorded actions exist; the honest surface is `execute()`); seeding
+  the honesty note into `warnings` — rejected (would force every clean
+  replay to `completed-with-warnings`, degrading honest reporting).
+- **Consequences**: one unambiguous, fully audited replay surface
+  (engine `replay()`, API route, typed client method) whose refusals
+  are as explicit as executions'; original-vs-replay relationships are
+  queryable (`?replayOf=`) without rewriting history; the DEC-019/DEC-021
+  authorization posture is unchanged (RSK-26/T-7.3 still own
+  authenticated non-loopback identity).

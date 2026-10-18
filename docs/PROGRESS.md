@@ -1023,3 +1023,88 @@ run.
 - Next: **STOP after T-3.4** per instruction. When resumed, the next
   roadmap task is T-3.5 (replay), which must reuse
   `engine.scenarioRuns.execute()` and never add a second executor.
+
+## 2026-10-18 — PHASE 3E: Scenario Replay (T-3.5)
+
+**Phase/Task IDs**: Phase 3E — T-3.5 only. CLI/UI surfaces (T-3.6),
+Failure Lab UI, diagnostics (Phase 4), recovery orchestration, K8s —
+explicitly NOT started, roadmap untouched.
+
+### 1. What was built
+
+- **`ScenarioEngine.replay()`** (`packages/engine/src/scenario/runner.ts`)
+  — re-executes a finished run's RECORDED actions as a NEW run by
+  re-entering the same internal run-start path as `execute()`
+  (`startRun()` — one executor, one gate chain, one injector pipeline;
+  no second execution subsystem). The new run's snapshot is the SOURCE
+  run's immutable snapshot (never the scenario's possibly edited or
+  deleted current definition); unusable snapshots (missing/empty steps)
+  are refused with `SCENARIO_RUN_NOT_REPLAYABLE` before any run record
+  exists. `scenarioReplayRequestSchema`: `{ runId, networkIdOrName,
+  mode: 'execute', requestedBy? }` — the target is explicit, never
+  inherited; DEC-021 posture unchanged.
+- **Eligibility + provenance** (`scenario/run-types.ts`) —
+  `REPLAYABLE_SCENARIO_RUN_STATES` (completed / completed-with-warnings
+  / failed / cancelled / cleanup-failed; `rejected` and unfinished
+  states refused with actionable messages) and `replayOfRunId: string |
+  null` on the run record + summary, persisted in a new indexed column
+  `scenario_runs.replay_of_run_id` (migration 12, schemaVersion 16→17)
+  — append-only: replay never rewrites the source row;
+  `list({ replayOf })` / `?replayOf=` queries every attempt from a
+  source. `scenarioRunReplayNote()` + the 202 response's `replayNote`
+  state the honest contract in the API itself (replay repeats ACTIONS,
+  identical outcomes are NOT guaranteed, evidence is freshly observed);
+  a clean replay still reaches plain `completed` (the note does not
+  ride the `warnings` channel).
+- **API + typed client** — `POST /api/scenarios/runs/:runId/replay`
+  (202 `{ ok, run, replayNote }`; errors: 400 INVALID_INPUT, 404
+  SCENARIO_RUN_NOT_FOUND/NETWORK_NOT_FOUND, 403 SCENARIO_EXEC_NOT_ALLOWED,
+  409 SCENARIO_RUN_NOT_REPLAYABLE/SCENARIO_RUN_CONFLICT — new error
+  code mapped in `errors.ts` + `statusFor`); run-history query param
+  `replayOf`; web client `replayScenarioRun()` +
+  `ScenarioReplayResponse` type. Read-only requests never execute.
+- **Tests** — engine `scenario-replay.test.ts` 10 (harness extracted to
+  `test/scenario-harness.ts`, shared with the 37 T-3.4 tests, unchanged
+  in behavior); API +4 (=13); LIVE +1 (=9/9 in the file, 44/44 suite).
+
+### 2. Evidence (commands actually run, 2026-10-18)
+
+- `npm run typecheck` / `npm run lint` / `npm run build` — PASS (exit 0).
+- `npm test` — **262/262 (24 files)**: engine 195 (scenario-run 37,
+  scenario-replay 10, scenario 32, fault 24, monitor 21, topologies 17,
+  remaining 54), api 31 (scenarios 18, scenario-runs 13), web 36.
+  (T-3.4 baseline was 248; +10 engine replay, +4 API replay.)
+- `KAIZEN_TEST_LIVE=1 KAIZEN_TEST_BIN_DIR=/tmp/opencode/bin TMPDIR=/tmp/opencode
+  npm run test:integration` — **44/44 (10 files, 337 s)** against real
+  `portaldot_dev`; the new replay check (14.6 s) independently sampled the
+  replay's effect (victim unreachable while held), asserted a fresh fault
+  id + fresh claims, re-verified recovery itself (same pid, RPC back),
+  confirmed the source run byte-identical, queried provenance, and
+  confirmed ineligible/unknown-target refusals. T-3.2/T-3.3/T-3.4 suites
+  intact; `pgrep -af portaldot` after → no orphans.
+- Docs updated: this log, IMPLEMENTATION_PLAN (T-3.5 → VERIFIED),
+  ARCHITECTURE §6 (replay contract), DECISIONS (**DEC-022**), TESTING §14;
+  the Phase 3D report archived verbatim at
+  `docs/reports/PHASE_03D_REPORT.md`; the new report is
+  `docs/PHASE_REPORT.md`. RISKS: no new risk; RSK-26 still covers the
+  replay endpoint's loopback-only posture (T-7.3 owns auth).
+
+### 3. Problems, decisions, remaining work
+
+- **Design iterations pinned by failing tests (fixed, not weakened)**:
+  (a) seeding the honesty note into `warnings` downgraded every clean
+  replay to `completed-with-warnings` — moved to `replayOfRunId` +
+  `replayNote` (DEC-022); (b) a crafted test snapshot dropped the
+  mandatory rpc-reachable baseline and was correctly refused by the
+  existing validation — the test was authored to the real rule;
+  (c) `insertScenarioRun` now requires `replayOfRunId` — the T-3.4
+  reconcile-test helper was updated (schema change is intentional,
+  migration 12).
+- **DEC-022** recorded; no existing decision changed; T-3.2/T-3.3/T-3.4
+  safety behavior verified intact by their unchanged suites.
+- **Not started (per instruction)**: T-3.6 CLI/UI surfaces (Failure Lab
+  UI), diagnostics, recovery orchestration, K8s — roadmap unchanged.
+- Next: **STOP after T-3.5** per instruction. When resumed, the next
+  roadmap task is **T-3.6** (Failure Lab CLI/API and UI integration
+  surfaces), which must call `engine.scenarioRuns.execute()` /
+  `.replay()` exactly like the API does.

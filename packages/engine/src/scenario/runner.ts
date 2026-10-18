@@ -64,8 +64,10 @@ import {
 } from './conditions';
 import type { ScenarioService } from './service';
 import {
+  REPLAYABLE_SCENARIO_RUN_STATES,
   canTransitionRun,
   canTransitionStep,
+  isReplayableScenarioRunState,
   isTerminalScenarioRunState,
   isTerminalScenarioStepState,
   toRunSummary,
@@ -105,6 +107,23 @@ export const scenarioRunRequestSchema = z
   .strict();
 export type ScenarioRunRequest = z.infer<typeof scenarioRunRequestSchema>;
 
+/**
+ * Replay request (T-3.5): re-execute a finished run's RECORDED actions as a
+ * NEW run. Same authorization posture as execute (literal mode marker +
+ * EXPLICITLY confirmed target): the historical run is provenance, never
+ * authorization, and the target is never inherited from the source run.
+ */
+export const scenarioReplayRequestSchema = z
+  .object({
+    runId: z.string().min(1).max(64),
+    networkIdOrName: z.string().min(1).max(64),
+    /** Literal marker — same posture as execute. */
+    mode: z.literal('execute'),
+    requestedBy: z.string().min(1).max(64).optional(),
+  })
+  .strict();
+export type ScenarioReplayRequest = z.infer<typeof scenarioReplayRequestSchema>;
+
 export interface ScenarioEngineOptions {
   store: StateStore;
   events: EventBus;
@@ -123,6 +142,8 @@ export interface ScenarioRunListFilter {
   scenarioId?: string;
   networkId?: string;
   state?: ScenarioRunState;
+  /** Only runs replayed FROM this source run (T-3.5 provenance). */
+  replayOf?: string;
   limit?: number;
   offset?: number;
 }
@@ -237,6 +258,7 @@ export class ScenarioEngine {
       ...(filter.scenarioId !== undefined ? { scenarioId: filter.scenarioId } : {}),
       ...(filter.networkId !== undefined ? { networkId: filter.networkId } : {}),
       ...(filter.state !== undefined ? { state: filter.state } : {}),
+      ...(filter.replayOf !== undefined ? { replayOf: filter.replayOf } : {}),
       limit,
       offset,
     };
@@ -245,6 +267,7 @@ export class ScenarioEngine {
       ...(filter.scenarioId !== undefined ? { scenarioId: filter.scenarioId } : {}),
       ...(filter.networkId !== undefined ? { networkId: filter.networkId } : {}),
       ...(filter.state !== undefined ? { state: filter.state } : {}),
+      ...(filter.replayOf !== undefined ? { replayOf: filter.replayOf } : {}),
     });
     return { runs: runs.map(toRunSummary), malformed, total, limit, offset };
   }
@@ -286,8 +309,71 @@ export class ScenarioEngine {
     const req = parsed.data;
     // Throws SCENARIO_NOT_FOUND before any run record exists.
     const scenario = this.store.getScenario(req.scenarioId);
+    return this.startRun(scenario, req, null);
+  }
 
-    const record = this.newRunRecord(scenario, req);
+  /**
+   * Replay a finished run's RECORDED actions as a NEW run (T-3.5). The new
+   * run executes the source run's immutable snapshot (never the scenario's
+   * possibly-edited current definition), re-enters the SAME execution path
+   * (gates → injector → evidence), and records provenance (`replayOfRunId`).
+   * Replay repeats ACTIONS; it never claims identical outcomes, and no
+   * source evidence is copied — every verdict below is freshly observed.
+   */
+  replay(input: unknown): ScenarioRunRecord {
+    if (this.closed) {
+      throw new KaizenError('SCENARIO_EXEC_NOT_ALLOWED', 'ScenarioEngine is shut down');
+    }
+    const parsed = scenarioReplayRequestSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new KaizenError('INVALID_INPUT', 'Invalid scenario replay request', {
+        issues: parsed.error.issues,
+        hint: 'replay requires the explicit mode:"execute" marker and an EXPLICITLY confirmed target network — a historical run is provenance, never authorization',
+      });
+    }
+    const req = parsed.data;
+    const source = this.store.getScenarioRun(req.runId);
+    if (!isReplayableScenarioRunState(source.state)) {
+      throw new KaizenError(
+        'SCENARIO_RUN_NOT_REPLAYABLE',
+        source.state === 'rejected'
+          ? `Run ${source.id} was rejected — it never executed any action; execute the scenario directly instead of replaying a refusal`
+          : `Run ${source.id} is unfinished (${source.state}) — unfinished runs are never resumed or replayed; startup reconciliation must first move it to a terminal state`,
+        {
+          runId: source.id,
+          state: source.state,
+          replayableStates: [...REPLAYABLE_SCENARIO_RUN_STATES],
+        },
+      );
+    }
+    const snapshot = source.snapshot;
+    if (
+      !snapshot ||
+      typeof snapshot !== 'object' ||
+      !Array.isArray(snapshot.steps) ||
+      snapshot.steps.length === 0
+    ) {
+      throw new KaizenError(
+        'SCENARIO_RUN_NOT_REPLAYABLE',
+        `Run ${source.id} has no usable scenario snapshot — its recorded actions cannot be replayed; execute the scenario directly instead`,
+        { runId: source.id },
+      );
+    }
+    return this.startRun(snapshot, {
+      scenarioId: source.scenarioId,
+      networkIdOrName: req.networkIdOrName,
+      mode: 'execute',
+      requestedBy: req.requestedBy ?? 'engine',
+    }, source.id);
+  }
+
+  /** Shared run-start path (execute + replay) — one executor, one gate chain. */
+  private startRun(
+    scenario: ScenarioRecord,
+    req: ScenarioRunRequest,
+    replayOfRunId: string | null,
+  ): ScenarioRunRecord {
+    const record = this.newRunRecord(scenario, req, replayOfRunId);
     this.store.insertScenarioRun(record);
     this.events.emit('scenario-run.created', {
       runId: record.id,
@@ -295,6 +381,7 @@ export class ScenarioEngine {
       scenarioName: record.scenarioName,
       networkId: record.networkId,
       requestedBy: record.requestedBy,
+      ...(replayOfRunId !== null ? { replayOfRunId } : {}),
       steps: scenario.steps.length,
       at: record.createdAt,
     });
@@ -1501,7 +1588,11 @@ export class ScenarioEngine {
   // -------------------------------------------------------------------------
   // Record construction + state transitions
 
-  private newRunRecord(scenario: ScenarioRecord, req: ScenarioRunRequest): ScenarioRunRecord {
+  private newRunRecord(
+    scenario: ScenarioRecord,
+    req: ScenarioRunRequest,
+    replayOfRunId: string | null,
+  ): ScenarioRunRecord {
     const at = nowIso();
     return {
       id: `run-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`,
@@ -1513,12 +1604,17 @@ export class ScenarioEngine {
       networkName: '',
       targetNodes: [],
       requestedBy: req.requestedBy ?? 'engine',
+      replayOfRunId,
+      // NOTE: replay honesty is exposed via scenarioRunReplayNote(run) and
+      // the `replayOfRunId` provenance field — NOT via `warnings`, which are
+      // reserved for execution-time observations (a clean replay must reach
+      // plain 'completed', exactly like a clean original run).
+      warnings: [],
       state: 'queued',
       currentStepId: null,
       currentStepOrder: null,
       steps: [],
       validation: null,
-      warnings: [],
       error: null,
       cleanup: null,
       cancellation: null,
