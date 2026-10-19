@@ -571,6 +571,79 @@ executed); adapter-internal polling bounds need a wrap backstop ABOVE them
 
 ---
 
+## R-23 — Portaldot V3 public endpoints: connectivity and identity (T-8.1)
+
+- **Question**: Are the official Portaldot V3 endpoints reachable from this
+  environment, and what do they verifiably answer — chain identity, health,
+  height, EVM chain id — without assuming anything from generic Substrate
+  docs?
+- **Source**: T-8.1 live probe, 2026-10-19 ~17:51 UTC, via the implemented
+  probe itself: `KAIZEN_TEST_V3=1 npx vitest run --config
+  vitest.integration.config.mts test/integration/v3-probe.int.test.ts`
+  (`test/integration/v3-probe.int.test.ts`, report logged as one
+  credential-free `[v3-live]` JSON line). Manual pre-checks the same day:
+  `curl -X POST https://test-evm-rpc-v3.portaldot.dev` (`eth_chainId` →
+  `0x190f1ca9`) and a Node `ws` script against the Substrate endpoint
+  (`system_chain`/`system_health`/`chain_getHeader`).
+- **Evidence (verbatim observations, single probe cycle 2026-10-19T17:51Z)**:
+  - **Substrate WS** `wss://test-node-v3.portaldot.dev` — `ok` (3130 ms):
+    `system_chain` = **"PortaldotV3 Test"**; `system_health` =
+    **{peers: 2, isSyncing: false, shouldHavePeers: false}**; best header
+    **#106135** (hash `0x30c7b266…08cab66`).
+  - **EVM JSON-RPC** `https://test-evm-rpc-v3.portaldot.dev` — `ok`
+    (1553 ms): `eth_chainId` = `0x190f1ca9` = **420420777** (matches the
+    supplied expectation exactly); `eth_blockNumber` = **#106135** — the
+    SAME height as the Substrate head, corroborating one chain exposed via
+    two protocols; `web3_clientVersion` is supported and returned
+    **"eth-rpc/main-fddd431/x86_64-unknown-linux-gnu/rustc1.98.0"** — a
+    Frontier-style `eth-rpc`, not a geth client.
+  - Height advances over time (manual pre-check at 17:27 UTC read
+    #105907), i.e. the chain is live, not a static fixture.
+- **Status**: **VERIFIED** (point-in-time, this environment).
+- **Implications**: the T-8.1 default configuration (incl. chain id
+  420420777) is confirmed correct against the real endpoints; monitoring or
+  later phases can read the current height from either surface and they
+  agree; EVM method support includes the optional `web3_clientVersion`.
+- **Uncertainties**: single-host, single-time-point observations; no
+  finality/session/contract state probed (out of T-8.1's read-only
+  connectivity scope); behavior across V3 chain restarts/reorgs not
+  observed; availability of the endpoints from other networks/regions not
+  tested.
+- **Next verification step**: any future task integrating with V3 (e.g.
+  contract deployment) re-runs `KAIZEN_TEST_V3=1` and must treat a
+  chain-id mismatch as a hard stop, not a warning.
+
+## R-24 — Explorer public HTTP response: what is verifiable (T-8.1)
+
+- **Question**: What can honestly be verified about
+  `https://node-console.portaldot.dev` without a browser scraper or a new
+  dependency — and what cannot?
+- **Source**: manual `curl` inspection 2026-10-19 17:28 UTC, plus the
+  probe's bounded availability check (fetch GET, first 2 KiB of the body,
+  17:51 UTC).
+- **Evidence**: HTTP/2 **200**, `content-type: text/html`, server
+  `cloudflare`, ~12.9 kB document, `<title>Portaldot Node Console</title>`
+  (probe observed the same title within its bounded 2 KiB prefix);
+  `last-modified: 2026-10-16`. The page is an HTML SPA (loads
+  `env-config.js`); it exposes **no Substrate WS or EVM JSON-RPC
+  protocol** at this URL.
+- **Status**: **PARTIALLY VERIFIED** — availability, status, content type,
+  and document identity are verified; the explorer's actual data views
+  (accounts, blocks, contracts rendered by its JS bundle) are NOT verified
+  (that would require browser/JS execution — deliberately out of T-8.1
+  scope: no scraper, no new dependency).
+- **Implications**: the probe's explorer check is availability-only and
+  says so in its typed result (`warnings` field: "availability check
+  only…"); no RPC semantics are ever attributed to the explorer.
+- **Uncertainties**: behavior of the console's backend APIs (its
+  `env-config.js` targets) is unknown; whether the title changes across
+  deployments.
+- **Next verification step**: if explorer deep-checks are ever justified,
+  inspect its published API surface first (likely a separate backend URL in
+  `env-config.js`) rather than scraping HTML.
+
+---
+
 ## Summary Matrix
 
 | ID | Capability | Status |
@@ -597,3 +670,5 @@ executed); adapter-internal polling bounds need a wrap backstop ABOVE them
 | R-20 | Platform coverage (macOS/WSL) | VERIFIED |
 | R-21 | HTTP JSON-RPC for monitoring | VERIFIED (Phase 2A) |
 | R-22 | Fault mechanisms: pause/disconnect/partition/terminate (T-3.1) | PARTIALLY VERIFIED — A/B2/C2/C4/C5/D VERIFIED; B1/C1/C3 negative results proven (see matrix). T-3.2: pause + terminate IMPLEMENTED and re-verified live through the injector; peer-disconnect + partition registered as typed-blocked (see T-3.2 status table) |
+| R-23 | Portaldot V3 public endpoints: connectivity & identity (T-8.1) | VERIFIED (2026-10-19) — Substrate WS chain "PortaldotV3 Test", health peers 2 / not syncing, best #106135; EVM chain id 420420777 matches config, same height via both surfaces, client `eth-rpc/main-fddd431…`; point-in-time, single host |
+| R-24 | Explorer public HTTP response (T-8.1) | PARTIALLY VERIFIED — HTTP 200 / text/html / title "Portaldot Node Console" verified (availability-only check); SPA data views not verified (no browser/JS execution; out of scope) |

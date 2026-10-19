@@ -37,8 +37,46 @@ export {
 } from './process/args';
 export type { NodeLaunchSpec } from './process/args';
 
-export { PortaldotRpcClient, readSnapshot } from './rpc/client';
-export type { RpcClientOptions } from './rpc/client';
+export { PortaldotRpcClient, readSnapshot, readProbeState } from './rpc/client';
+export type { RpcClientOptions, SubstrateProbeRead } from './rpc/client';
+
+// V3 connectivity probe (T-8.1, Phase 8) — configuration-driven, read-only
+// checks of the official Portaldot V3 endpoints (DEC-023). No route/UI
+// surface exists: this is an engine service with injectable transports.
+export { V3ConnectivityProbe, probeV3Connectivity } from './v3/probe';
+export type { V3ProbeOptions } from './v3/probe';
+export {
+  V3_ENDPOINT_DEFAULTS,
+  V3_ENV_KEYS,
+  resolveV3Config,
+  redactEndpointUrl,
+} from './v3/config';
+export type { V3EndpointConfig } from './v3/config';
+export {
+  RealSubstrateTransport,
+  FetchJsonRpcTransport,
+  FetchHttpAvailabilityTransport,
+} from './v3/transports';
+export type {
+  V3ProbeTransports,
+  V3SubstrateTransport,
+  V3SubstrateTransportInput,
+  V3HttpJsonRpcTransport,
+  V3JsonRpcTransportInput,
+  V3HttpAvailabilityTransport,
+  V3HttpAvailabilityTransportInput,
+  V3HttpAvailabilityResult,
+} from './v3/transports';
+export type {
+  V3ConnectivityReport,
+  V3EndpointProbeResult,
+  V3EndpointRole,
+  V3EvmObservations,
+  V3ExplorerObservations,
+  V3ProbeFailure,
+  V3ProbeStatus,
+  V3SubstrateObservations,
+} from './v3/types';
 
 export { NetworkService } from './network/service';
 export type { CreateNetworkInput, NetworkServiceOptions } from './network/service';

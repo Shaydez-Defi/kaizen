@@ -19,6 +19,13 @@ export interface RpcClientOptions {
   requestTimeoutMs?: number;
 }
 
+/** Read-only probe result (T-8.1): the three checks the V3 probe performs. */
+export interface SubstrateProbeRead {
+  chainName: string;
+  health: { isSyncing: boolean; peers: number; shouldHavePeers: boolean };
+  best: { number: number; hash: string };
+}
+
 const DEFAULTS = {
   connectTimeoutMs: 15_000,
   requestTimeoutMs: 10_000,
@@ -191,6 +198,41 @@ export class PortaldotRpcClient {
     };
   }
 
+  /**
+   * Read-only connectivity probe reads (T-8.1): chain name, system health,
+   * and the current best header — three parallel reads with one bounded
+   * timeout. No subscriptions, no writes, no unsafe-flagged extras: exactly
+   * what the V3 endpoint probe needs and nothing more.
+   */
+  async probeReads(): Promise<SubstrateProbeRead> {
+    const api = this.requireApi();
+    const [chain, health, header] = await withTimeout(
+      Promise.all([
+        api.rpc.system.chain(),
+        api.rpc.system.health(),
+        api.rpc.chain.getHeader(),
+      ]),
+      this.requestTimeoutMs,
+      'read probe state (chain/health/head)',
+    ).catch((e) => {
+      if (e instanceof KaizenError) throw e;
+      throw new KaizenError(
+        'RPC_ERROR',
+        `Probe reads failed for ${this.wsUrl}: ${messageOf(e)}`,
+        { wsUrl: this.wsUrl },
+      );
+    });
+    return {
+      chainName: chain.toString(),
+      health: {
+        isSyncing: health.isSyncing.valueOf(),
+        peers: health.peers.toNumber(),
+        shouldHavePeers: health.shouldHavePeers.valueOf(),
+      },
+      best: { number: header.number.toNumber(), hash: header.hash.toHex() },
+    };
+  }
+
   /** Subscribe to new block heads. Returns an unsubscribe function. */
   async subscribeHeads(
     onHead: (head: { number: number; hash: string }) => void,
@@ -237,6 +279,23 @@ export async function readSnapshot(
   try {
     await client.connect();
     return await client.getSnapshot();
+  } finally {
+    await client.close();
+  }
+}
+
+/**
+ * One-shot read-only probe helper (T-8.1): connect, read chain/health/head,
+ * ALWAYS disconnect — on success, failure, and timeout alike.
+ */
+export async function readProbeState(
+  wsUrl: string,
+  options: RpcClientOptions = {},
+): Promise<SubstrateProbeRead> {
+  const client = new PortaldotRpcClient(wsUrl, options);
+  try {
+    await client.connect();
+    return await client.probeReads();
   } finally {
     await client.close();
   }

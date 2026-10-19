@@ -114,6 +114,19 @@ through the backend (FR-1).
 
 ---
 
+## Phase 8 — V3 Connectivity (external endpoints) 
+
+No `PHASE_8_PLAN.md` was supplied with the T-8.1 brief (2026-10-19); this
+section records the task exactly as scoped there. Later T-8.x tasks (contract
+deployment, registry, wallet authorization) are **undefined and not started**
+— they must not be inferred or started without their own brief.
+
+| ID | Task | Deps | Pri | Acceptance criteria | Verification | Status |
+|----|------|------|-----|---------------------|--------------|--------|
+| T-8.1 | Portaldot V3 connectivity probe: typed endpoint configuration (official V3 endpoints as overridable defaults) + independent read-only probes of Substrate WS (connect, chain name, health, best header), EVM JSON-RPC (validated envelope/IDs, `eth_chainId` matched against config — mismatch ≠ success, HTTP 200 ≠ healthy), and explorer HTTP (availability only, documented scope); deterministic cleanup on success/failure/timeout; credential-free results (origin-redacted endpoints, scrubbed messages); offline unit suite via injected fakes; env-gated live probe | — | P0 | (a) defaults: `wss://test-node-v3.portaldot.dev`, `https://test-evm-rpc-v3.portaldot.dev`, `https://node-console.portaldot.dev`, chain id 420420777, overridable via explicit options/`KAIZEN_V3_*`; (b) per-endpoint typed statuses `ok/unavailable/timeout/protocol-error/malformed-response/mismatch`; (c) endpoints probed independently (failure of one never suppresses another); (d) no writes/signing/auth; no arbitrary-URL probing surface; (e) unit tests cover the required matrix offline; (f) live probe on configured endpoints gated `KAIZEN_TEST_V3=1` with observations recorded (never reported as passed when skipped/blocked) | unit `packages/engine/test/v3-probe.test.ts` (21/21 mocked); live `test/integration/v3-probe.int.test.ts` (1/1 with gate; 1 skipped without — 2026-10-19) | VERIFIED |
+
+---
+
 ## Milestone Gates
 
 - **G1 (end Phase 1)**: engine can manage a real single node end-to-end; API+CLI exist.

@@ -73,6 +73,7 @@ flowchart TB
 | **MonitoringService** | Polls running networks (one job per network, 2s cadence, in-flight guard): HTTP JSON-RPC sampler → pure health state machine (`unknown/healthy/unhealthy/unavailable/stale`) → typed `monitor.*` events; auto-starts/stops from `network.status` bus events; `snapshotNow()` for on-demand reads (DEC-012/DEC-015). |
 | **NodeProcessManager** | Spawns/kills node processes via **argv arrays** (never shell strings), per-node workdirs, log capture, port allocation, health polling, restart policies. |
 | **PortaldotRpcClient** | Typed wrapper over `@polkadot/api`: health, peers, sync, headers, events, storage reads. Reconnect/backoff logic. |
+| **V3ConnectivityProbe** (`v3/`) | Phase 8 (T-8.1): configuration-driven, read-only connectivity checks of the official Portaldot V3 endpoints — Substrate WS (chain name/health/best header via `readProbeState`), EVM JSON-RPC (validated envelopes + chain-id match against config), explorer HTTP (availability only). Per-endpoint typed results, bounded deadlines, injectable transports (DEC-023); no API/UI surface. |
 | **ScenarioEngine** | Loads scenario definitions (ordered actions + delays), executes with recording (action, ts, result, error), supports replay of the action sequence. |
 | **FailureInjector** | Executes guarded fault operations (stop, SIGSTOP pause, peer disconnect via reserved-peer RPC or rewire, partition by isolation) — only against designated test networks. |
 | **IncidentMonitor** | Subscribes to signals (process exit, RPC unreachable, peer count drop, block stall, `imOnline` events), correlates into incidents with timelines + evidence. |
@@ -135,6 +136,15 @@ sequenceDiagram
 - **Chain interaction policy**: Kaizen never signs mainnet transactions; all
   write operations (staking/session) are Phase 5, guarded, and local-testnet
   first.
+- **V3 external endpoints (Phase 8, T-8.1)**: the official Portaldot V3
+  endpoints (`wss://test-node-v3.portaldot.dev`,
+  `https://test-evm-rpc-v3.portaldot.dev`,
+  `https://node-console.portaldot.dev`, expected EVM chain id 420420777) are
+  configuration **defaults** (explicit options / `KAIZEN_V3_*` env override
+  them), read-only probe targets only. `V3ConnectivityProbe` never signs,
+  never writes, never accepts a caller-supplied URL, and redacts every result
+  to origin form (DEC-023); the live check is environment-gated
+  (`KAIZEN_TEST_V3=1`) so the offline unit suite is unaffected (RSK-29).
 
 ## 6. Process & Network Lifecycle
 

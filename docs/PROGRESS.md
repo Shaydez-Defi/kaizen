@@ -1108,3 +1108,113 @@ explicitly NOT started, roadmap untouched.
   roadmap task is **T-3.6** (Failure Lab CLI/API and UI integration
   surfaces), which must call `engine.scenarioRuns.execute()` /
   `.replay()` exactly like the API does.
+
+## 2026-10-19 — PHASE 8 (partial): Portaldot V3 Connectivity Probe (T-8.1)
+
+**Phase/Task IDs**: Phase 8 — T-8.1 ONLY. Contract deployment, registry
+contracts, wallet authorization, later T-8.x tasks, T-3.6 CLI/UI
+surfaces, Phases 4–7 — explicitly NOT started, roadmap untouched.
+
+### 1. What was built
+
+- **V3 endpoint configuration** (`packages/engine/src/v3/config.ts`):
+  official V3 endpoints as overridable DEFAULTS —
+  `V3_ENDPOINT_DEFAULTS` (substrate `wss://test-node-v3.portaldot.dev`,
+  EVM `https://test-evm-rpc-v3.portaldot.dev`, explorer
+  `https://node-console.portaldot.dev`, expected EVM chain id
+  **420420777**, 15 s probe deadline); `resolveV3Config()` resolves
+  explicit > `KAIZEN_V3_*` env > default with Zod validation that names
+  failing KEYS, never values; `redactEndpointUrl()` reduces any URL to
+  its origin (userinfo/path/query/fragment stripped) for every result,
+  log, and message.
+- **Typed probe service** (`v3/probe.ts`, `v3/types.ts`):
+  `V3ConnectivityProbe` (+ `probeV3Connectivity()`) probes three
+  endpoints INDEPENDENTLY in parallel with per-endpoint hard deadlines
+  (AbortController race bounds even non-cooperating transports) and
+  never rejects. Per-endpoint typed statuses:
+  `ok | unavailable | timeout | protocol-error | malformed-response |
+  mismatch`; `healthy` only when all three are `ok`; unobserved values
+  are `null`, never guessed. Substrate: connect → chain name + system
+  health + best header (height/hash validated, partial observations
+  preserved). EVM: JSON-RPC envelope + response-id validation, hex
+  quantity parsing, chain id compared to configuration (HTTP 200 alone
+  is never success; wrong id → `mismatch`); `web3_clientVersion` is
+  optional — its absence is a warning, never a failure. Explorer:
+  availability-only (status/content-type/bounded 2 KiB title prefix) with
+  the scope limitation recorded in the result's own `warnings`.
+- **Transports** (`v3/transports.ts`): DI interfaces + real
+  implementations reusing existing stacks — `readProbeState()` on the
+  existing `PortaldotRpcClient` (`@polkadot/api`, DEC-001; new
+  `probeReads()` three-parallel-read method + one-shot helper with
+  guaranteed close) for WS, and the engine's `fetch` HTTP stack for
+  JSON-RPC/HTTP (AbortSignal.any deadline+abort; Content-Type only — no
+  auth headers ever). No new dependency; no EVM library.
+- **Redaction**: result sanitization replaces configured URLs with
+  origins, strips URL userinfo generically, and applies the shared
+  `redactSecrets` scrubber — credential-bearing URLs cannot leave the
+  config object (unit-tested with `user:pass@host/path?apikey=` cases).
+- **Safety posture (DEC-023)**: read-only by construction (EVM allowlist
+  `eth_chainId`/`eth_blockNumber`/`web3_clientVersion` with empty params;
+  substrate reads only; explorer GET only); NO API route, NO UI, NO
+  caller-supplied URL anywhere — configuration is the only target source.
+- **Tests**: `packages/engine/test/v3-probe.test.ts` (21 tests, all
+  fakes, offline) covering the required matrix; live env-gated
+  `test/integration/v3-probe.int.test.ts` (own gate `KAIZEN_TEST_V3=1`).
+- **Docs**: IMPLEMENTATION_PLAN new Phase 8 section + T-8.1 row
+  (VERIFIED); TECHNICAL_RESEARCH **R-23** (V3 endpoints VERIFIED) +
+  **R-24** (explorer PARTIALLY VERIFIED) + summary-matrix rows;
+  ARCHITECTURE (component table row + §5 V3 boundary bullet);
+  DECISIONS **DEC-023**; RISKS **RSK-29**; TESTING §15; the Phase 3E
+  report archived verbatim at `docs/reports/PHASE_03E_REPORT.md`
+  (byte-identical, `cmp` clean); `docs/PHASE_REPORT.md` is now the
+  T-8.1 report. `docs/EVIDENCE.md` was NOT created — it does not exist
+  and AGENTS.md fixes research facts in TECHNICAL_RESEARCH.md; live vs
+  mocked evidence is separated in the phase report + TESTING §15.
+
+### 2. Verification (commands + actual results, 2026-10-19)
+
+- `npm run build` → PASS (exit 0).
+- `npm run typecheck` → PASS (exit 0).
+- `npm run lint` → PASS (exit 0).
+- `npm test` → first run 282/283 with ONE failure in
+  `scenario-run.test.ts` ("stand-in node could not listen on 34741" —
+  transient local port-bind contention in the T-3.4 harness, no V3 code
+  involved); isolated re-run of that file → 37/37 PASS; second full run
+  → **283/283 (25 files) PASS**.
+- Live check, ungated: `1 skipped` (a skipped check is never reported as
+  passed).
+- Live check: `KAIZEN_TEST_V3=1 npx vitest run --config
+  vitest.integration.config.mts test/integration/v3-probe.int.test.ts`
+  → **1/1 PASS** (exit 0, 3.1 s). Observations (2026-10-19T17:51Z,
+  `[v3-live]` log line): substrate `ok` — chain **"PortaldotV3 Test"**,
+  health {peers: 2, isSyncing: false, shouldHavePeers: false}, best
+  **#106135** (hash `0x30c7b266…08cab66`), 3130 ms; EVM `ok` —
+  `eth_chainId` **420420777** (= configured expectation; `0x190f1ca9`),
+  block **#106135** (same height as Substrate head — one chain, two
+  surfaces), client `eth-rpc/main-fddd431/x86_64-unknown-linux-gnu/
+  rustc1.98.0`, 1553 ms; explorer `ok` — HTTP 200, text/html, title
+  "Portaldot Node Console" (bounded 2 KiB read), 888 ms;
+  **healthy: true**; endpoints origin-redacted, zero credentials.
+- Hygiene: `pgrep -af portaldot` after the live run → none (the probe
+  closes its own WS/HTTP connections deterministically).
+
+### 3. Problems, decisions, remaining work
+
+- **Supplied-vs-observed match**: the brief's expected chain id
+  420420777 was CONFIRMED by the live read (not assumed); block heights
+  advance between runs (#105907 manual pre-check → #106135 at probe
+  time) — recorded as live-chain evidence, not a discrepancy.
+- **Test-authoring fix (not a code fix)**: two suite failures were my own
+  hex arithmetic (`0x19db3` = 105907, not 172723) and a fake-factory
+  signature bug; both corrected in the test file — no production code was
+  weakened to pass.
+- **DEC-023** recorded; no existing decision changed. `docs/EVIDENCE.md`
+  intentionally not created (see §1). No `PHASE_8_PLAN.md` existed to
+  integrate — the Phase 8 section records the task exactly as briefed.
+- **Not started (per instruction)**: contract deployment / registry /
+  wallet authorization / later T-8.x (undefined without a brief), T-3.6
+  CLI/UI surfaces, Phases 4–7.
+- Next: **STOP after T-8.1** per instruction. When resumed, the next
+  roadmap task is **T-3.6** (Failure Lab CLI/API and UI integration
+  surfaces), which must call `engine.scenarioRuns.execute()` /
+  `.replay()` exactly like the API does.

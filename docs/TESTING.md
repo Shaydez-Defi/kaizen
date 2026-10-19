@@ -722,3 +722,82 @@ suite: **44/44 across 10 files** (T-3.2/T-3.3/T-3.4 suites intact).
 - **Not faked anywhere**: mocked/scripted coverage is labeled unit;
   the live replay's effect and recovery are observed by the test
   itself, not read from the run record.
+
+## 15. Tests Executed in Phase 8 (T-8.1) — V3 Connectivity Probe
+
+### 15.1 Engine unit suite — `packages/engine/test/v3-probe.test.ts` (21 tests, mocked transports — offline)
+
+All three transports are injected fakes; the suite performs **no network
+I/O**. Coverage (one `it` per requirement where applicable):
+
+- configuration: official V3 defaults; env overrides
+  (`KAIZEN_V3_*`); explicit > env > default precedence; invalid
+  config rejected as `INVALID_INPUT` naming the KEY, never the value;
+  `redactEndpointUrl` origin-stripping.
+- independent success: all three endpoints `ok` with real observation
+  shapes; default endpoints shown origin-redacted in results.
+- independence: substrate down + EVM/explorer up; EVM down +
+  substrate/explorer up; all three failing differently (unavailable /
+  protocol-error / timeout) — three results always returned, `healthy`
+  false, no short-circuit, nothing suppressed.
+- timeout + cleanup: a hung substrate transport yields `timeout` within
+  the 500 ms deadline (elapsed bounded, latency ≥ 450 ms) and the
+  transport's `AbortSignal` is observed fired (`signal.aborted`,
+  abort-counter 1) — deterministic cleanup path; transport-thrown
+  `RPC_TIMEOUT`/`RPC_ERROR` are classified instantly (not by waiting for
+  the deadline).
+- malformed responses: HTTP 200 with non-JSON body →
+  `malformed-response`; invalid hex `eth_blockNumber`; substrate header
+  height/hash garbage and malformed health → `malformed-response` with
+  the valid partial observations preserved; valid hex heights accepted.
+- protocol errors: JSON-RPC error object with HTTP 200 →
+  `protocol-error` (code + sanitized message); wrong `jsonrpc` version;
+  response id mismatch; response with neither result nor error; non-2xx
+  HTTP status.
+- chain id: observed `0x64` (100) vs configured 420420777 → `mismatch`
+  (never `ok`), observed id and expected id both reported.
+- optional method: `web3_clientVersion` returning `-32601` records a
+  warning and `clientVersion: null` while the probe stays `ok`.
+- redaction: a credential-bearing config URL and a hostile transport
+  message echoing it produce zero occurrences of userinfo/path/query
+  material anywhere in the serialized report; endpoints appear origin-only.
+- read-only: EVM methods limited to `eth_chainId`/`eth_blockNumber`/
+  `web3_clientVersion` with empty params and no header/auth inputs;
+  substrate transport input limited to url/timeouts/signal; no
+  write/sign/authorization-shaped content anywhere.
+- `RealSubstrateTransport` abort path exercised offline against a closed
+  local port with a pre-aborted signal → rejects `RPC_TIMEOUT`.
+- single-endpoint use: `probeEndpoint('evm-rpc')` honors the same contract.
+
+### 15.2 LIVE integration — `test/integration/v3-probe.int.test.ts` (gated `KAIZEN_TEST_V3=1`)
+
+Independent gate (not `KAIZEN_TEST_LIVE`): **without the gate the suite is
+skipped — verified: running it ungated reports `1 skipped`, never passed**.
+With the gate, the probe runs against the configured official V3 endpoints
+and the test asserts `ok` on every endpoint with real observations, the
+chain id exactly 420420777, block number > 0, a hash-shaped best-header
+hash, HTTP 2xx + `html` content type + non-empty document title for the
+explorer, `healthy: true`, and origin-redacted endpoints in the report.
+The full sanitized report is logged as one `[v3-live]` JSON line for
+evidence. Actual run (2026-10-19 17:51 UTC): substrate
+`PortaldotV3 Test` / peers 2 / not syncing / best #106135 / 3130 ms; EVM
+chain id 420420777 / block #106135 / client
+`eth-rpc/main-fddd431/x86_64-unknown-linux-gnu/rustc1.98.0` / 1553 ms;
+explorer HTTP 200 `text/html` title "Portaldot Node Console" / 888 ms;
+`healthy: true` (R-23/R-24).
+
+- **CLI/UI surfaces**: none in T-8.1 by design (DEC-023) — nothing to
+  smoke; shared typecheck/build gates cover the engine package.
+- **Hygiene after the live run**: the probe opens and closes its own WS/HTTP
+  connections; `pgrep -af portaldot` after → none.
+
+### 15.3 Commands and actual results (2026-10-19)
+
+| Command | Result |
+|---------|--------|
+| `npm run build` | PASS (exit 0; engine/cli/api/web) |
+| `npm run typecheck` | PASS (exit 0) |
+| `npm run lint` | PASS (exit 0) |
+| `npm test` | First full run: 282/283 — one failure in `scenario-run.test.ts` ("stand-in node could not listen on 34741", a transient local port-bind contention in the harness, not V3 code); isolated re-run of that file: 37/37 PASS; second full run: **283/283 (25 files) PASS** |
+| `npx vitest run --config vitest.integration.config.mts test/integration/v3-probe.int.test.ts` (no gate) | 1 skipped — the live check does not pass without its gate |
+| `KAIZEN_TEST_V3=1 npx vitest run --config vitest.integration.config.mts test/integration/v3-probe.int.test.ts` | **1/1 PASS** (exit 0, 3.1 s probe; observations in §15.2 / R-23 / R-24) |

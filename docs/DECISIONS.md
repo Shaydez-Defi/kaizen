@@ -515,3 +515,68 @@ Format: context → decision → alternatives → consequences. Newest entries a
   queryable (`?replayOf=`) without rewriting history; the DEC-019/DEC-021
   authorization posture is unchanged (RSK-26/T-7.3 still own
   authenticated non-loopback identity).
+
+## DEC-023 — V3 connectivity probe: configuration is the only target source; engine-service surface; honest, availability-scoped checks
+
+- **Context**: T-8.1 adds connectivity checks against the official
+  Portaldot V3 endpoints. The design risks were: (a) a probe that accepts
+  arbitrary URLs becoming an SSRF-style scanning surface; (b) credential-
+  bearing endpoint URLs (env overrides) leaking into results/logs;
+  (c) overclaiming explorer "health" by attributing RPC semantics to an
+  HTML site; (d) treating HTTP 200 or an expected-looking response as
+  "healthy" without validating the protocol answer.
+- **Decision**:
+  1. **Official endpoints are configuration defaults, never immutable
+     constants — and configuration is the only target source.**
+     `V3_ENDPOINT_DEFAULTS` (substrate `wss://test-node-v3.portaldot.dev`,
+     EVM `https://test-evm-rpc-v3.portaldot.dev`, explorer
+     `https://node-console.portaldot.dev`, expected chain id 420420777)
+     are overridable per-call (explicit options win) and per-environment
+     (`KAIZEN_V3_*`). The probe has **no route, no request input, no URL
+     parameter** — nothing can steer it at arbitrary destinations; any
+     future surface must keep the config-only posture.
+  2. **One small typed engine service with injected transports.**
+     `V3ConnectivityProbe` (DEC-002 package boundaries; `v3/` module)
+     depends on transport interfaces; unit tests inject fakes. Real
+     transports reuse existing compatible clients — `PortaldotRpcClient`
+     (`@polkadot/api`, DEC-001) for Substrate WS via the new read-only
+     `readProbeState()`, and the engine's `fetch` HTTP stack for
+     JSON-RPC/HTTP. No new dependency (no EVM library needed for three
+     hex-quantity reads).
+  3. **Honest status model.** Per-endpoint typed results with
+     `ok | unavailable | timeout | protocol-error | malformed-response |
+     mismatch`; `healthy` only when all three are `ok`. EVM identity is
+     proven by reading `eth_chainId` and matching configuration — HTTP 200
+     alone is never success; a wrong chain id is `mismatch`, never a pass;
+     unobserved values are `null`, never guessed; a hard per-endpoint
+     deadline bounds even non-cooperating transports, and the abort signal
+     drives deterministic cleanup.
+  4. **Explorer check is availability-only, by scope.** It verifies only
+     what the public HTTP response shows (status, content type, bounded-
+     prefix document title) and records that limitation in the result's
+     own `warnings` (R-24: PARTIALLY VERIFIED). No scraper, no headless
+     browser, no RPC semantics attributed to the console.
+  5. **Redaction by construction.** Results/logs carry origin-only
+     endpoints (`redactEndpointUrl` strips userinfo/path/query/fragment);
+     message sanitization replaces configured URLs with their origins,
+     strips URL userinfo generically, and applies the shared secret
+     scrubber; config validation errors name KEYS, never values.
+  6. **Live checking is environment-gated** (`KAIZEN_TEST_V3=1`, its own
+     gate); the unit suite stays fully offline; a skipped gate is reported
+     as skipped, never as passed (RSK-29).
+- **Alternatives**: a probe API route (UI-facing) — rejected for T-8.1
+  scope; if ever added it must remain config-only (no caller-supplied
+  URL); adding ethers/viem for the EVM read — rejected (dependency
+  discipline; the read is three validated JSON-RPC calls); scraping the
+  explorer UI / headless browser — rejected (fragile, new dependency,
+  out of scope); immutable endpoint constants — rejected (staging/testnet
+  overrides and honest config-vs-observation comparison need overrides);
+  throwing from the probe on failure — rejected (per-endpoint typed
+  results preserve sibling evidence and make partial outages visible).
+- **Consequences**: an auditable, credential-free connectivity surface
+  that later V3 tasks can build on; the first live run CONFIRMED the
+  supplied expectation (chain id 420420777, R-23) instead of assuming it;
+  no API/UI surface exists yet (by design); research facts live in
+  `docs/TECHNICAL_RESEARCH.md` (R-23/R-24) per AGENTS.md rather than a new
+  `docs/EVIDENCE.md` (which does not exist and was not created — the
+  phase report separates live vs mocked evidence).
