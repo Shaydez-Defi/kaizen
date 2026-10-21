@@ -31,9 +31,35 @@ import type {
   ScenarioStepRun,
   ScenarioValidationResult,
   SerializedOperationDefinition,
+  FaultRecord,
+  FaultExecutionResult,
+  FaultPreview,
+  FaultType,
+  FaultState,
+  V3ConnectivityReport,
+  V3EndpointProbeResult,
+  V3AnchorRecord,
+  V3ContractRecord,
+  V3AnchorStatusReport,
+  V3AnchorVerification,
+  V3AnchorMethod,
+  RpcPeerInfo,
 } from '@kaizen/engine';
 
 export type {
+  FaultRecord,
+  FaultExecutionResult,
+  FaultPreview,
+  FaultType,
+  FaultState,
+  V3ConnectivityReport,
+  V3EndpointProbeResult,
+  V3AnchorRecord,
+  V3ContractRecord,
+  V3AnchorStatusReport,
+  V3AnchorVerification,
+  V3AnchorMethod,
+  RpcPeerInfo,
   KaizenEventMap,
   KaizenEventName,
   NetworkMonitorSnapshot,
@@ -198,4 +224,73 @@ export interface ScenarioRunListResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ---------------------------------------------------------------------------
+// Faults (T-3.2 FailureInjector surface, consumed by the Failure Lab UI)
+
+export interface FaultRequestInput {
+  nodeId: string;
+  type: FaultType;
+  options?: { durationMs?: number };
+  requestedBy?: string;
+}
+
+export interface FaultDryRunResponse {
+  ok: boolean;
+  preview: FaultPreview;
+}
+
+export interface FaultExecuteResponse {
+  ok: boolean;
+  result: FaultExecutionResult;
+}
+
+export interface FaultListResponse {
+  ok: boolean;
+  faults: FaultRecord[];
+}
+
+export interface FaultResponse {
+  ok: boolean;
+  fault: FaultRecord;
+}
+
+// ---------------------------------------------------------------------------
+// Portaldot V3 (T-8.1 probe + T-8.2 anchoring)
+
+export interface V3ProbeResponse {
+  ok: boolean;
+  report: V3ConnectivityReport;
+}
+
+export interface V3StatusResponse {
+  ok: boolean;
+  status: V3AnchorStatusReport;
+}
+
+export interface V3AnchorListResponse {
+  ok: boolean;
+  anchors: V3AnchorRecord[];
+  contracts: V3ContractRecord[];
+  /** polkadot-js node-console block URL with a `{block}` placeholder. */
+  explorerBlockUrlTemplate: string;
+}
+
+export interface V3AnchorResponse {
+  ok: boolean;
+  anchor: V3AnchorRecord;
+}
+
+export interface V3VerifyResponse {
+  ok: boolean;
+  verification: V3AnchorVerification;
+}
+
+export interface V3RunHashResponse {
+  ok: boolean;
+  runId: string;
+  runHash: string;
+  state: string;
+  anchorable: boolean;
 }
