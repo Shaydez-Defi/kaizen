@@ -284,6 +284,54 @@ export class V3AnchorService {
     }
   }
 
+  /**
+   * Record an existing registry deployment from CHAIN EVIDENCE only (block
+   * hash + extrinsic hash): the extrinsic must exist in that block, have
+   * succeeded, and have emitted revive.Instantiated. Used to recover a
+   * deployment whose local record was lost or never written. Read-only.
+   */
+  async importDeployment(blockHash: string, txHash: string): Promise<V3ContractRecord> {
+    if (!isBytes32Hex(blockHash.toLowerCase()) || !isBytes32Hex(txHash.toLowerCase())) {
+      throw new KaizenError('INVALID_INPUT', 'blockHash and txHash must be 0x-prefixed 32-byte hex');
+    }
+    const session = await this.open();
+    try {
+      const info = await session.info();
+      const dep = await session.deploymentAt(blockHash.toLowerCase(), txHash.toLowerCase());
+      if (!dep) {
+        throw new KaizenError('V3_TX_FAILED', `Extrinsic ${txHash} was not found in block ${blockHash}`);
+      }
+      if (!dep.success || !dep.contract) {
+        throw new KaizenError(
+          'V3_TX_FAILED',
+          `Extrinsic ${txHash} did not deploy a contract (events: ${dep.events.join(', ')})`,
+        );
+      }
+      const record: V3ContractRecord = {
+        address: dep.contract,
+        name: 'KaizenRunRegistry',
+        codeHash: keccakAsHex(KAIZEN_RUN_REGISTRY_ARTIFACT.bytecode, 256),
+        deployerAddress: dep.signer,
+        chainName: info.chainName,
+        genesisHash: info.genesisHash,
+        txHash: txHash.toLowerCase(),
+        blockHash: blockHash.toLowerCase(),
+        blockNumber: dep.blockNumber,
+        createdAt: this.iso(),
+      };
+      this.store.insertV3Contract(record);
+      this.events.emit('v3.contract', {
+        address: record.address,
+        txHash: record.txHash,
+        blockNumber: record.blockNumber,
+        at: record.createdAt,
+      });
+      return record;
+    } finally {
+      await session.close();
+    }
+  }
+
   /** Anchor a finished run's deterministic hash on the V3 test network. */
   async anchorRun(
     runId: string,

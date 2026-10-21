@@ -52,6 +52,7 @@ const fakeChain: V3ChainConnector = {
       freeBalance: async () => 123_450_000_000_000_000n,
       evmAddressOf: async () => '0x' + '31'.repeat(20),
       blockHashAt: async () => '0x' + '22'.repeat(32),
+      deploymentAt: async () => null,
       remarkAt: async () => null,
       submitRemark: async () => receipt(),
       deployContract: async () => receipt({ instantiated: '0x' + 'ab'.repeat(20) }),
@@ -163,7 +164,7 @@ afterAll(() => {
 describe('kaizen v3', () => {
   it('lists the v3 subcommands in help', async () => {
     const r = await runCli(['v3', '--help']);
-    for (const c of ['probe', 'status', 'deploy-registry', 'hash', 'anchor', 'anchors', 'verify']) expect(r.stdout).toContain(c);
+    for (const c of ['probe', 'status', 'deploy-registry', 'import-deployment', 'hash', 'anchor', 'anchors', 'verify']) expect(r.stdout).toContain(c);
   });
 
   it('shows status with balance and the public address only', async () => {

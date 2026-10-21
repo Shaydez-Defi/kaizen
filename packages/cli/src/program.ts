@@ -1021,6 +1021,17 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     });
 
   v3Cmd
+    .command('import-deployment <blockHash> <txHash>')
+    .description('Record an existing KaizenRunRegistry deployment from chain evidence (read-only; verifies revive.Instantiated)')
+    .action(async (blockHash: string, txHash: string) => {
+      await run(async (engine, opts) => {
+        const contract = await engine.v3Anchors.importDeployment(blockHash, txHash);
+        if (opts.json) printJson({ ok: true, contract });
+        else console.log(`registry ${contract.address} recorded (block ${contract.blockNumber}, tx ${contract.txHash})`);
+      });
+    });
+
+  v3Cmd
     .command('hash <runId>')
     .description('Compute the deterministic run hash offline (what `anchor` would write)')
     .action(async (runId: string) => {

@@ -56,6 +56,7 @@ const fakeChain: V3ChainConnector = {
       freeBalance: async () => 10n ** 16n,
       evmAddressOf: async () => '0x' + '31'.repeat(20),
       blockHashAt: async () => '0x' + '22'.repeat(32),
+      deploymentAt: async () => null,
       remarkAt: async () => null,
       submitRemark: async () => receipt(),
       deployContract: async () => receipt({ instantiated: REGISTRY }),

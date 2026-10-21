@@ -128,6 +128,10 @@ class FakeChain implements V3ChainConnector {
       freeBalance: async () => self.opts.balance ?? 10n ** 16n,
       evmAddressOf: async () => '0x' + '31'.repeat(20),
       blockHashAt: async () => (self.opts.blockHashAt !== undefined ? self.opts.blockHashAt : '0x' + '22'.repeat(32)),
+      deploymentAt: async (_b, tx) =>
+        tx === '0x' + '00'.repeat(32)
+          ? null
+          : { contract: tx === '0x' + '33'.repeat(32) ? null : REGISTRY, signer: ALICE, blockNumber: 4000, success: true, events: ['revive.Instantiated'] },
       remarkAt: async () => (self.opts.remarkText !== undefined ? self.opts.remarkText : null),
       submitRemark: async (_signer, payload) => {
         self.calls.push({ kind: 'remark', args: [payload] });
@@ -465,9 +469,36 @@ describe('V3AnchorService', () => {
     expect((await good.svc.verify(anchor.id)).verdict).toBe('mismatch');
   });
 
+  it('imports a past deployment only from chain evidence', async () => {
+    const { svc, store } = setup();
+    const rec = await svc.importDeployment('0x' + '22'.repeat(32), '0x' + '44'.repeat(32));
+    expect(rec).toMatchObject({ address: REGISTRY, deployerAddress: ALICE, blockNumber: 4000, genesisHash: GENESIS });
+    expect(store.listV3Contracts()).toHaveLength(1);
+    await expectCode(svc.importDeployment('0x' + '22'.repeat(32), '0x' + '00'.repeat(32)), 'V3_TX_FAILED');
+    await expectCode(svc.importDeployment('0x' + '22'.repeat(32), '0x' + '33'.repeat(32)), 'V3_TX_FAILED');
+    await expectCode(svc.importDeployment('0x12', '0x34'), 'INVALID_INPUT');
+  });
+
   it('exposes a stable offline hash of a run', () => {
     const { svc, store } = setup();
     const run = makeRun(store);
     expect(svc.hashRun(run.id)).toEqual({ runId: run.id, runHash: computeRunHash(run), state: 'completed', anchorable: true });
+  });
+});
+
+describe('committed V3 testnet evidence (docs/evidence)', () => {
+  it('recomputes the exact run hashes that were anchored on the V3 test network', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const root = path.resolve(__dirname, '../../../docs/evidence');
+    const anchors = JSON.parse(fs.readFileSync(path.join(root, 'v3-anchors.json'), 'utf8')) as {
+      anchors: { runId: string; runHash: string; status: string }[];
+    };
+    const landed = anchors.anchors.filter((a) => a.status === 'finalized' || a.status === 'in-block');
+    expect(landed.length).toBeGreaterThanOrEqual(3);
+    for (const a of landed) {
+      const run = JSON.parse(fs.readFileSync(path.join(root, 'runs', `${a.runId}.json`), 'utf8')) as ScenarioRunRecord;
+      expect(computeRunHash(run)).toBe(a.runHash);
+    }
   });
 });

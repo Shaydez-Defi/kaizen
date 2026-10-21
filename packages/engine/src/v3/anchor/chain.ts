@@ -69,6 +69,17 @@ export interface V3ChainSession {
   submitRemark(signer: KeyringPair, payload: string, opts: V3SubmitOptions): Promise<V3TxReceipt>;
   deployContract(signer: KeyringPair, initCode: string, opts: V3SubmitOptions): Promise<V3TxReceipt>;
   callContract(signer: KeyringPair, contract: string, calldata: string, opts: V3SubmitOptions): Promise<V3TxReceipt>;
+  /**
+   * Re-read a past deployment from chain evidence: the extrinsic (by hash)
+   * in the given block, its signer, success, and revive.Instantiated address.
+   */
+  deploymentAt(blockHash: string, txHash: string): Promise<{
+    contract: string | null;
+    signer: string;
+    blockNumber: number;
+    success: boolean;
+    events: string[];
+  } | null>;
   /** Text of a `system.remark*` extrinsic at (block, index); null when absent. */
   remarkAt(blockHash: string, extrinsicIndex: number): Promise<string | null>;
   /** Read-only contract call (runtime-API dry run); returns return data hex. */
@@ -116,6 +127,13 @@ interface WeightLike {
   refTime: BigLike;
   proofSize: BigLike;
 }
+/** ReturnFlags is `{ bits: u32 }` on this runtime (observed live); older
+ *  shapes expose the number directly. */
+type ReturnFlagsLike = { bits?: { toNumber(): number }; toNumber?: () => number };
+function flagBits(flags: ReturnFlagsLike): number {
+  if (flags.bits) return flags.bits.toNumber();
+  return flags.toNumber ? flags.toNumber() : 0;
+}
 interface DispatchErrorLike {
   isModule: boolean;
   asModule: unknown;
@@ -125,7 +143,7 @@ interface ReviveDryRun {
   result: {
     isErr: boolean;
     asErr: DispatchErrorLike;
-    asOk: { flags: { toNumber(): number }; data: { toHex(): string } };
+    asOk: { flags: ReturnFlagsLike; data: { toHex(): string } };
   };
   weightRequired: WeightLike;
   storageDeposit: { isCharge: boolean; asCharge: BigLike };
@@ -236,10 +254,14 @@ class PolkadotV3ChainSession implements V3ChainSession {
     };
   }
 
-  /** Charge + 50% headroom (the unused part of the limit is never taken). */
+  /**
+   * Dry-run charge + 2% + 0.01 unit headroom. The dry run is deterministic
+   * for the same code/state, so a small margin suffices; a large margin
+   * could exceed the signer's free balance (the limit must be payable).
+   */
   private depositLimit(deposit: ReviveDryRun['storageDeposit']): bigint {
     const charge = deposit.isCharge ? deposit.asCharge.toBigInt() : 0n;
-    return charge + charge / 2n + 1_000_000_000_000n;
+    return charge + charge / 50n + 1_000_000_000_000n;
   }
 
   private async ensureMapped(signer: KeyringPair, opts: V3SubmitOptions): Promise<void> {
@@ -274,7 +296,7 @@ class PolkadotV3ChainSession implements V3ChainSession {
     const dry = await this.rt.call.reviveApi.call(signer.address, contract, 0, null, null, calldata);
     if (dry.result.isErr) throw this.dryRunFailure(dry.result, 'contract call');
     const ok = dry.result.asOk;
-    if (ok.flags.toNumber() & 1) {
+    if (flagBits(ok.flags) & 1) {
       // REVERT flag: the contract refused (e.g. "already anchored").
       throw new KaizenError('V3_TX_FAILED', `contract call dry run reverted (data ${ok.data.toHex().slice(0, 266)})`, {
         reverted: true,
@@ -288,6 +310,32 @@ class PolkadotV3ChainSession implements V3ChainSession {
       calldata,
     );
     return this.submit(tx, signer, opts, 'revive.call');
+  }
+
+  async deploymentAt(blockHash: string, txHash: string): Promise<{
+    contract: string | null;
+    signer: string;
+    blockNumber: number;
+    success: boolean;
+    events: string[];
+  } | null> {
+    const signed = await this.api.rpc.chain.getBlock(blockHash);
+    const idx = signed.block.extrinsics.findIndex((e) => e.hash.toHex() === txHash);
+    const ext = signed.block.extrinsics[idx];
+    if (idx < 0 || !ext) return null;
+    const at = (await this.api.at(blockHash)) as unknown as {
+      query: { system: { events(): Promise<unknown> } };
+    };
+    const all = (await at.query.system.events()) as EventRecord[];
+    const mine = all.filter((e) => e.phase.isApplyExtrinsic && e.phase.asApplyExtrinsic.toNumber() === idx);
+    const extracted = this.extract(mine);
+    return {
+      contract: extracted.instantiated,
+      signer: ext.signer.toString(),
+      blockNumber: signed.block.header.number.toNumber(),
+      success: extracted.events.includes('system.ExtrinsicSuccess'),
+      events: extracted.events,
+    };
   }
 
   async remarkAt(blockHash: string, extrinsicIndex: number): Promise<string | null> {
@@ -304,7 +352,7 @@ class PolkadotV3ChainSession implements V3ChainSession {
     const dry = await this.rt.call.reviveApi.call(origin, contract, 0, null, null, calldata);
     if (dry.result.isErr) throw this.dryRunFailure(dry.result, 'contract read');
     const ok = dry.result.asOk;
-    if (ok.flags.toNumber() & 1) throw new KaizenError('V3_TX_FAILED', 'contract read reverted');
+    if (flagBits(ok.flags) & 1) throw new KaizenError('V3_TX_FAILED', 'contract read reverted');
     return ok.data.toHex();
   }
 
@@ -428,24 +476,26 @@ class PolkadotV3ChainSession implements V3ChainSession {
     let remarkHash: string | null = null;
     for (const { event } of events) {
       names.push(`${event.section}.${event.method}`);
-      const data = event.data as unknown as Record<string, { toHex(): string; map?: unknown }> & {
-        toJSON(): Record<string, unknown>;
-      };
+      // Event data serializes positionally on the V3 runtime (observed live:
+      // revive.Instantiated -> [deployer, contract]); accept named shapes too.
+      const raw = (event.data as unknown as { toJSON(): unknown }).toJSON();
+      const field = (name: string, index: number): unknown =>
+        Array.isArray(raw) ? raw[index] : (raw as Record<string, unknown> | null)?.[name];
       if (event.section === 'revive' && event.method === 'ContractEmitted') {
-        const json = data.toJSON() as { contract?: string; data?: string; topics?: string[] };
+        const topics = field('topics', 2);
         logs.push({
-          contract: String(json.contract ?? '').toLowerCase(),
-          data: String(json.data ?? '0x'),
-          topics: (json.topics ?? []).map((t) => String(t).toLowerCase()),
+          contract: String(field('contract', 0) ?? '').toLowerCase(),
+          data: String(field('data', 1) ?? '0x'),
+          topics: (Array.isArray(topics) ? topics : []).map((t) => String(t).toLowerCase()),
         });
       }
       if (event.section === 'revive' && event.method === 'Instantiated') {
-        const json = data.toJSON() as { contract?: string };
-        instantiated = json.contract ? String(json.contract).toLowerCase() : null;
+        const contract = field('contract', 1);
+        instantiated = contract ? String(contract).toLowerCase() : null;
       }
       if (event.section === 'system' && event.method === 'Remarked') {
-        const json = data.toJSON() as { hash_?: string; hash?: string };
-        remarkHash = String(json.hash_ ?? json.hash ?? '') || null;
+        const hash = field('hash_', 1) ?? field('hash', 1);
+        remarkHash = hash ? String(hash) : null;
       }
     }
     return { events: names, logs, instantiated, remarkHash };
