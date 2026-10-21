@@ -1314,3 +1314,57 @@ K8s/Helm — untouched.
 - Next: **T-3.6B — wire the imported web UI to the Failure Lab API**
   (typed-client compatibility only; no fabricated data), or the next
   roadmap task as directed.
+
+## 2026-10-21 — PHASE 8B: V3 On-Chain Run Anchoring (T-8.2) + PHASE 3G: Console Integration (T-3.6B)
+
+### 1. What was done
+
+- **T-8.2 (commits 633d144, 3516bc5, 667d051)**: KaizenRunRegistry
+  contract + reproducible build; engine `V3AnchorService` (canonical run
+  hash, ABI codec, env-only signer, runtime dry runs, persist-first anchor
+  records, verify); SQLite migrations 19–22; CLI `kaizen v3 probe|status|
+  deploy-registry|import-deployment|hash|anchor|anchors|verify`; API
+  `/api/v3/*`; console **Portaldot V3** screen (probe cards, signer/registry
+  status, anchored runs with node-console block links, per-anchor Verify,
+  Anchor run with confirm — remark default, contract shows the deposit
+  warning). Decisions DEC-026 / DEC-027.
+- **Live on PortaldotV3 Test (chain id 420420777)**: registry
+  `0x08fdadd1ebe16234c03b723255cc12fd98a5ef07` deployed at block 136822
+  (tx `0x2fa1c5ae2de79d71ca663d7e7050cc9995e4803b234ade6dd916bc3a8d5eff30`);
+  contract anchors block 136899 (tx
+  `0xa06abaa085c59486bd2a8d8e4d593b30a9a6e521c7908c6de4b3bdbb70f8c5b7`) and
+  136919 (tx `0x8ae9cfc07d559c9dc058472869ae6daa1c364d8965f597704bcc44893abd4df9`);
+  remark anchors block 136940 (tx
+  `0xa9b15505f07d72738159fb24af61f9959319f7e241125c4b1e82d1c8ab1173ff`) and
+  136947 (tx `0x84027d2397efce0930e1a5abd49b77a741a8820f4373ebb8dc9c97f7fd774f49`).
+  The anchored runs were real Failure Lab runs on a local two-node
+  `portaldot_dev` network, executed on the arm64 sandbox under qemu-user
+  x86_64 emulation (RSK-31). Evidence: `docs/evidence/`,
+  `docs/assets/node-console-block-136899.webp`.
+- **T-3.6B (commit e34635f)**: the imported framer-motion console replaces
+  the Phase 2B pages; every screen on the typed client + WS (Overview live
+  topology, node drawer, Failure Lab, Scenarios, Incidents evidence,
+  Deployments, Validators, Settings); unbuilt features disabled + labelled
+  (DEC-028).
+
+### 2. Verification (commands + ACTUAL results, 2026-10-21)
+
+- `npm run typecheck` ✓, `npm run lint` ✓, `npm run build` ✓.
+- Unit suite in chunks (120 s command cap): web 55/55 (7 files), api+cli
+  79/79 (5), engine 60/60 + 134/134 + 41/41 + 10/10 → **379/379 (29
+  files)**.
+- Live re-verification against the public V3 endpoints with the API on
+  the evidence data dir: probe healthy 3/3 (best #137255, EVM chain id
+  match, node console HTTP 200); status → registry from deployment,
+  signer ≈3.15 tPOT; verify → all four finalized anchors `verified`.
+
+### 3. Problems, decisions, remaining work
+
+- Costs observed (RSK-30): ≈85 tPOT deploy, ≈4 tPOT per contract anchor,
+  ≈0.02 tPOT per remark; one contract attempt failed honestly with
+  `StorageDepositNotEnoughFunds` and is recorded as `failed`.
+- The qemu workaround was not present in the docs/UI session, so the new
+  console was NOT driven against a live network or in a real browser
+  (RSK-23); T-3.6B stays IMPLEMENTED and T-3.6 PARTIAL.
+- Next: live UI smoke on an x86_64 host (create → monitor → Failure Lab
+  pause → V3 remark anchor → verify); refund the deployer; Phase 4.

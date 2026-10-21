@@ -1,189 +1,96 @@
-# Phase 3F Report (partial) — Failure Lab CLI/API Integration (T-3.6A)
+# Phase 8B + 3G Report — V3 On-Chain Run Anchoring (T-8.2) & Console Integration (T-3.6B)
 
-**Date**: 2026-10-21 · **Status**: IMPLEMENTED & VERIFIED (this slice)
-· Prior report archived verbatim as `docs/reports/PHASE_08A_REPORT.md`.
+**Date**: 2026-10-21 · **Context**: Portaldot Hacker House — Week 2 submission
+· **Status**: T-8.2 VERIFIED (live on the V3 test network; console screen
+IMPLEMENTED) · T-3.6B IMPLEMENTED (jsdom-verified; live browser smoke
+pending) · Prior report archived verbatim as `docs/reports/PHASE_03F_REPORT.md`.
 
 ## 1. Task & scope
 
-T-3.6A ONLY: the operator-facing CLI surface for Failure Lab scenarios
-and runs (authoring, execution, replay, inspection, cancellation) plus
-an audit of the API surface. Explicitly out of scope for this slice:
-the web-UI integration surface (T-3.6B — imported UI wiring), Phase 4,
-contracts/registry/wallet, K8s/Helm, Phases 5–7. T-3.6 as a whole
-remains PARTIAL until the UI flow exists.
+- **T-8.2** — anchor finished Failure Lab runs on the Portaldot V3 TEST
+  network: deterministic run hash, `KaizenRunRegistry` contract (Solidity,
+  EVM bytecode on pallet-revive) plus an explicit `remarkWithEvent`
+  fallback, verify, CLI/API surfaces, and a console screen.
+- **T-3.6B** — port the user's new framer-motion console design into
+  `apps/web` with every screen on the real API/WS (no simulated store).
+- Out of scope: incident detection (Phase 4), validator operations
+  (Phase 5), Docker/K8s adapters (Phase 6), wallet-based signing (unbriefed
+  T-8.x). These appear in the console as disabled, labelled affordances.
 
-Constraints honored: the CLI calls the shared engine (`packages/engine`)
-— never a second executor, never a re-implementation of gates, target
-validation, preconditions, cancellation, timeout, or cleanup; no
-destructive operation can reach a non-designated-test network (DEC-008
-gates stay engine-side); audit history and source-run immutability
-preserved; no new dependencies; the API needed **zero changes** (audit
-below).
+## 2. Architecture & files
 
-## 2. Architecture & files changed
+- `contracts/KaizenRunRegistry.sol` + `compile-registry.mjs` + committed
+  artifact; `packages/engine/src/v3/anchor/*` (canonical hash, ABI codec,
+  signer, chain session with runtime dry runs, `V3AnchorService`); SQLite
+  migrations 19–22; CLI `kaizen v3 …`; API `/api/v3/*` (see ARCHITECTURE §5,
+  mermaid diagram of the anchoring path).
+- `apps/web/src`: `App.tsx` (shell), `state/ConsoleContext.tsx`,
+  `lib/model.ts` (view model), `lib/eventText.ts`, `components/{ui,
+  Topology,Backdrop,NodeDrawer}.tsx`, `pages/{Landing,Create,Overview,
+  Validators,Lab,Scenarios,Incidents,Deployments,V3,Settings}.tsx`, tests in
+  `pages/*.test.tsx`, `lib/model.test.ts`, `test-utils/{mockApi,renderConsole}`.
+- Client changes: `dryRunFault` typed (`FaultDryRunResponse`); error
+  bodies without an `{error}` envelope are kept in `ApiError.details`
+  (the 403 dry-run preview). Dependency: `framer-motion` 12 (the design's
+  motion system; nothing else added).
+- Decisions: DEC-026 (explicit, env-signed, persist-first writes), DEC-027
+  (contract primary, remark explicit), DEC-028 (real data only; unbuilt
+  features disabled + labelled). Risks: RSK-30 (deposit costs), RSK-31
+  (arm64 host), RSK-23 updated (no browser E2E).
 
-- `packages/cli/src/program.ts` (NEW): the whole CLI program —
-  `kaizen scenario (list | get <id> | create <file> | validate <file> |
-  operations)` and `kaizen run (execute <scenarioId> | replay <runId> |
-  list | get <runId> | cancel <runId>)`. `execute`/`replay` require
-  explicit `-n, --network <idOrName>` (never inferred) and accept
-  bounded `--timeout <ms>` (default 300000; cancel 60000). Structured
-  errors + exit codes per DEC-024; rejected runs are surfaced with their
-  persisted id and an actionable hint. `buildProgram(deps?)` exposes an
-  engine-factory DI seam used by tests only.
-- `packages/cli/src/index.ts`: rewritten as the thin bin wrapper
-  (parse + version/help conventions only).
-- `packages/cli/test/scenario-commands.test.ts` (NEW): 36 offline unit
-  tests (parsing/help/validation/JSON/exit codes/timeout & cancel
-  honesty/rejected-run surfacing) — mocked engine, never live claims.
-- `test/integration/cli-scenario.int.test.ts` (NEW): 5 LIVE tests
-  against a real `portaldot_dev` network (see §5).
-- Engine (cross-process run control, DEC-025 — every fix driven by a
-  real observed failure):
-  - `packages/engine/src/fault/adapters/pause.ts`: `nodeAlive()`
-    liveness rule (fresh running record + live OS pid) replacing the
-    in-memory-only view at 5 sites.
-  - `packages/engine/src/scenario/runner.ts`: durable cross-process
-    cancel (`cancel()` persists for any non-terminal run — still no
-    second executor); memoizing `cancelPending()` at every checkpoint;
-    a 400ms single-interrupt watcher around the in-flight fault honoring
-    the persisted request via the same `faults.cancel` mechanism;
-    pending-cancellation-honored recording (an interrupted fault that
-    ends failed/rejected records the step/run `cancelled`, never a
-    misattributed failure; `cleanup-failed` still quarantines);
-    `executor_pid` stamped once at insert; startup reconcile defers to
-    live owners.
-  - `packages/engine/src/state/store.ts`: migration #13
-    (`scenario_runs.executor_pid`, schema v18; insert + mapper only —
-    never updated, like `replay_of_run_id`); `cancellation` UPDATE is
-    write-once (`COALESCE(?, cancellation)`).
-  - `packages/engine/src/scenario/run-types.ts`: `executorPid` field +
-    reconcile-report `deferred` entry documentation;
-    `packages/engine/src/engine.ts`: reconcile comment.
-- Tests: `packages/engine/test/scenario-run.test.ts` (+4: cross-process
-  cancel, write-once guard, live-owner defer, dead-owner terminalize →
-  41); `packages/engine/test/store.test.ts` (schemaVersion 17 → 18 —
-  the ONLY pre-existing assertion updated; nothing weakened).
-- Docs: this report; `docs/reports/PHASE_08A_REPORT.md` (archive);
-  PROGRESS entry; IMPLEMENTATION_PLAN T-3.6 = PARTIAL; TESTING §16;
-  DECISIONS DEC-024/DEC-025; ARCHITECTURE CLI row.
-- **API**: audit only — `apps/api` untouched. Existing typed routes
-  already cover scenario CRUD/validate/operations and runs
-  execute(202)/list (`scenarioId|networkId|state|replayOfRunId|limit|
-  offset`)/get/cancel/replay(202 + `replayNote`); rejected-attempt
-  persistence, run history, replay provenance, and the security posture
-  are unchanged. Nothing was added because nothing was missing.
-
-## 3. Acceptance criteria (PASS / FAIL / BLOCKED) with evidence
+## 3. Acceptance criteria
 
 | Criterion | Verdict | Evidence |
-|-----------|---------|----------|
-| Scenario list/get/create/validate/operations via CLI over the shared engine | PASS | CLI unit 36/36; live test 1 (authoring) |
-| Run execute/replay/list/get/cancel via CLI; engine is the ONLY executor | PASS | `program.ts` calls `engine.scenarioRuns.*` only; unit + live tests 2–5 |
-| Explicit `-n, --network` on execute/replay; never inferred | PASS | commander-required option; unit (missing `--network`), live (ghost network) |
-| Bounded `--timeout`; honest OPERATION_TIMEOUT ("keeps executing"), never success | PASS | unit timeout-honesty tests (execute + cancel) |
-| Exit-code contract (completed*→0; rejected/failed/cancelled/cleanup-failed/timeout→1; validate 0/1; cancel 0 only on OBSERVED terminal) | PASS | unit tests per branch |
-| Engine refusals surfaced with persisted `rejectedRunId` + actionable hint; no misattribution | PASS | unit + live gate-refusal test |
-| Replay provenance + honesty note; re-confirmation of the network | PASS | live test 3 (`replayOfRunId`, distinct fault, note) |
-| Cancellation works ACROSS PROCESSES (canceller ≠ executor); audit history preserved; source immutability | PASS | live test 4: execute in a REAL child process, cancelled by a separate `run cancel`; unit cross-process + write-once tests |
-| Authorization/test-network gates intact (DEC-008); rejected attempts persisted | PASS | engine gates unchanged; live gate-refusal test |
-| API audit complete; no duplicated routes; typed contracts untouched | PASS | §2 — zero API changes |
-| No fabricated data anywhere in CLI output | PASS | every field printed comes from a real engine record |
-| Regression: existing suites stay green after engine changes | PASS | unit 323/323; live scenario-runs 9/9, faults 5/5 |
-| Full T-3.6 (incl. web UI) | BLOCKED (by scope, not by defect) | T-3.6B wiring pending — see §9 |
+|---|---|---|
+| Registry deployed on the V3 TEST network | PASS | `0x08fdadd1ebe16234c03b723255cc12fd98a5ef07`, block 136822, tx `0x2fa1c5ae…5eff30` (`docs/evidence/v3-anchors.json`) |
+| Real runs anchored via contract | PASS | blocks 136899 (tx `0xa06abaa0…f8c5b7`) and 136919 (tx `0x8ae9cfc0…bd4df9`), finalized |
+| Real runs anchored via remark | PASS | blocks 136940 (tx `0xa9b15505…1173ff`) and 136947 (tx `0x84027d23…774f49`), finalized |
+| Verify recomputes + re-reads chain | PASS | all four re-verified via API 2026-10-21 → `verified` (TESTING §17.1) |
+| Failed submissions never shown as anchored | PASS | two failed contract attempts recorded with reasons (decoder bug pre-fix; `StorageDepositNotEnoughFunds`) |
+| Secrets never logged/committed | PASS | env-only signer, scrubbing tests; `.secrets/` outside the repo |
+| Console V3 screen: probe, anchors + links, verify, confirmed anchor | PASS (jsdom) | `V3.test.tsx` 6/6 rendering the committed evidence; live API read smoke |
+| Every console screen renders only API/WS data | PASS (jsdom) | 55 web tests; mock client only in tests |
+| Destructive UI actions confirm first | PASS (jsdom) | fault execute, run/replay, remove, anchor tests assert no call before confirm |
+| Full Failure Lab flow usable from the UI against a live network | NOT VERIFIED | no browser / x86_64 userland in this session (RSK-23, RSK-31) |
 
-## 4. Exact commands and results (2026-10-21)
+## 4. Commands and results (2026-10-21)
 
-| Command | Result |
-|---------|--------|
-| `npm run typecheck` | PASS (exit 0, clean) |
-| `npm run lint` | PASS (exit 0, clean) |
-| `npm run build` | PASS (exit 0; benign rolldown notice) |
-| `npm test` | **323/323 PASS (26 files)** — `scenario-commands` 36/36, `scenario-run` 41/41 |
-| `npm run test:integration` (no gate) | 50 skipped / 12 files — `cli-scenario` 5 skipped (skipped ≠ passed) |
-| `KAIZEN_TEST_LIVE=1 npx vitest run --config vitest.integration.config.mts test/integration/cli-scenario.int.test.ts` | **5/5 PASS** (~32 s, real network) |
-| `KAIZEN_TEST_LIVE=1 … scenario-runs.int.test.ts` (regression re-run) | **9/9 PASS** |
-| `KAIZEN_TEST_LIVE=1 … faults.int.test.ts` (regression re-run) | **5/5 PASS** |
-| `pgrep -af portaldot` (hygiene, after live runs) | none |
+`npm run typecheck` PASS · `npm run lint` PASS · `npm run build` PASS ·
+unit suite **379/379 PASS (29 files)**, run in chunks because of the
+sandbox's 120 s per-command cap (TESTING §17.4). V3 live read smoke and
+re-verification: TESTING §17.1.
 
-## 5. Mocked vs live evidence (kept separate)
+## 5. Mocked vs live evidence
 
-- **Mocked (offline)**: all 36 CLI unit tests use a scripted fake engine
-  through the DI seam — they prove parsing, envelopes, exit codes, and
-  honesty wording, NOT runtime behavior. Engine unit additions run real
-  SQLite + the real injector against harness stand-in nodes.
-- **Live (real `portaldot_dev`, disposable designatedTest networks)**:
-  the 5 tests in `cli-scenario.int.test.ts` — the network is created by
-  Kaizen itself; every execution claim is backed by an INDEPENDENT
-  observation (own RPC polling + process identity), not just the CLI's
-  printed record:
-  1. authoring via CLI (validate never saves);
-  2. a real pause run completes via `run execute`; the victim is
-     reachable again with the SAME pid and a moving chain head;
-  3. `run replay` replays a finished run as a NEW run with provenance
-     (`replayOfRunId` + honesty note) and a DISTINCT fault record;
-  4. **cross-process cancel**: the execute runs in a REAL child process
-     (built bin, same `KAIZEN_DATA_DIR`); `run cancel` from the test
-     process durably records the request; the child's engine interrupts
-     the hold and the child honestly reports `{ok:false,
-     state:"cancelled"}` with exit 1; the node returns with the SAME pid
-     and RPC reachable; cancelling the finished run →
-     SCENARIO_RUN_CONFLICT;
-  5. gate refusals: ghost network refused with a persisted, inspectable
-     rejected run; replay-of-rejected refused (no new run); missing
-     `--network`; unknown ids → NOT_FOUND.
-- Each engine cross-process fix followed: live failure observed → fix →
-  live proof → unit regression test. Nothing was marked VERIFIED on
-  mocked evidence alone.
+- **Live**: V3 deploy/anchor/verify (previous session, under qemu-user
+  emulation for the local `portaldot_dev` network — RSK-31); V3 probe /
+  status / verify re-run against the public endpoints in this session.
+- **Mocked**: all web screens (jsdom with an API double primed with
+  real-shaped records — the V3 test renders the committed evidence file);
+  engine anchoring unit tests (fake chain transport).
 
-## 6. What was NOT implemented (deliberate scope boundaries)
+## 6. Not implemented (deliberate)
 
-- **T-3.6B web-UI surface**: the imported UI was neither designed,
-  regenerated, restyled, nor wired in this slice; existing UI files are
-  untouched. Backend/CLI contracts and typed-client compatibility are
-  preserved so the wiring task can start cleanly.
-- No `--detach` mode (would lie about executor ownership; bounded waits
-  instead — DEC-024).
-- No API changes (audit found nothing missing); no new routes, no
-  contract changes, no new dependencies.
-- No wallet signing, no chain writes, no new T-8.x features; no
-  Kubernetes/Helm work; no mainnet contact (DEC-008 gates intact).
+Incident detection/correlation (Phase 4); staking/session keys
+(Phase 5); Docker/K8s deploy + cluster connect (Phase 6); node restart
+operation; peer-disconnect/partition faults (engine-blocked, R-22);
+custom ring/star wiring; browser wallet signing.
 
-## 7. Security considerations & risks
+## 7. Security & risks
 
-- The CLI never executes shell strings or host commands on behalf of the
-  UI; all process execution stays engine-side (argv arrays, allowlists,
-  timeouts — unchanged).
-- Target selection is explicit and engine-gated: `--network` is a
-  required flag resolved against designated-test networks; a refusal
-  persists a rejected run (audit trail). Nothing in the CLI can aim a
-  destructive operation at mainnet.
-- Cancellation remains single-mechanism (`faults.cancel`, once) — the
-  cross-process path never introduces a second executor or kills
-  processes directly; signalling identity stays on the verified pid.
-- `executor_pid` is stamped once and never updated (provenance
-  semantics); reconcile only touches runs whose owner is verifiably
-  dead — it can no longer disrupt a live operator session.
-- No secrets, keys, or machine-specific paths in the diff; `.kaizen/`
-  remains gitignored runtime state; the repo stays demo-able from a
-  clean clone.
+Writes only via explicit, confirmed requests; signer in env only; runtime
+dry run before every write; registry deploy CLI-only; UI holds no key.
+Deployer balance ≈3.15 tPOT → contract anchoring needs a refund (RSK-30).
 
-## 8. Cleanup / resource-release verification
+## 8. Cleanup
 
-- Live suites stop their networks in `afterAll`; the CLI child process
-  is SIGKILLed in `afterAll` if it somehow outlives a failed test; runs
-  always terminalize (cancel, deadline, or bounded timeout — a timeout
-  reports honestly that the run keeps executing).
-- `pgrep -af portaldot` after every live run: no leaked node processes.
-- Temp debug instrumentation used during diagnosis was fully removed
-  (grep-clean) before commit; engine/cli dist rebuilt from clean sources.
+No portaldot processes were started in this session; the temporary API
+process used for the live smoke was stopped. No secrets in the diff.
 
-## 9. Remaining work & next task
+## 9. Remaining work & next step
 
-- **Remaining for full T-3.6**: T-3.6B — wire the imported web UI to
-  the existing Failure Lab API/typed client (no fabricated data, no
-  restyling; UI wiring only). T-3.6 stays PARTIAL until that flow
-  exists and its evidence is recorded.
-- **Next task (recommended)**: **T-3.6B — Failure Lab UI integration**
-  (imported UI → typed client → existing API routes), or the next
-  roadmap task as directed.
+1. Live UI smoke on an x86_64 host: create two-node network → Failure Lab
+   pause → Scenarios run → V3 anchor (remark) → verify (promotes T-3.6B /
+   T-3.6 to VERIFIED).
+2. Refund the deployer for further contract anchors (RSK-30).
+3. Phase 4 incident detection; Playwright smoke in Phase 7 (RSK-23).

@@ -40,12 +40,14 @@ flowchart TB
         DA --- DK["DockerAdapter"]
         DA --- KH["K8sHelmAdapter"]
         ENG --- ST["StateStore<br/>(SQLite: networks, runs, history)"]
+        ENG --- V3S["V3 Probe + V3AnchorService<br/>(T-8.1 / T-8.2)"]
     end
 
     subgraph infra["Real infrastructure"]
         NODES["Portaldot node processes<br/>(portaldot_dev)"]
         DOCKER["Docker containers"]
         K8S["Kubernetes (minikube)<br/>+ Helm releases"]
+        V3NET["Portaldot V3 TEST network<br/>Substrate WS + EVM RPC<br/>KaizenRunRegistry"]
     end
 
     WEB <-->|"REST cmds + WS events"| API
@@ -58,13 +60,20 @@ flowchart TB
     KH --> K8S
     IN --> RC
     IN --> PM
+    V3S <-->|"probe (read) / anchor + verify (write, explicit)"| V3NET
 ```
+
+Status (2026-10-21): built — API, engine services for networks, processes,
+RPC/monitoring, FailureInjector, ScenarioEngine (+ replay), StateStore, V3
+probe + anchoring, LocalProcessAdapter-equivalent lifecycle, web console and
+CLI. Not built yet — IncidentMonitor (Phase 4), Docker/K8s adapters
+(Phase 6); the console shows those features disabled and labelled (DEC-028).
 
 ## 3. Component Responsibilities
 
 | Component | Responsibility |
 |---|---|
-| **Web UI** (`apps/web`) | Operations console (React 19 + Vite): Overview, Networks (+ create), Network detail, Node detail, Events. Thin typed client over the API/WS only (DEC-016): one shared API client for base-URL/errors/timeouts, one WebSocket in a React context (auto-reconnect + resync refetch), engine models via `import type`. Renders only engine-provided data; the browser never launches processes or runs shell commands. |
+| **Web UI** (`apps/web`) | Operations console (React 19 + Vite + framer-motion; imported design, T-3.6B): Landing, Create, Overview (live topology), node drawer, Validators, Failure Lab, Scenarios, Incidents (fault evidence), Deployments, Portaldot V3, Settings. Thin typed client over the API/WS only (DEC-016): one shared API client for base-URL/errors/timeouts, one WebSocket in a React context (auto-reconnect + resync refetch), `ConsoleProvider` for the selected network (REST state + WS invalidation + bounded monitor poll), engine models via `import type`. Renders only engine-provided data; unbuilt features are disabled and labelled (DEC-028); the browser never launches processes, runs shell commands, or holds signing keys. |
 | **CLI (`kaizen`)** | Scriptable surface (human + `--json` output). Thin argument parsing → engine calls. Exit codes for automation. Failure Lab: `scenario (list/get/create/validate/operations)` + `run (execute/replay/list/get/cancel)` over the same engine pathways the API uses; `execute`/`replay` require explicit `--network` (DEC-024). |
 | **API Layer** | HTTP for commands/queries; WebSocket for engine event stream. Input validation (Zod), auth-less by design for localhost-first (see §8). |
 | **Operations Engine** | The single source of operational truth. Application services with typed inputs/outputs; emits events; persists history. |
@@ -133,9 +142,10 @@ sequenceDiagram
   (`build-spec`, `purge-chain`, `key insert`) — no unsupported internals.
 - **Data plane**: JSON-RPC/WebSocket via `@polkadot/api` only. V13 metadata is
   handled by the SDK.
-- **Chain interaction policy**: Kaizen never signs mainnet transactions; all
-  write operations (staking/session) are Phase 5, guarded, and local-testnet
-  first.
+- **Chain interaction policy**: Kaizen never signs mainnet transactions.
+  The only external write today is V3 TEST-network run anchoring (T-8.2,
+  below); validator write operations (staking/session) are Phase 5,
+  guarded, and local-testnet first.
 - **V3 external endpoints (Phase 8, T-8.1)**: the official Portaldot V3
   endpoints (`wss://test-node-v3.portaldot.dev`,
   `https://test-evm-rpc-v3.portaldot.dev`,
@@ -145,6 +155,40 @@ sequenceDiagram
   never writes, never accepts a caller-supplied URL, and redacts every result
   to origin form (DEC-023); the live check is environment-gated
   (`KAIZEN_TEST_V3=1`) so the offline unit suite is unaffected (RSK-29).
+- **V3 run anchoring (Phase 8, T-8.2)** — the ONLY external write path.
+  `V3AnchorService` (`packages/engine/src/v3/anchor/`) turns a finished
+  scenario run into a deterministic fingerprint (`computeRunHash`: SHA-256
+  of the canonical run JSON) and writes it to the V3 TEST network either
+  via the `KaizenRunRegistry` contract (`contracts/KaizenRunRegistry.sol`,
+  EVM bytecode executed by pallet-revive, `revive.call`) or via
+  `system.remarkWithEvent` (DEC-027). Writes are explicit and operator-
+  signed from `KAIZEN_V3_SIGNER_SURI` only (DEC-026); a runtime dry run
+  precedes every submission; anchor rows are persisted `pending` before
+  submission and updated with what the chain reported (SQLite migrations
+  19–22: `v3_anchors`, `v3_contracts`). `verify` recomputes the hash and
+  re-reads the chain (block hash, registry `anchoredAt`, `eth_getCode`, or
+  the remark text). Surfaces: CLI `kaizen v3 probe|status|deploy-registry|
+  import-deployment|hash|anchor|anchors|verify`, API `GET /api/v3/probe|
+  status|anchors|anchors/:id|runs/:runId/hash`, `POST /api/v3/anchors`
+  (`mode:"execute"`), `POST /api/v3/anchors/:id/verify`, WS `v3.anchor` /
+  `v3.contract` events, and the console's Portaldot V3 screen. Block links
+  use the node console (`https://node-console.portaldot.dev/?rpc=<ws>#/
+  explorer/query/<blockHash>`).
+
+```mermaid
+flowchart LR
+  run[Finished scenario run<br/>SQLite] --> hash[computeRunHash<br/>SHA-256 canonical JSON]
+  hash --> svc[V3AnchorService]
+  ui[Console V3 screen<br/>confirm] -->|POST /api/v3/anchors| api[Fastify API]
+  cli[kaizen v3 anchor] --> svc
+  api --> svc
+  svc -->|dry run + revive.call| reg[(KaizenRunRegistry<br/>0x08fd…ef07)]
+  svc -->|system.remarkWithEvent| rem[(Remarked event)]
+  reg --> v3[Portaldot V3 TEST<br/>chain id 420420777]
+  rem --> v3
+  svc -->|persist pending → finalized/failed| db[(v3_anchors)]
+  svc -.->|verify: block hash, anchoredAt, eth_getCode| v3
+```
 
 ## 6. Process & Network Lifecycle
 

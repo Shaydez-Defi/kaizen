@@ -17,7 +17,7 @@ import { blockUrl, formatTokens } from '../lib/model';
 import { useEventsContext } from '../state/EventsContext';
 import { useAsync } from '../state/useAsync';
 
-/** Observed V3 costs (T-8.2 live run, see docs/RISKS.md RSK-31). */
+/** Observed V3 costs (T-8.2 live run, see docs/RISKS.md RSK-30). */
 export const CONTRACT_ANCHOR_COST_NOTE =
   'Contract mode calls KaizenRunRegistry.anchor via pallet-revive and reserves a storage deposit — about 4 tPOT per anchor on the V3 test network (remark costs ≈0.02 tPOT).';
 

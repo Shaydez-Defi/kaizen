@@ -690,3 +690,85 @@ Format: context → decision → alternatives → consequences. Newest entries a
   `cancelled` outcome); regressions are pinned by unit tests
   (`scenario-run.test.ts`: write-once guard, cross-process cancel,
   live/dead-owner reconcile) and the live cancel test.
+
+## DEC-026 — V3 anchoring writes are explicit, operator-signed, env-only, and persisted before submission
+
+- **Context**: T-8.2 makes Kaizen's first WRITES to an external chain (the
+  Portaldot V3 TEST network, chain id 420420777). Writes cost real testnet
+  funds (RSK-30), need a signing key, and must never be confused with
+  successful anchoring when they fail.
+- **Decision**:
+  1. **Explicit only.** An anchor is written only on an explicit request —
+     `kaizen v3 anchor <runId>`, or `POST /api/v3/anchors` with
+     `mode:"execute"` (the web console adds a confirm dialog). Nothing
+     anchors automatically when a run finishes. Registry deployment is
+     CLI-only (`kaizen v3 deploy-registry`), not exposed over HTTP.
+  2. **Only finished runs.** The anchored value is the deterministic run
+     hash: SHA-256 of the canonical JSON of the persisted run record
+     (`computeRunHash`), anchorable only for completed runs. `verify`
+     recomputes it from SQLite and compares.
+  3. **Env-only signer.** The secret URI is read only from
+     `KAIZEN_V3_SIGNER_SURI`; it is never accepted over HTTP/argv, never
+     persisted, and scrubbed from every message (redaction patterns in
+     `fault/redact.ts`). Only the public SS58 address is stored/returned.
+  4. **Persist first, then let the chain decide.** The anchor row is written
+     `pending` BEFORE submission; tx hash / block / events from the chain
+     flip it to `in-block` / `finalized`. A runtime dry run precedes every
+     write so unaffordable or reverting calls fail before submission. Any
+     submission whose expected evidence (RunAnchored log or Remarked event)
+     is missing is recorded `failed` with a sanitized reason — never as
+     anchored.
+- **Alternatives**: auto-anchor on run completion (rejected: spends funds
+  without consent); browser-side signing with a wallet extension (deferred:
+  wallet authorization is an unbriefed T-8.x task); storing the key in
+  SQLite (rejected: secrets never at rest in runtime state).
+- **Consequences**: failed attempts are part of the evidence (two failed
+  contract attempts are listed in `docs/evidence/v3-anchors.json`); the
+  console can show anchors and verify them without ever holding a key.
+
+## DEC-027 — KaizenRunRegistry contract is the primary anchor; `remarkWithEvent` is an explicit, never-silent fallback
+
+- **Context**: the V3 runtime exposes pallet-revive with EVM bytecode
+  allowed, so a Solidity registry gives a queryable on-chain index
+  (`anchoredAt(runHash)`) and an EVM-visible event; but contract calls
+  reserve a storage deposit (≈4 tPOT per anchor observed, RSK-30), which a
+  lightly funded operator account cannot sustain.
+- **Decision**: `contract` (KaizenRunRegistry.anchor(runHash, meta) via
+  `revive.call`) is the default whenever a registry is known
+  (`KAIZEN_V3_REGISTRY_ADDRESS` or a recorded deployment on this chain).
+  `remark` (`system.remarkWithEvent("kaizen:v1:<runHash>:<runId>")`) is
+  available only when the caller chooses it explicitly (`--method remark`,
+  `method:"remark"`, or the console's method selector, which defaults to
+  remark to protect a low balance — the choice is always visible). There is
+  no automatic fallback from a failed contract call to a remark.
+- **Alternatives**: remark-only (rejected: no on-chain index, no EVM
+  visibility); silent fallback (rejected: the evidence type must be what
+  the operator asked for).
+- **Consequences**: both methods are live-proven (contract: blocks 136899,
+  136919; remark: 136940, 136947) and both are verified by `verify`
+  (contract: block hash + `anchoredAt` + `eth_getCode`; remark: block hash
+  + payload).
+
+## DEC-028 — Imported console design: real data only, unbuilt features disabled and labelled
+
+- **Context**: T-3.6B ports a new framer-motion console design whose
+  original ran on a simulated in-browser store (fake nodes, scripted
+  incidents, generated Kubernetes manifests, staking).
+- **Decision**: keep the design's look and motion; replace the simulated
+  store with `ConsoleProvider` (REST state, WS events as invalidation, a
+  bounded 3 s monitor poll while running). Every simulated affordance that
+  has no backend is kept **disabled** with its phase label (`Planned`
+  chip): node restart (planned engine op), peer-disconnect / partition
+  (engine-blocked, R-22), incident detection (Phase 4), staking / session
+  keys (Phase 5), Docker / Kubernetes deploy and cluster connect
+  (Phase 6), custom ring/star wiring. Destructive actions (fault execute,
+  scenario run/replay, stop/purge/remove, V3 anchor) always pass a confirm
+  dialog. The legacy Events page was dropped; recent events live on
+  Overview and the fault/run screens.
+- **Alternatives**: keep the old Phase 2B pages alongside (rejected: two
+  UIs over one API); hide unbuilt features (rejected: the design's
+  lifecycle story is the product, and labelling is more honest than
+  omission).
+- **Consequences**: UI never shows a number the API did not return
+  ("—" for unobserved); browser-level verification is still pending
+  (RSK-23).

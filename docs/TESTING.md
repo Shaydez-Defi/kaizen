@@ -880,3 +880,87 @@ printed record:
 | `KAIZEN_TEST_LIVE=1 … scenario-runs.int.test.ts` (regression re-run; engine touched) | **9/9 PASS** |
 | `KAIZEN_TEST_LIVE=1 … faults.int.test.ts` (regression re-run; pause adapter touched) | **5/5 PASS** |
 | Hygiene: `pgrep -af portaldot` after live runs | none |
+
+## 17. Week 2 submission — T-8.2 V3 anchoring + T-3.6B console (2026-10-21)
+
+### 17.1 T-8.2 — V3 on-chain run anchoring
+
+- **Engine unit** `packages/engine/test/v3-anchor.test.ts` (fake chain
+  transport): canonical run hash determinism; ABI selectors vs solc output;
+  persist-before-submit; dry-run refusal → `failed` (never anchored);
+  missing RunAnchored/Remarked evidence → `failed`; verify verdicts
+  (verified / mismatch / unverifiable); signer scrubbing; no silent
+  contract→remark fallback; duplicate-anchor refusal per chain + method
+  (retry allowed after a failure); and a recompute
+  of every anchored hash from the committed `docs/evidence/runs/*.json`.
+- **API** `apps/api/test/v3.test.ts`, **CLI** `packages/cli/test/v3-commands.test.ts`.
+- **Live write suite** `test/integration/v3-anchor.int.test.ts`, gated
+  `KAIZEN_TEST_V3_WRITE=1` + `KAIZEN_V3_SIGNER_SURI` (spends tPOT; skipped
+  otherwise and never reported as passed).
+- **Live evidence (PortaldotV3 Test, chain id 420420777, genesis
+  0xd4f9…83bd)**: registry deploy block 136822; contract anchors 136899,
+  136919; remark anchors 136940, 136947; records in
+  `docs/evidence/v3-anchors.json`, the exact run records in
+  `docs/evidence/runs/`, node-console screenshot
+  `docs/assets/node-console-block-136899.webp`.
+- **Re-verification (2026-10-21, this session)**: API started on the
+  evidence data dir (`KAIZEN_DATA_DIR=<evidence dir> node apps/api/dist/index.js`):
+  `GET /api/v3/probe` → healthy (substrate ok, best #137255; EVM ok,
+  chain id 420420777 matches; node console HTTP 200);
+  `GET /api/v3/status` → registry `0x08fdadd1ebe16234c03b723255cc12fd98a5ef07`
+  (source: deployment), signer balance ≈3.15 tPOT;
+  `POST /api/v3/anchors/:id/verify` for all four finalized anchors →
+  `verified` (hash match + block-hash match; contract anchors also
+  registry code present + `anchoredAt` 2026-10-21T21:18:48Z / 21:20:48Z).
+
+### 17.2 arm64 sandbox: qemu-user workaround (RSK-31)
+
+The development sandbox is linux-arm64; upstream publishes no
+linux-arm64 `portaldot_dev`. The T-8.2 live runs (local two-node
+`portaldot_dev` network → Failure Lab pause/terminate runs → anchors) were
+executed under **qemu-user x86_64 emulation** (the x86_64 binary run
+through qemu-user on the arm64 host), with a one-line preload that
+reports `process.arch = 'x64'` so the binary manager selects the official
+linux-x64 artifact (`node -r ./arch-x64.cjs …`, the file containing
+`Object.defineProperty(process, 'arch', { value: 'x64' })`). Emulation is
+slower than native but runs the real, hash-verified binary. The
+workaround is per-machine, not part of the repo, and was not present in
+the later docs/UI session — no new live node runs were made there. On an
+x86_64 Linux host none of this is needed.
+
+### 17.3 T-3.6B — imported console (jsdom)
+
+Seven web test files, 55 tests (`apps/web/src/**`):
+`Console.test.tsx` (shell routing/steps, landing health, nav gating,
+Overview topology/links/start/stop/WS events, node drawer logs/diagnostics/
+stop), `FailureLab.test.tsx` (blocked fault types disabled, confirm before
+execute, 403 dry-run preflight rendering, active-fault roll back, scenario
+draft→input, save+execute after confirm, cancel, replay, registry-blocked
+ops), `Screens.test.tsx` (Create preset/custom, Validators Phase 5 labels,
+Incidents evidence timeline + Phase 4 label, Deployments local processes +
+Phase 6, Settings readiness + confirm-remove), `V3.test.tsx` (probe per
+endpoint, committed evidence anchors with node-console links, verify,
+remark-default anchor with confirm, contract deposit warning, non-
+anchorable run), `lib/model.test.ts` (observed/inferred/down links, no
+invented values), plus the existing `client.test.ts` / `events.test.ts`.
+The API client double lives in `src/test-utils/mockApi.ts` (tests only).
+
+### 17.4 Commands and actual results (2026-10-21)
+
+The sandbox caps a single command at 120 s, so `npm test` was run as
+chunks of the same vitest config; together they cover every file in the
+default suite:
+
+| Command | Result |
+|---------|--------|
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npm run build` | PASS (rolldown "use client" notice only) |
+| `npx vitest run apps/web` | 55/55 PASS (7 files) |
+| `npx vitest run apps/api packages/cli` | 79/79 PASS (5 files) |
+| `npx vitest run packages/engine/test/{args,binary,bus,chainspec,manager,ports,topologies,store,service}.test.ts` | 60/60 PASS |
+| `npx vitest run packages/engine/test/{fault,monitor,v3-anchor,v3-probe,scenario-store,scenario}.test.ts` | 134/134 PASS |
+| `npx vitest run packages/engine/test/scenario-run.test.ts` | 41/41 PASS |
+| `npx vitest run packages/engine/test/scenario-replay.test.ts` | 10/10 PASS |
+| **Total** | **379/379 PASS (29 files)** |
+| Live UI smoke in a real browser | NOT RUN (no browser / no x86_64 userland in this session — RSK-23, RSK-31) |
