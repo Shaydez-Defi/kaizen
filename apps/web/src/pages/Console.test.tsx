@@ -9,8 +9,8 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '../test-utils/render';
 import { apiClient } from '../api/client';
-import { App, stepFor } from '../App';
-import { Overview } from './Overview';
+import { App, stepFor, watermarkFor } from '../App';
+import { Overview, compactHeight } from './Overview';
 import { NodeDrawer, diagnose } from '../components/NodeDrawer';
 import { primeApi, okOp, ALICE, type ApiMock } from '../test-utils/mockApi';
 import { pushEvent, renderConsole } from '../test-utils/renderConsole';
@@ -38,6 +38,30 @@ describe('App shell', () => {
     expect(stepFor('/incidents')).toBe(3);
     expect(stepFor('/deployments')).toBe(5);
     expect(stepFor('/v3')).toBe(-1);
+    expect(watermarkFor('/lab', false)).toBe('BREAK');
+    expect(watermarkFor('/lab', true)).toBe('FAILURE');
+    expect(watermarkFor('/incidents', false)).toBe('DIAGNOSE');
+    expect(watermarkFor('/overview', false)).toBe('KAIZEN');
+  });
+
+  it('shell shows the real control-plane status and a network chip', async () => {
+    renderConsole(<App />, { route: '/overview', withConsole: false });
+    expect(await screen.findByLabelText('Control plane status')).toHaveTextContent(/connected/);
+    expect(await screen.findByLabelText('Selected network')).toHaveValue('net_1');
+    const steps = screen.getByRole('list', { name: 'Lifecycle' });
+    expect(within(steps).getByRole('link', { name: 'Monitor' })).toHaveAttribute('aria-current', 'step');
+    expect(within(screen.getByRole('navigation', { name: 'Console' })).getByRole('button', { name: 'Networks' })).toBeEnabled();
+  });
+
+  it('landing shows only real commands and labels planned targets', async () => {
+    renderConsole(<App />, { route: '/', withConsole: false });
+    expect(screen.getAllByText('npx kaizen up').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('kaizen up output')).toHaveTextContent('4 nodes started and healthy');
+    expect(screen.getAllByText(/Phase 6/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Blocked in engine · R-22/)).toHaveLength(2);
+    expect(screen.getByLabelText('V3 evidence')).toHaveTextContent('0x08fdadd1ebe16234c03b723255cc12fd98a5ef07');
+    expect(screen.getByLabelText('V3 evidence')).toHaveTextContent('420420777');
+    expect(screen.getByText(/Illustration — the console draws this view/)).toBeInTheDocument();
   });
 
   it('landing shows real control-plane status and launches the console', async () => {
@@ -66,11 +90,17 @@ describe('App shell', () => {
 describe('Overview', () => {
   it('renders real nodes, heights and observed links', async () => {
     renderConsole(<Overview />);
-    expect(await screen.findByText('Network healthy')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Network healthy' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /demo-alice, Synced/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /demo-bob, Synced/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('#121')).toBeInTheDocument());
     expect(screen.getByText(/1 via peer ids/)).toBeInTheDocument();
+  });
+
+  it('formats block heights compactly without inventing digits', () => {
+    expect(compactHeight(1284)).toBe('1,284');
+    expect(compactHeight(128_430)).toBe('128.4k');
+    expect(compactHeight(1_284_306)).toBe('1.28M');
   });
 
   it('shows Start for a stopped network and calls the backend', async () => {
@@ -93,10 +123,11 @@ describe('Overview', () => {
 
   it('lists live WS events for the selected network', async () => {
     renderConsole(<Overview />);
-    await screen.findByText('Network healthy');
+    await screen.findByRole('heading', { name: 'Network healthy' });
     act(() => FakeWebSocket.last().open());
     act(() => pushEvent('node.status', { networkId: 'net_1', nodeId: 'net_1-bob', name: 'demo-bob', status: 'stopping' }));
-    expect(await screen.findByText('demo-bob → stopping')).toBeInTheDocument();
+    // the network-name prefix is dropped for the compact events column
+    expect(await screen.findByText('bob → stopping')).toBeInTheDocument();
   });
 });
 

@@ -9,7 +9,8 @@ import { apiClient } from '../api/client';
 import type { FaultRecord } from '../api/types';
 import { Create } from './Create';
 import { Validators } from './Validators';
-import { Incidents, faultTimeline } from './Incidents';
+import { Incidents, causeSteps, faultTimeline, logLine } from './Incidents';
+import { Networks } from './Networks';
 import { Deployments } from './Deployments';
 import { Settings } from './Settings';
 import { okOp, primeApi, type ApiMock } from '../test-utils/mockApi';
@@ -104,6 +105,11 @@ describe('Incidents', () => {
     renderConsole(<Incidents />, { route: '/incidents' });
     expect(await screen.findByText(/Applied: SIGSTOP pid 4242/)).toBeInTheDocument();
     expect(screen.getByText('Verified independently over RPC.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Incident #0001' })).toBeInTheDocument();
+    expect(screen.getByText('Recovered')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Node log tail')).toHaveTextContent('WARN slow block import');
+    expect(causeSteps(fault).map((s) => `${s.label}:${s.done}`)).toEqual(['Paused:true', 'RPC lost:true', 'Resumed:true', 'Recovery verified:true', 'Closed:true']);
+    expect(logLine('2026-10-22 14:03:22 INFO x')).toBe('14:03:22 INFO x');
     expect(faultTimeline(fault).map((e) => e.msg.split(':')[0])).toEqual([
       'pause requested on demo-alice by web',
       'Before',
@@ -119,12 +125,32 @@ describe('Incidents', () => {
 describe('Deployments', () => {
   it('shows real local processes and Docker/Kubernetes as Phase 6', async () => {
     renderConsole(<Deployments />, { route: '/deployments' });
-    expect(await screen.findByText('Running as local processes')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Running as local processes' })).toBeInTheDocument();
     const seg = screen.getByRole('group', { name: 'Deployment target' });
     expect(within(seg).getByRole('button', { name: 'Docker' })).toBeDisabled();
     expect(within(seg).getByRole('button', { name: 'Kubernetes' })).toBeDisabled();
     expect(screen.getByText(/pid 4242/)).toBeInTheDocument();
-    expect(screen.getByText(/Phase 6/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Phase 6/).length).toBeGreaterThan(0);
+    // the Kubernetes view is an explicitly empty preview: no statuses claimed
+    const preview = screen.getByLabelText('Kubernetes preview');
+    expect(within(preview).getAllByText('not deployed').length).toBe(2);
+    expect(within(preview).queryByText(/Running/)).toBeNull();
+  });
+});
+
+describe('Networks', () => {
+  it('lists real networks and opens one', async () => {
+    renderConsole(<Networks />, { route: '/networks' });
+    const table = await screen.findByRole('table', { name: 'Networks' });
+    expect(within(table).getByText('demo')).toBeInTheDocument();
+    expect(within(table).getByText('two-node')).toBeInTheDocument();
+    expect(within(table).getByText('running')).toBeInTheDocument();
+  });
+
+  it('offers create when there are none', async () => {
+    primeApi(api, { empty: true });
+    renderConsole(<Networks />, { route: '/networks' });
+    expect(await screen.findByText('No networks yet')).toBeInTheDocument();
   });
 });
 

@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import '../test-utils/render';
 import { ApiError, apiClient } from '../api/client';
 import type { FaultRecord, ScenarioRecord, ScenarioRunRecord, ScenarioRunSummary } from '../api/types';
-import { Lab } from './Lab';
+import { Lab, quorumAfter } from './Lab';
 import { Scenarios, draftFromRecord, inputFromDraft } from './Scenarios';
 import { primeApi, type ApiMock } from '../test-utils/mockApi';
 import { renderConsole } from '../test-utils/renderConsole';
@@ -27,6 +27,15 @@ beforeEach(() => {
   primeApi(api);
 });
 
+describe('Failure Lab helpers', () => {
+  it('applies the GRANDPA >2/3 threshold', () => {
+    expect(quorumAfter(4, 3)).toBe(true);
+    expect(quorumAfter(4, 2)).toBe(false);
+    expect(quorumAfter(2, 1)).toBe(false);
+    expect(quorumAfter(0, 0)).toBe(false);
+  });
+});
+
 describe('Failure Lab', () => {
   it('shows blocked mechanisms disabled and requires confirm before executing', async () => {
     api.executeFault.mockResolvedValue({
@@ -34,17 +43,22 @@ describe('Failure Lab', () => {
       result: { ok: true, outcome: 'verified', faultId: 'flt-1', state: 'completed', networkId: 'net_1', nodeId: 'net_1-alice', type: 'pause', claims, evidence: {}, durationMs: 14_000 },
     });
     renderConsole(<Lab />, { route: '/lab' });
-    await screen.findByText('Break it on purpose');
+    await screen.findByRole('heading', { name: 'Break it on purpose' });
     const kinds = screen.getByRole('group', { name: 'Fault type' });
-    expect(within(kinds).getByRole('button', { name: 'Disconnect' })).toBeDisabled();
-    expect(within(kinds).getByRole('button', { name: 'Partition' })).toBeDisabled();
-    await userEvent.click(within(screen.getByRole('group', { name: 'Hold duration' })).getByRole('button', { name: '30s' }));
-    await userEvent.click(screen.getByRole('button', { name: /Inject fault/ }));
+    expect(within(kinds).getByRole('button', { name: /Disconnect peer/ })).toBeDisabled();
+    expect(within(kinds).getByRole('button', { name: /Partition/ })).toBeDisabled();
+    expect(within(kinds).getByRole('button', { name: /Stop node/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('option', { name: /Partition \(blocked/ })).toBeDisabled();
+    await userEvent.click(within(kinds).getByRole('button', { name: /Pause validator/ }));
+    await userEvent.selectOptions(screen.getByLabelText('Hold duration'), '10000');
+    // expected impact is computed from live state and labelled as an expectation
+    expect(screen.getByText(/Expected: links 1 → 0, health 1\/2, finality likely stalls/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Inject failure/ }));
     expect(api.executeFault).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Confirm fault' });
-    await userEvent.click(within(dialog).getByRole('button', { name: /Inject fault/ }));
-    expect(api.executeFault).toHaveBeenCalledWith('net_1', { nodeId: 'net_1-alice', type: 'pause', options: { durationMs: 30_000 }, requestedBy: 'web' });
-    expect(await screen.findByText('Recovery verified')).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: /Inject failure/ }));
+    expect(api.executeFault).toHaveBeenCalledWith('net_1', { nodeId: 'net_1-alice', type: 'pause', options: { durationMs: 10_000 }, requestedBy: 'web' });
+    expect(await screen.findByRole('heading', { name: 'Recovery verified' })).toBeInTheDocument();
     expect(screen.getByLabelText('Last result')).toHaveTextContent('Recovery independently verified');
   });
 
@@ -68,8 +82,10 @@ describe('Failure Lab', () => {
     primeApi(api, { faults: [active] });
     api.cancelFault.mockResolvedValue({ ok: true });
     renderConsole(<Lab />, { route: '/lab' });
-    expect(await screen.findByText('demo-bob under pause')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /Roll back now/ }));
+    expect(await screen.findByRole('heading', { name: 'Validator 02 paused' })).toBeInTheDocument();
+    expect(screen.getByText(/Failure active · \d\d:\d\d · executing/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Live fault log')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Recover node/ }));
     expect(api.cancelFault).toHaveBeenCalledWith('flt-live');
   });
 });
