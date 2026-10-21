@@ -212,7 +212,7 @@ Gated suites are **skipped** without their flag and never reported as passed.
 | [docs/RISKS.md](docs/RISKS.md) | Risk register |
 | [docs/TECHNICAL_RESEARCH.md](docs/TECHNICAL_RESEARCH.md) | Portaldot capability matrix |
 | [docs/PHASE_REPORT.md](docs/PHASE_REPORT.md) · [docs/reports/](docs/reports/) | Phase reports |
-| [docs/DEMO.md](docs/DEMO.md) · [docs/SUBMISSION.md](docs/SUBMISSION.md) | Demo shot list, DoraHacks Week 2 fields |
+| [docs/DEMO.md](docs/DEMO.md) | Demo shot list |
 | [AGENTS.md](AGENTS.md) | Build governance for agents |
 
 ## License
