@@ -24,7 +24,7 @@ export default tseslint.config(
   {
     // Node ESM test scripts (experiment harnesses) run under Node, not the
     // browser — declare the Node/runtime globals they legitimately use.
-    files: ['test/**/*.mjs'],
+    files: ['test/**/*.mjs', 'contracts/**/*.mjs'],
     languageOptions: {
       globals: {
         process: 'readonly',

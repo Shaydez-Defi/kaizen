@@ -23,6 +23,8 @@ import {
   scenarioRunReplayNote,
   type KaizenEngine,
   type KaizenEventName,
+  probeV3Connectivity,
+  type V3ConnectivityReport,
 } from '@kaizen/engine';
 
 export const API_HOST = '127.0.0.1';
@@ -98,6 +100,28 @@ const runListQuery = z.object({
 });
 const cancelRunBody = z.object({ requestedBy: z.string().min(1).max(64).optional() });
 
+// V3 anchoring (T-8.2). Anchoring spends testnet funds from the operator's
+// env-configured signer, so it demands the same explicit mode:'execute'
+// marker as fault/scenario execution. Registry deployment is deliberately
+// NOT exposed over HTTP (one-time operator action: `kaizen v3 deploy-registry`).
+const anchorBody = z.object({
+  mode: z.literal('execute'),
+  runId: z.string().min(1).max(64),
+  method: z.enum(['contract', 'remark']).optional(),
+  requestedBy: z.string().min(1).max(64).optional(),
+});
+const anchorIdParam = z.object({ anchorId: z.string().min(1).max(64) });
+const anchorListQuery = z.object({
+  runId: z.string().min(1).max(64).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+export interface ServerOptions {
+  /** V3 probe implementation (DI seam for tests). Default: real probe of the
+   *  env/default-configured endpoints — never a caller-supplied URL. */
+  probeV3?: () => Promise<V3ConnectivityReport>;
+}
+
 function statusFor(code: string): number {
   switch (code) {
     case 'INVALID_INPUT':
@@ -111,6 +135,7 @@ function statusFor(code: string): number {
     case 'FAULT_NOT_FOUND':
     case 'SCENARIO_NOT_FOUND':
     case 'SCENARIO_RUN_NOT_FOUND':
+    case 'V3_ANCHOR_NOT_FOUND':
       return 404;
     case 'NETWORK_ALREADY_EXISTS':
     case 'NETWORK_ALREADY_RUNNING':
@@ -123,7 +148,15 @@ function statusFor(code: string): number {
     case 'SCENARIO_VERSION_UNSUPPORTED':
     case 'SCENARIO_RUN_CONFLICT':
     case 'SCENARIO_RUN_NOT_REPLAYABLE':
+    case 'V3_SIGNER_NOT_CONFIGURED':
+    case 'V3_SIGNER_INVALID':
+    case 'V3_REGISTRY_NOT_DEPLOYED':
+    case 'V3_RUN_NOT_ANCHORABLE':
+    case 'V3_ALREADY_ANCHORED':
+    case 'V3_INSUFFICIENT_FUNDS':
       return 409;
+    case 'V3_TX_FAILED':
+      return 502;
     default:
       return 500;
   }
@@ -142,7 +175,8 @@ function requireParam<T>(
   return parsed.data;
 }
 
-export function createServer(engine: KaizenEngine): FastifyInstance {
+export function createServer(engine: KaizenEngine, options: ServerOptions = {}): FastifyInstance {
+  const probeV3 = options.probeV3 ?? (() => probeV3Connectivity());
   const app = Fastify({ logger: false });
 
   // Ordered: websocket plugin FIRST so its onRoute hook exists for the
@@ -608,6 +642,71 @@ export function createServer(engine: KaizenEngine): FastifyInstance {
       // source run's actions; it never promises identical outcomes, and the
       // run's evidence is freshly observed (never a copy of the source).
       reply.status(202).send({ ok: true, run, replayNote: scenarioRunReplayNote(run) });
+    });
+
+    // ---- Portaldot V3 (T-8.1 probe + T-8.2 anchoring) -----------------------
+    scope.get('/api/v3/probe', async () => {
+      const report = await probeV3();
+      return { ok: true, report };
+    });
+
+    scope.get('/api/v3/status', async () => ({
+      ok: true,
+      status: await engine.v3Anchors.status(),
+    }));
+
+    scope.get('/api/v3/anchors', async (req, reply) => {
+      const q = anchorListQuery.safeParse(req.query ?? {});
+      if (!q.success) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: 'INVALID_INPUT', message: 'Invalid anchor query', details: { issues: q.error.issues } },
+        });
+        return;
+      }
+      reply.send({
+        ok: true,
+        anchors: engine.v3Anchors.list({
+          ...(q.data.runId !== undefined ? { runId: q.data.runId } : {}),
+          ...(q.data.limit !== undefined ? { limit: q.data.limit } : {}),
+        }),
+        contracts: engine.v3Anchors.contracts(),
+        explorerBlockUrlTemplate: engine.v3Anchors.explorerBlockUrlTemplate(),
+      });
+    });
+
+    scope.get('/api/v3/anchors/:anchorId', async (req, reply) => {
+      const params = requireParam(anchorIdParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, anchor: engine.v3Anchors.get(params.anchorId) });
+    });
+
+    scope.post('/api/v3/anchors', async (req, reply) => {
+      const body = anchorBody.safeParse(req.body);
+      if (!body.success) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: 'INVALID_INPUT', message: 'Invalid anchor request', details: { issues: body.error.issues } },
+        });
+        return;
+      }
+      const anchor = await engine.v3Anchors.anchorRun(body.data.runId, {
+        requestedBy: body.data.requestedBy ?? 'api',
+        ...(body.data.method !== undefined ? { method: body.data.method } : {}),
+      });
+      reply.status(201).send({ ok: anchor.status !== 'failed', anchor });
+    });
+
+    scope.post('/api/v3/anchors/:anchorId/verify', async (req, reply) => {
+      const params = requireParam(anchorIdParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, verification: await engine.v3Anchors.verify(params.anchorId) });
+    });
+
+    scope.get('/api/v3/runs/:runId/hash', async (req, reply) => {
+      const params = requireParam(runIdParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, ...engine.v3Anchors.hashRun(params.runId) });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an
