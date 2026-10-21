@@ -16,6 +16,7 @@
  * reconciliation (terminalize, never resume); shutdown.
  */
 
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -30,8 +31,10 @@ import {
   toRunSummary,
   type FaultRecord,
   type KaizenEventMap,
+  type MonitoringService,
   type ScenarioInput,
   type ScenarioRunRecord,
+  ScenarioEngine,
 } from '@kaizen/engine';
 import {
   createScenario,
@@ -778,6 +781,96 @@ describe('ScenarioEngine cancellation', () => {
       code: 'SCENARIO_RUN_CONFLICT',
     });
   }, 60_000);
+
+  it('cross-process: a cancel recorded by ANOTHER engine instance stops the run (durable request, same interrupt path)', async () => {
+    const h = await makeHarness();
+    // A second ScenarioEngine over the SAME store: its in-memory `active` map
+    // does NOT know the run — exactly the topology of a separate
+    // `kaizen run cancel` process. Only the persisted record connects them.
+    const otherProcess = new ScenarioEngine({
+      store: h.store,
+      events: h.events,
+      scenarios: h.scenarios,
+      faults: h.injector,
+      monitoring: {
+        getLatest: () => undefined,
+        snapshotNow: async () => {
+          throw new Error('monitoring is not used by this cancel-only instance');
+        },
+      } as unknown as MonitoringService,
+    });
+
+    const id = createScenario(h, 'cross-process cancel', [
+      pauseStep('s1', {
+        durationMs: 60_000,
+        timeoutMs: 120_000,
+        preconditions: [processRunning('alice')],
+        postconditions: [recoveryVerified('alice')],
+      }),
+    ]);
+    const started = defaultRun(h, id);
+    const hasFault = await waitUntil(() => h.injector.activeFaults().length === 1, 10_000, 50);
+    expect(hasFault).toBe(true);
+    const pidBefore = h.childPid('alice');
+
+    // Durable path: no local entry → persisted request, not a refusal.
+    const requested = await otherProcess.cancel(started.id, 'other-process');
+    expect(requested.cancellation?.requestedBy).toBe('other-process');
+    expect(requested.state).toBe('cancel-requested');
+
+    // The EXECUTING engine observes the flag at its checkpoints, interrupts
+    // the fault through the injector's supported mechanism, verifies cleanup.
+    const run = await h.runs.wait(started.id, 30_000);
+    expect(run.state).toBe('cancelled');
+    expect(run.steps[0]!.state).toBe('cancelled');
+    expect(run.cancellation?.requestedBy).toBe('other-process'); // audit history preserved
+    expect(run.steps[0]!.claims?.recoveryVerified).toBe(true);
+    expect(run.cleanup).toMatchObject({ verified: true, quarantined: false });
+    expect(h.injector.activeFaults()).toEqual([]);
+    // Rollback proven independently: same pid, resumed, RPC back — a
+    // cross-process cancel never leaks a stopped process.
+    expect(h.childPid('alice')).toBe(pidBefore);
+    expect(isPidAlive(pidBefore!)).toBe(true);
+    expect(await rpcReachable(h.ports.alice, 1_500)).toBe(true);
+    // The requesting instance reads the same terminal state from the store.
+    expect(otherProcess.get(started.id).state).toBe('cancelled');
+  }, 60_000);
+
+  it('never lets a concurrent full-row rewrite clobber a persisted cancellation (write-once guard)', async () => {
+    // Regression (DEC-025): the executor's own full-row rewrite used to
+    // overwrite a durable cancellation persisted by ANOTHER process back to
+    // null (lost update) — the owner then never observed the request and the
+    // run kept executing until its deadline. The store keeps the existing
+    // value whenever the incoming record carries none; the executing engine's
+    // watcher observes the surviving request and interrupts the fault.
+    const h = await makeHarness();
+    const id = createScenario(h, 'write-once cancellation guard', [
+      pauseStep('s1', { durationMs: 60_000, timeoutMs: 120_000 }),
+    ]);
+    const started = defaultRun(h, id);
+    const hasFault = await waitUntil(() => h.injector.activeFaults().length === 1, 10_000, 50);
+    expect(hasFault).toBe(true);
+
+    // The other process's durable write (no state edge available yet: the
+    // row stays `running`, only the cancellation field is set).
+    const foreign = h.store.getScenarioRun(started.id);
+    foreign.cancellation = { requestedBy: 'other-process', requestedAt: new Date().toISOString() };
+    h.store.updateScenarioRun(foreign);
+
+    // The owner's next rewrite is built from its STALE in-memory record
+    // (cancellation still null) — exactly the write that used to clobber.
+    const staleOwnerView = h.store.getScenarioRun(started.id);
+    staleOwnerView.cancellation = null;
+    h.store.updateScenarioRun(staleOwnerView);
+    expect(h.store.getScenarioRun(started.id).cancellation?.requestedBy).toBe('other-process');
+
+    // The executing engine observes the surviving request at its watcher and
+    // terminalizes honestly as cancelled (audit history preserved).
+    const run = await h.runs.wait(started.id, 30_000);
+    expect(run.state).toBe('cancelled');
+    expect(run.cancellation?.requestedBy).toBe('other-process');
+    expect(h.injector.activeFaults()).toEqual([]);
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -874,6 +967,8 @@ describe('ScenarioEngine startup reconciliation', () => {
       runState?: ScenarioRunRecord['state'];
       faultState?: FaultRecord['state'];
       seq?: number;
+      /** Recorded executor ownership (absent → unknown → reconciled as orphan). */
+      executorPid?: number | null;
     },
   ): { runId: string; faultId: string } {
     const now = new Date().toISOString();
@@ -895,6 +990,7 @@ describe('ScenarioEngine startup reconciliation', () => {
       targetNodes: [{ label: 'alice', nodeId: h.nodeIds.alice, nodeName: 'run-net-alice' }],
       requestedBy: 'test',
       replayOfRunId: null,
+      executorPid: opts.executorPid ?? null,
       state: opts.runState ?? 'running',
       currentStepId: 's1',
       currentStepOrder: 0,
@@ -1041,6 +1137,54 @@ describe('ScenarioEngine startup reconciliation', () => {
     }
     // idempotent across calls
     expect(await h.runs.reconcileOnStartup()).toBe(report);
+  }, 60_000);
+
+  it('defers a run owned by a still-live executor process (never terminalizes someone else\'s live run)', async () => {
+    const h = await makeHarness();
+    // Live executor = this test process — the exact liveness rule a separate
+    // `kaizen` process satisfies (T-3.6A multi-process topology: an inspection
+    // or cancel command must never destroy a run another process is driving).
+    const { runId, faultId } = craftRunAndFault(h, { executorPid: process.pid });
+
+    const report = await h.runs.reconcileOnStartup();
+    expect(report.runs).toHaveLength(1);
+    expect(report.runs[0]!.runId).toBe(runId);
+    expect(report.runs[0]!.finalState).toBe('running'); // unchanged — honest deferral
+    expect(report.runs[0]!.detail).toContain('deferred');
+    expect(report.runs[0]!.detail).toContain(String(process.pid));
+    expect(report.runs[0]!.faults).toEqual([]); // in-flight fault NOT touched
+    expect(report.quarantined).toBe(false);
+
+    // The live run and its in-flight fault are fully untouched: no
+    // terminalization, no error stamped, no fault reconciliation.
+    const run = h.store.getScenarioRun(runId);
+    expect(run.state).toBe('running');
+    expect(run.error).toBeNull();
+    expect(run.finishedAt).toBeNull();
+    expect(run.executorPid).toBe(process.pid);
+    const fault = h.store.getFault(faultId);
+    expect(fault.state).toBe('executing');
+    expect(fault.reconciled).toBe(false);
+  }, 60_000);
+
+  it('still terminalizes an orphan whose recorded executor process is gone', async () => {
+    const h = await makeHarness();
+    // A pid that genuinely existed and is now dead — crash simulation via
+    // real process liveness, not a fabricated constant.
+    const child = spawn(process.execPath, ['-e', 'process.exit(0)']);
+    const pid = child.pid!;
+    await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+    expect(await waitUntil(() => !isPidAlive(pid), 5_000, 50)).toBe(true);
+
+    const { runId, faultId } = craftRunAndFault(h, { executorPid: pid });
+    const report = await h.runs.reconcileOnStartup();
+    expect(report.runs).toHaveLength(1);
+    expect(report.runs[0]!.runId).toBe(runId);
+    expect(report.runs[0]!.detail).not.toContain('deferred');
+
+    expect(h.store.getScenarioRun(runId).state).toBe('failed');
+    expect(h.store.getScenarioRun(runId).error?.code).toBe('INTERRUPTED');
+    expect(h.store.getFault(faultId).reconciled).toBe(true);
   }, 60_000);
 });
 

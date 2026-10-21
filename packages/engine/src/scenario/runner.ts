@@ -54,6 +54,7 @@ import { createRpcObserver, type FaultObserver } from '../fault/observer';
 import { redactDeep } from '../fault/redact';
 import type { FaultRequest, FaultType } from '../fault/types';
 import type { MonitoringService } from '../monitor/service';
+import { isPidAlive } from '../process/manager';
 import type { StateStore } from '../state/store';
 import type { NetworkRecord } from '../types';
 import {
@@ -278,7 +279,7 @@ export class ScenarioEngine {
       scenarioId: e.scenarioId,
       networkId: e.networkId,
       state: this.store.tryGetScenarioRun(e.runId)?.state ?? 'running',
-      cancelRequested: e.cancelRequested,
+      cancelRequested: this.cancelPending(e),
     }));
   }
 
@@ -471,11 +472,50 @@ export class ScenarioEngine {
   }
 
   /**
+   * True when cancellation is pending for this run.
+   *
+   * Local requests set the in-memory flag; a cross-process request (another
+   * process persisting `cancellation` on the run record) is picked up from
+   * the store at every cancellation checkpoint and memoized on the entry —
+   * one single-row read per checkpoint while no local request exists.
+   */
+  private cancelPending(entry: ActiveRunEntry): boolean {
+    if (entry.cancelRequested) return true;
+    const persisted = this.store.getScenarioRun(entry.runId).cancellation;
+    if (!persisted) return false;
+    entry.cancelRequested = true;
+    entry.cancelInfo = persisted;
+    return true;
+  }
+
+  /** Persist a cancellation request: record + allowed state transition. */
+  private persistCancellation(
+    record: ScenarioRunRecord,
+    info: { requestedBy: string; requestedAt: string; reason?: string },
+  ): void {
+    record.cancellation = info;
+    if (canTransitionRun(record.state, 'cancel-requested')) {
+      record.state = 'cancel-requested';
+    }
+    record.updatedAt = info.requestedAt;
+    this.store.updateScenarioRun(record);
+  }
+
+  /**
    * Request cancellation of an active run: explicit, persisted, and — when
    * a fault is in flight — interrupted through the injector's supported
    * cancellation mechanism (bounded; the injector's cleanup still runs).
    * The run finishes as `cancelled` (cleanup confirmed) or `cleanup-failed`
    * (never claimed as recovered).
+   *
+   * Cross-process: the run does not have to execute in THIS process (nodes
+   * are daemons; CLI/API processes are short-lived). A request for a run
+   * executing elsewhere is persisted durably and honored by the executing
+   * process at every cancellation checkpoint (step boundaries, condition
+   * polls, delay waits, and mid-operation via the same injector interrupt).
+   * When no process is executing the run (orphaned by a crash), nothing can
+   * honor it here — the request stays recorded honestly on the run and
+   * startup reconciliation terminalizes the orphan.
    */
   async cancel(runId: string, requestedBy = 'engine'): Promise<ScenarioRunRecord> {
     const stored = this.store.getScenarioRun(runId);
@@ -486,26 +526,21 @@ export class ScenarioEngine {
         { runId, state: stored.state },
       );
     }
+    const info = { requestedBy, requestedAt: nowIso() };
     const entry = this.active.get(runId);
     if (!entry) {
-      throw new KaizenError(
-        'SCENARIO_RUN_CONFLICT',
-        `Run ${runId} is not active in this process (interrupted by a restart?) — it cannot be cancelled here`,
-        { runId, state: stored.state },
-      );
+      // Not executing in this process: persist the request durably — the
+      // process driving the run picks it up at its next checkpoint.
+      this.persistCancellation(stored, info);
+      this.events.emit('scenario-run.cancelled', { runId, requestedBy, at: info.requestedAt });
+      return this.store.getScenarioRun(runId);
     }
-    const info = { requestedBy, requestedAt: nowIso() };
     entry.cancelRequested = true;
     entry.cancelInfo = info;
 
     // Persist the cancellation request immediately (fresh read + patch).
     const fresh = this.store.getScenarioRun(runId);
-    fresh.cancellation = info;
-    if (canTransitionRun(fresh.state, 'cancel-requested')) {
-      fresh.state = 'cancel-requested';
-    }
-    fresh.updatedAt = info.requestedAt;
-    this.store.updateScenarioRun(fresh);
+    this.persistCancellation(fresh, info);
     this.events.emit('scenario-run.cancelled', { runId, requestedBy, at: info.requestedAt });
 
     // Interrupt a fault in flight through the ONLY supported mechanism.
@@ -535,6 +570,11 @@ export class ScenarioEngine {
    * are quarantined and reconciled through the injector's existing
    * evidence-based mechanism; the runs themselves are terminalized
    * (`failed` or `cleanup-failed`) — execution is NEVER auto-resumed.
+   *
+   * A run is an orphan only if its EXECUTOR is gone: runs whose recorded
+   * `executorPid` is still alive are owned by a live process (concurrent
+   * CLI/API topology) and are DEFERRED untouched — never terminalized,
+   * never resumed, and honestly reported as deferred in the report.
    */
   reconcileOnStartup(): Promise<ScenarioRunReconcileReport> {
     this.startupReconcilePromise ??= this.performStartupReconcile();
@@ -547,6 +587,24 @@ export class ScenarioEngine {
     let quarantined = false;
     try {
       for (const run of this.store.listUnfinishedScenarioRuns()) {
+        const owner = run.executorPid;
+        if (typeof owner === 'number' && owner > 0 && isPidAlive(owner)) {
+          // Another LIVE process (or this one, in another engine instance)
+          // is executing this run right now: not an orphan. Leave the run
+          // AND its in-flight faults completely alone — reconciling them
+          // would terminalize a live run and release a fault someone else
+          // is driving. (Stale-pid caveat: like node pidfiles, a recycled
+          // pid defers reconciliation until that pid exits.)
+          runs.push({
+            runId: run.id,
+            scenarioId: run.scenarioId,
+            networkId: run.networkId,
+            finalState: run.state,
+            faults: [],
+            detail: `deferred: run is owned by live executor process ${owner} — not an orphan; not terminalized, not resumed`,
+          });
+          continue;
+        }
         const outcome = await this.reconcileInterruptedRun(run);
         runs.push(outcome);
         if (outcome.finalState === 'cleanup-failed') quarantined = true;
@@ -856,7 +914,7 @@ export class ScenarioEngine {
     try {
       const record = this.store.getScenarioRun(entry.runId);
       for (const stepRun of record.steps) {
-        if (entry.cancelRequested) {
+        if (this.cancelPending(entry)) {
           await this.enterCancelPath(record, entry);
           return;
         }
@@ -955,7 +1013,7 @@ export class ScenarioEngine {
       stepRun.preconditions = evals;
       this.persistRun(record, entry);
       const unsatisfied = evals.filter((e) => e.verdict !== 'satisfied');
-      if (unsatisfied.length > 0 && entry.cancelRequested) {
+      if (unsatisfied.length > 0 && this.cancelPending(entry)) {
         this.setStepState(record, stepRun, 'cancelled');
         stepRun.error = { code: 'CANCELLED', message: 'cancelled while preconditions were being evaluated' };
         stepRun.finishedAt = nowIso();
@@ -1001,7 +1059,7 @@ export class ScenarioEngine {
       this.emitVerification(record, stepRun, 'precondition', 'satisfied', 'all preconditions held');
     }
 
-    if (entry.cancelRequested) {
+    if (this.cancelPending(entry)) {
       this.setStepState(record, stepRun, 'cancelled');
       stepRun.error = { code: 'CANCELLED', message: 'cancelled before the operation' };
       stepRun.finishedAt = nowIso();
@@ -1038,7 +1096,7 @@ export class ScenarioEngine {
         details: { blockingReasons: preflight.blockingReasons, checks: preflight.checks },
       });
     }
-    if (entry.cancelRequested) {
+    if (this.cancelPending(entry)) {
       // Cancellation arrived during revalidation — no fault is ever created.
       this.setStepState(record, stepRun, 'cancelled');
       stepRun.error = { code: 'CANCELLED', message: 'cancelled after revalidation, before the operation' };
@@ -1049,6 +1107,22 @@ export class ScenarioEngine {
 
     entry.faultNodeId = targetNode.id;
     const executePromise = this.faults.execute(faultRequest);
+    // Cross-process cancellation while the operation is in flight: a durable
+    // cancel request recorded by ANOTHER process is honored here through the
+    // SAME supported mechanism the local cancel path uses — one interrupt,
+    // never a second executor; failure stays with the fault record itself.
+    let interruptIssued = false;
+    const interruptTimer = setInterval(() => {
+      if (interruptIssued) return;
+      const pending = this.cancelPending(entry);
+      if (!pending || !entry.faultNodeId) return;
+      const active = this.faults
+        .activeFaults()
+        .find((f) => f.nodeId === entry.faultNodeId);
+      if (!active) return;
+      interruptIssued = true;
+      this.faults.cancel(active.faultId).catch(() => undefined);
+    }, 400);
     let result;
     try {
       let timer: NodeJS.Timeout | undefined;
@@ -1071,12 +1145,27 @@ export class ScenarioEngine {
         if (timer) clearTimeout(timer);
       }
     } catch (e) {
+      if (this.cancelPending(entry)) {
+        // The injector call rejected after our own interruption (a pending
+        // cross- or same-process cancellation): the operator's request is the
+        // truth — record the step as cancelled, never as a genuine failure.
+        this.setStepState(record, stepRun, 'cancelled');
+        stepRun.error = {
+          code: 'CANCELLED',
+          message: `cancelled during the operation (injector rejected after the interruption: ${e instanceof Error ? e.message : String(e)})`,
+          details: { code: isKaizen(e) ? e.code : 'INTERNAL' },
+        };
+        stepRun.finishedAt = nowIso();
+        this.persistRun(record, entry);
+        return { kind: 'cancelled' };
+      }
       return this.applyStepFailedPolicy(record, entry, stepRun, {
         code: 'STEP_FAILED',
         message: `injector refused/failed the operation: ${e instanceof Error ? e.message : String(e)}`,
         details: { code: isKaizen(e) ? e.code : 'INTERNAL' },
       });
     } finally {
+      clearInterval(interruptTimer);
       entry.faultNodeId = null;
     }
 
@@ -1111,6 +1200,22 @@ export class ScenarioEngine {
       return { kind: 'cancelled' };
     }
     if (result.state !== 'completed') {
+      if (this.cancelPending(entry)) {
+        // The fault ended non-completed right after our own interruption of a
+        // pending cancellation (e.g. its hold-effect verification observed the
+        // recovering node): record cancelled — never misattribute our own
+        // interruption to a genuine fault failure. `cleanup-failed` is handled
+        // above and still quarantines (an unverified recovery is never hidden).
+        this.setStepState(record, stepRun, 'cancelled');
+        stepRun.error = {
+          code: 'CANCELLED',
+          message: `cancelled through a pending request; the fault ended ${result.state} after the interruption (${result.error?.message ?? result.outcome})`,
+          details: { faultId: result.faultId, outcome: result.outcome },
+        };
+        stepRun.finishedAt = nowIso();
+        this.persistRun(record, entry);
+        return { kind: 'cancelled' };
+      }
       return this.applyStepFailedPolicy(record, entry, stepRun, {
         code: 'STEP_FAILED',
         message: `fault ended ${result.state} (${result.outcome}): ${(result.error?.message ?? result.evidence.notes.join('; ')) || 'no further detail'}`,
@@ -1146,7 +1251,7 @@ export class ScenarioEngine {
     const summary = post
       .map((p) => `${p.kind}@${p.node} [${p.verdict}] ${p.detail}`)
       .join('; ');
-    if (entry.cancelRequested) {
+    if (this.cancelPending(entry)) {
       this.setStepState(record, stepRun, 'cancelled');
       stepRun.error = { code: 'CANCELLED', message: 'cancelled while postconditions were being evaluated' };
       stepRun.finishedAt = nowIso();
@@ -1539,14 +1644,14 @@ export class ScenarioEngine {
         monitoring: this.monitoring,
         observer: this.observer,
         network,
-        isCancelled: () => entry.cancelRequested,
+        isCancelled: () => this.cancelPending(entry),
       });
       let attempts = 0;
       let last: ConditionAttempt = { satisfied: false, detail: 'not evaluated' };
       for (;;) {
         attempts += 1;
         last = await evaluator.attempt();
-        if (last.satisfied || entry.cancelRequested) break;
+        if (last.satisfied || this.cancelPending(entry)) break;
         const remaining = budget - (Date.now() - started);
         if (remaining <= 0) break;
         await sleep(Math.min(SCENARIO_CONDITION_POLL_MS, remaining));
@@ -1577,11 +1682,11 @@ export class ScenarioEngine {
   ): Promise<'done' | 'cancelled' | 'timeout'> {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
-      if (entry.cancelRequested) return 'cancelled';
+      if (this.cancelPending(entry)) return 'cancelled';
       if (Date.now() >= entry.runDeadline) return 'timeout';
       await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
     }
-    if (entry.cancelRequested) return 'cancelled';
+    if (this.cancelPending(entry)) return 'cancelled';
     return Date.now() >= entry.runDeadline ? 'timeout' : 'done';
   }
 
@@ -1605,6 +1710,11 @@ export class ScenarioEngine {
       targetNodes: [],
       requestedBy: req.requestedBy ?? 'engine',
       replayOfRunId,
+      // Owner process for the whole life of this run: startup reconciliation
+      // defers (never terminalizes) a non-terminal run while this pid is
+      // still alive — "unfinished" alone never proves a crash when CLI/API
+      // processes run concurrently against one dataDir (T-3.6A).
+      executorPid: process.pid,
       // NOTE: replay honesty is exposed via scenarioRunReplayNote(run) and
       // the `replayOfRunId` provenance field — NOT via `warnings`, which are
       // reserved for execution-time observations (a clean replay must reach

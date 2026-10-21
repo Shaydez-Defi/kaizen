@@ -1218,3 +1218,99 @@ surfaces, Phases 4–7 — explicitly NOT started, roadmap untouched.
   roadmap task is **T-3.6** (Failure Lab CLI/API and UI integration
   surfaces), which must call `engine.scenarioRuns.execute()` /
   `.replay()` exactly like the API does.
+
+## 2026-10-21 — PHASE 3F (partial): Failure Lab CLI/API Integration (T-3.6A)
+
+**Phase/Task IDs**: Phase 3F — T-3.6A ONLY (CLI surface + API audit).
+The web-UI integration surface (T-3.6B) is explicitly NOT started
+(imported UI wiring pending); Phases 4–7, contracts/registry/wallet,
+K8s/Helm — untouched.
+
+### 1. What was built
+
+- **CLI scenario/run command groups** (`packages/cli/src/program.ts`,
+  new; `packages/cli/src/index.ts` rewritten as a thin wrapper):
+  - `kaizen scenario (list | get <id> | create <file> | validate <file>
+    | operations)` — authoring over the shared engine.
+  - `kaizen run (execute <scenarioId> | replay <runId> | list |
+    get <runId> | cancel <runId>)`.
+  - `execute`/`replay` REQUIRE explicit `-n, --network <idOrName>`
+    (never inferred) and accept bounded `--timeout <ms>` (default
+    300000; cancel 60000). Exit codes: completed* → 0; rejected/failed/
+    cancelled/cleanup-failed/timeout → 1; validate 0/1; `run cancel`
+    exits 0 only when the run was OBSERVED reaching `cancelled` (or
+    completed*), else 1. Engine refusals surface typed errors + the
+    persisted `rejectedRunId` with a `kaizen run get <id>` hint.
+  - `buildProgram(deps?: { engineFactory })` DI — the CLI constructs the
+    engine exactly like the bin does (DEC-002: one engine, two
+    frontends); it NEVER re-implements gates/execution (DEC-024).
+- **API audit: zero changes.** Existing typed routes already cover
+  scenario CRUD/validate/operations and runs execute(202)/list/get/
+  cancel/replay(202 + replayNote); no route duplicated, no contract
+  touched.
+- **Cross-process run-control fixes** (engine; each driven by a REAL
+  observed failure, DEC-025):
+  - `pause.ts` `nodeAlive()`: liveness accepts a fresh running record
+    with a live OS pid — the pause preflight no longer refuses nodes
+    running in another process (was: in-memory-only view → "paused node
+    looks dead").
+  - Durable cross-process cancel: `cancel()` persists for any
+    non-terminal run (no local entry; still no second executor); a 400ms
+    watcher around the in-flight fault honors the persisted request via
+    the SAME `faults.cancel` mechanism, once; the store's
+    `cancellation` UPDATE is write-once (`COALESCE`) so a stale
+    full-row rewrite can never clobber a foreign request (live-observed
+    lost update); a pending cancellation that lands while the
+    interrupted fault ends failed/rejected records the run `cancelled`
+    (never misattributed; `cleanup-failed` still quarantines).
+  - `executor_pid` stamped once at insert (migration #13, v18;
+    never updated, like `replay_of_run_id`); startup reconcile DEFERS
+    (honest `deferred` report entry) while the owner pid is alive —
+    it no longer terminalizes other processes' live runs as
+    `INTERRUPTED` (live-observed).
+
+### 2. Verification (commands + ACTUAL results, 2026-10-21)
+
+- `npm run typecheck` ✓ clean; `npm run lint` ✓ clean; `npm run build`
+  ✓ (rolldown notice only).
+- `npm test` → **323/323 pass (26 files)** — includes CLI
+  `scenario-commands.test.ts` **36/36** (help surface, parsing,
+  validation, JSON envelopes, exit codes, timeout/cancel honesty,
+  rejected-run surfacing) and `scenario-run.test.ts` **41/41** (new:
+  cross-process cancel, write-once cancellation guard, live/dead-owner
+  reconcile behavior).
+- Ungated `npm run test:integration` → all 50 skipped (cli-scenario
+  **5 skipped** — never reported as passed).
+- `KAIZEN_TEST_LIVE=1` `cli-scenario.int.test.ts` → **5/5 pass**
+  (authoring; real run with SAME-pid + RPC/head independent
+  observations; replay with provenance + honesty note + distinct fault;
+  **REAL cross-process cancel** — execute in a child process, cancelled
+  by a separate `run cancel`, honest `cancelled` outcome + node
+  recovery; gate refusals persisted & surfaced).
+- Regression re-runs (engine touched): `scenario-runs.int.test.ts`
+  **9/9**, `faults.int.test.ts` **5/5** (live).
+- Hygiene: `pgrep -af portaldot` clean after live runs; no secrets in
+  the diff; `.kaizen/` untouched.
+
+### 3. Problems, decisions, remaining work
+
+- Three engine defects were found ONLY because the live cross-process
+  test exercised a topology the in-process tests could not (fix → live
+  proof → regression test, each time); one test-harness race (in-process
+  concurrent CLI runs sharing global spies) was fixed by running the bg
+  execute as a REAL child process — which also made the test honest
+  cross-process evidence.
+- One stale assertion (`store.test.ts` schemaVersion 17 → 18) updated
+  for migration #13 — the only pre-existing test change; no test
+  weakened anywhere.
+- **DEC-024** (CLI design) and **DEC-025** (cross-process run control)
+  recorded; `docs/PHASE_REPORT.md` replaced (Phase 3F) with the T-8.1
+  report archived byte-identical to
+  `docs/reports/PHASE_08A_REPORT.md`.
+- **Remaining for full T-3.6**: T-3.6B web-UI integration surface
+  (imported UI wiring to the existing API/typed client — not designed,
+  generated, or restyled here); T-3.6 stays PARTIAL until the UI flow
+  exists.
+- Next: **T-3.6B — wire the imported web UI to the Failure Lab API**
+  (typed-client compatibility only; no fabricated data), or the next
+  roadmap task as directed.

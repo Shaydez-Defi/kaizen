@@ -34,7 +34,7 @@ function makeNode(networkId: string): NodeConfig {
 describe('StateStore', () => {
   it('runs migrations idempotently', () => {
     const store = new StateStore(':memory:');
-    expect(store.schemaVersion).toBe(17);
+    expect(store.schemaVersion).toBe(18); // v18: scenario_runs.executor_pid (T-3.6A)
     // re-opening an in-memory store re-runs migrate() on a fresh db — verify
     // the persisted path also tolerates repeat migration:
     store.close();

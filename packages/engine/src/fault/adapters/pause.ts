@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import { KaizenError } from '../../errors';
-import { pidFileFor } from '../../process/manager';
+import { NodeProcessManager, pidFileFor } from '../../process/manager';
 import {
   DEFAULT_ADAPTER_TIMEOUTS,
   pollBounded,
@@ -60,6 +60,25 @@ function verifiedPid(ctx: FaultAdapterContext): number {
   return pid;
 }
 
+/**
+ * Cross-process-safe liveness of the target node process.
+ *
+ * Nodes are daemons and CLI processes are short-lived (DEC-004): a pause
+ * driven from a process that did NOT spawn the node must still verify the
+ * target honestly. In-memory manager state is used when this process manages
+ * the node; otherwise the persisted record must say 'running' with an alive
+ * pid — the exact predicate the injector's `target.engine-managed-running`
+ * gate and the rest of the codebase (network service, monitor, terminate
+ * adapter) already use. Signalling identity stays STRICTER than this check:
+ * `verifiedPid()` re-verifies the pid + kaizen-node.pid agreement immediately
+ * before every signal.
+ */
+function nodeAlive(ctx: FaultAdapterContext): boolean {
+  if (ctx.processes.isRunning(ctx.node.id)) return true;
+  const fresh = ctx.reloadNode();
+  return fresh.status === 'running' && NodeProcessManager.isExternalPidAlive(fresh.pid);
+}
+
 export const pauseAdapter: FaultAdapter = {
   type: 'pause',
   mechanism: 'SIGSTOP/SIGCONT on the verified managed node PID (R-22 A)',
@@ -84,7 +103,7 @@ export const pauseAdapter: FaultAdapter = {
   async preflight(ctx): Promise<AdapterPreflight> {
     const checks: FaultCheck[] = [];
     const pid = ctx.node.pid;
-    const alive = typeof pid === 'number' && pid > 0 && ctx.processes.isRunning(ctx.node.id);
+    const alive = nodeAlive(ctx);
     checks.push({
       id: 'pause.process-managed-alive',
       ok: alive,
@@ -143,7 +162,7 @@ export const pauseAdapter: FaultAdapter = {
     const { result, attempts } = await pollBounded(
       async () => {
         const obs = await ctx.observer.observe(ctx.node);
-        const processAlive = ctx.processes.isRunning(ctx.node.id);
+        const processAlive = nodeAlive(ctx);
         if (!processAlive) {
           return {
             stop: true,
@@ -155,7 +174,7 @@ export const pauseAdapter: FaultAdapter = {
       },
       { timeoutMs: this.timeouts.verifyEffectMs, intervalMs: 400, isCancelled: ctx.isCancelled },
     );
-    const processAlive = ctx.processes.isRunning(ctx.node.id);
+    const processAlive = nodeAlive(ctx);
     const observed = !result.observation.rpcReachable && processAlive;
     return {
       observed,
@@ -186,7 +205,7 @@ export const pauseAdapter: FaultAdapter = {
     const { result, attempts } = await pollBounded(
       async () => {
         const obs = await ctx.observer.observe(ctx.node);
-        const processAlive = ctx.processes.isRunning(ctx.node.id);
+        const processAlive = nodeAlive(ctx);
         if (!processAlive) {
           return {
             stop: true,
@@ -198,7 +217,7 @@ export const pauseAdapter: FaultAdapter = {
       },
       { timeoutMs: this.timeouts.verifyRecoveryMs, intervalMs: 400, isCancelled: () => false },
     );
-    const verified = result.observation.rpcReachable && ctx.processes.isRunning(ctx.node.id);
+    const verified = result.observation.rpcReachable && nodeAlive(ctx);
     return {
       verified,
       attempts,

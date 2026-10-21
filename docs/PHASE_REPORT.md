@@ -1,194 +1,189 @@
-# Phase 8 Report (partial) — Portaldot V3 Connectivity Probe (T-8.1)
+# Phase 3F Report (partial) — Failure Lab CLI/API Integration (T-3.6A)
 
-**Date**: 2026-10-19
-**Tasks**: T-8.1 ONLY. Contract deployment, registry contracts, wallet
-authorization, any later T-8.x task, T-3.6 CLI/UI surfaces, and Phases 4–7
-were explicitly out of scope and were NOT implemented. No `PHASE_8_PLAN.md`
-existed in the repo or was supplied — the Phase 8 section in
-`docs/IMPLEMENTATION_PLAN.md` records the task exactly as briefed.
-
----
+**Date**: 2026-10-21 · **Status**: IMPLEMENTED & VERIFIED (this slice)
+· Prior report archived verbatim as `docs/reports/PHASE_08A_REPORT.md`.
 
 ## 1. Task & scope
 
-Deliver a narrowly scoped, typed Portaldot V3 endpoint configuration and
-connectivity probe: the official V3 endpoints (Substrate WS, EVM JSON-RPC,
-Explorer) as overridable configuration defaults; independent read-only
-probes of each surface with typed, structured results; mocked-transport
-unit tests that need no internet; an environment-gated live probe against
-the real endpoints; documentation and evidence — nothing else.
+T-3.6A ONLY: the operator-facing CLI surface for Failure Lab scenarios
+and runs (authoring, execution, replay, inspection, cancellation) plus
+an audit of the API surface. Explicitly out of scope for this slice:
+the web-UI integration surface (T-3.6B — imported UI wiring), Phase 4,
+contracts/registry/wallet, K8s/Helm, Phases 5–7. T-3.6 as a whole
+remains PARTIAL until the UI flow exists.
 
-**Scope guardrails honored**: no UI screens, no API route, no
-arbitrary-URL probing surface, no chain writes/signing/wallet operations,
-no new dependencies, no README/provenance edits, unit suite stays offline.
-
----
+Constraints honored: the CLI calls the shared engine (`packages/engine`)
+— never a second executor, never a re-implementation of gates, target
+validation, preconditions, cancellation, timeout, or cleanup; no
+destructive operation can reach a non-designated-test network (DEC-008
+gates stay engine-side); audit history and source-run immutability
+preserved; no new dependencies; the API needed **zero changes** (audit
+below).
 
 ## 2. Architecture & files changed
 
-Configuration resolves as **explicit option > `KAIZEN_V3_*` env > trusted
-default**, validated with Zod (validation errors name KEYS, never values).
-`V3ConnectivityProbe` depends on three transport interfaces (DI — unit
-tests inject fakes); the real transports reuse existing stacks:
-`PortaldotRpcClient` (`@polkadot/api`, DEC-001) for Substrate WS and the
-engine's `fetch` HTTP stack for JSON-RPC/HTTP. Each endpoint probe is
-wrapped in a hard per-endpoint deadline (AbortController + `Promise.race`)
-whose abort signal drives transport cleanup; `probeAll()` runs the three
-probes in parallel, each individually wrapped — one failing endpoint can
-never suppress or short-circuit a sibling's result, and the probe never
-rejects. Results are credential-free by construction: endpoints appear
-origin-redacted (`redactEndpointUrl`), messages are sanitized (configured
-URLs → origins, userinfo stripped generically, shared `redactSecrets`
-scrubber), and unobserved values are `null`, never guessed.
-
-| File | Change |
-|------|--------|
-| `packages/engine/src/v3/config.ts` | **new** — `V3_ENDPOINT_DEFAULTS`, `V3_ENV_KEYS`, `resolveV3Config()`, `redactEndpointUrl()` |
-| `packages/engine/src/v3/types.ts` | **new** — `V3ProbeStatus`, `V3EndpointProbeResult`, `V3ConnectivityReport`, per-role observation types |
-| `packages/engine/src/v3/probe.ts` | **new** — `V3ConnectivityProbe`, `probeV3Connectivity()`, deadline/cleanup, validation, status model, sanitization |
-| `packages/engine/src/v3/transports.ts` | **new** — transport DI interfaces + `RealSubstrateTransport`, `FetchJsonRpcTransport`, `FetchHttpAvailabilityTransport` |
-| `packages/engine/src/rpc/client.ts` | **modified (additive)** — `SubstrateProbeRead`, `PortaldotRpcClient.probeReads()` (three parallel read-only calls), one-shot `readProbeState()` with guaranteed close |
-| `packages/engine/src/index.ts` | **modified** — exports for the v3 module (service, config, transports, types) |
-| `packages/engine/test/v3-probe.test.ts` | **new** — 21 unit tests, all transports faked, offline |
-| `test/integration/v3-probe.int.test.ts` | **new** — live probe, own gate `KAIZEN_TEST_V3=1` |
-| `docs/IMPLEMENTATION_PLAN.md` | new Phase 8 section + T-8.1 row (VERIFIED) |
-| `docs/TECHNICAL_RESEARCH.md` | R-23 (V3 endpoints, VERIFIED), R-24 (explorer, PARTIALLY VERIFIED) + summary-matrix rows |
-| `docs/ARCHITECTURE.md` | component-table row for `V3ConnectivityProbe`; §5 V3 external-endpoint boundary |
-| `docs/DECISIONS.md` | DEC-023 |
-| `docs/RISKS.md` | RSK-29 |
-| `docs/TESTING.md` | §15 (unit + live + commands/results) |
-| `docs/PROGRESS.md` | 2026-10-19 T-8.1 entry |
-| `docs/reports/PHASE_03E_REPORT.md` | **new** — Phase 3E report archived verbatim (`cmp` byte-identical) |
-
----
+- `packages/cli/src/program.ts` (NEW): the whole CLI program —
+  `kaizen scenario (list | get <id> | create <file> | validate <file> |
+  operations)` and `kaizen run (execute <scenarioId> | replay <runId> |
+  list | get <runId> | cancel <runId>)`. `execute`/`replay` require
+  explicit `-n, --network <idOrName>` (never inferred) and accept
+  bounded `--timeout <ms>` (default 300000; cancel 60000). Structured
+  errors + exit codes per DEC-024; rejected runs are surfaced with their
+  persisted id and an actionable hint. `buildProgram(deps?)` exposes an
+  engine-factory DI seam used by tests only.
+- `packages/cli/src/index.ts`: rewritten as the thin bin wrapper
+  (parse + version/help conventions only).
+- `packages/cli/test/scenario-commands.test.ts` (NEW): 36 offline unit
+  tests (parsing/help/validation/JSON/exit codes/timeout & cancel
+  honesty/rejected-run surfacing) — mocked engine, never live claims.
+- `test/integration/cli-scenario.int.test.ts` (NEW): 5 LIVE tests
+  against a real `portaldot_dev` network (see §5).
+- Engine (cross-process run control, DEC-025 — every fix driven by a
+  real observed failure):
+  - `packages/engine/src/fault/adapters/pause.ts`: `nodeAlive()`
+    liveness rule (fresh running record + live OS pid) replacing the
+    in-memory-only view at 5 sites.
+  - `packages/engine/src/scenario/runner.ts`: durable cross-process
+    cancel (`cancel()` persists for any non-terminal run — still no
+    second executor); memoizing `cancelPending()` at every checkpoint;
+    a 400ms single-interrupt watcher around the in-flight fault honoring
+    the persisted request via the same `faults.cancel` mechanism;
+    pending-cancellation-honored recording (an interrupted fault that
+    ends failed/rejected records the step/run `cancelled`, never a
+    misattributed failure; `cleanup-failed` still quarantines);
+    `executor_pid` stamped once at insert; startup reconcile defers to
+    live owners.
+  - `packages/engine/src/state/store.ts`: migration #13
+    (`scenario_runs.executor_pid`, schema v18; insert + mapper only —
+    never updated, like `replay_of_run_id`); `cancellation` UPDATE is
+    write-once (`COALESCE(?, cancellation)`).
+  - `packages/engine/src/scenario/run-types.ts`: `executorPid` field +
+    reconcile-report `deferred` entry documentation;
+    `packages/engine/src/engine.ts`: reconcile comment.
+- Tests: `packages/engine/test/scenario-run.test.ts` (+4: cross-process
+  cancel, write-once guard, live-owner defer, dead-owner terminalize →
+  41); `packages/engine/test/store.test.ts` (schemaVersion 17 → 18 —
+  the ONLY pre-existing assertion updated; nothing weakened).
+- Docs: this report; `docs/reports/PHASE_08A_REPORT.md` (archive);
+  PROGRESS entry; IMPLEMENTATION_PLAN T-3.6 = PARTIAL; TESTING §16;
+  DECISIONS DEC-024/DEC-025; ARCHITECTURE CLI row.
+- **API**: audit only — `apps/api` untouched. Existing typed routes
+  already cover scenario CRUD/validate/operations and runs
+  execute(202)/list (`scenarioId|networkId|state|replayOfRunId|limit|
+  offset`)/get/cancel/replay(202 + `replayNote`); rejected-attempt
+  persistence, run history, replay provenance, and the security posture
+  are unchanged. Nothing was added because nothing was missing.
 
 ## 3. Acceptance criteria (PASS / FAIL / BLOCKED) with evidence
 
-| # | Criterion | Verdict | Evidence |
-|---|-----------|---------|----------|
-| 1 | Official V3 endpoints are configuration defaults, overridable via options/env | **PASS** | `V3_ENDPOINT_DEFAULTS` + `resolveV3Config()`; unit tests "uses the official V3 endpoints as overridable defaults", "applies env overrides, with explicit options winning over env" |
-| 2 | Substrate WS probe: connect, chain name, system health, best header/height | **PASS** | unit (fake transport, ok + malformed variants); live: chain "PortaldotV3 Test", health {peers 2, not syncing}, best #106135 — `[v3-live]` log, R-23 |
-| 3 | EVM probe: `eth_chainId`, `eth_blockNumber`, optional `web3_clientVersion`; JSON-RPC envelope/ID validation | **PASS** | unit (envelope/id/version/error-object/non-2xx/non-JSON cases); live: chain id 420420777, block #106135, client `eth-rpc/main-fddd431…` |
-| 4 | Wrong chain ID = mismatch, never success; HTTP 200 alone ≠ healthy | **PASS** | unit "reports an unexpected chain id as mismatch…" (observed 100 → `mismatch`, healthy false); "200 + non-JSON body → malformed-response"; "JSON-RPC error object with HTTP 200 → protocol-error" |
-| 5 | Typed results distinguishing connection failure / timeout / protocol-RPC failure / malformed response / success | **PASS** | `V3ProbeStatus = ok \| unavailable \| timeout \| protocol-error \| malformed-response \| mismatch`; unit tests assert each classification (incl. instant transport-code classification, not deadline waiting) |
-| 6 | Endpoints probed independently; one failure never short-circuits another | **PASS** | unit: substrate down + EVM up; EVM down + substrate up; all-three-fail-differently test — three results always returned |
-| 7 | Deterministic cleanup on success, failure, and timeout | **PASS** | unit: hung transport → `timeout` within deadline, `signal.aborted` + abort-counter asserted; `readProbeState()` closes in `finally`; real transports honor abort (offline pre-aborted-signal test); live run leaves no processes |
-| 8 | Explorer: lightweight availability check implemented; scope documented (no scraper, no new dependency) | **PASS** (availability-only, deliberately) | bounded 2 KiB fetch GET; result carries scope warning; R-24 records PARTIALLY VERIFIED with what is and is not verifiable |
-| 9 | No secrets/credentials/tokens/full credential-bearing URLs in results or logs | **PASS** | unit "never leaks credentials from config or error messages into any result" (serialized report contains zero occurrences of userinfo/path/query material); redaction is structural (origin-only endpoints) |
-| 10 | No chain writes/signing/wallet/staking/deployment/funding/runtime capability discovery | **PASS** | read-only by construction + unit "performs read-only protocol calls…" (method allowlist, empty params, no header/auth inputs) |
-| 11 | No unrestricted arbitrary-URL probing surface; existing security conventions kept | **PASS** | no route, no request input, no URL parameter exists (DEC-023); config is the only target source |
-| 12 | Unit suite requires no internet; live check explicitly environment-gated | **PASS** | 21 mocked tests offline (fakes for all transports); live file gated `KAIZEN_TEST_V3=1`; ungated run verified `1 skipped` (never "passed") |
-| 13 | Live probe ran on the configured endpoints; observations recorded with timestamps; no skipped/blocked check reported as passed | **PASS** | `KAIZEN_TEST_V3=1 … v3-probe.int.test.ts` → 1/1 PASS (exit 0); `[v3-live]` report at 2026-10-19T17:51:03Z logged; R-23/R-24/TESTING §15 record the values |
-| 14 | Supplied-config-vs-observed comparison performed | **PASS** | expected chain id 420420777 CONFIRMED by `eth_chainId` (`0x190f1ca9`) — no mismatch; heights advance between runs (live chain), recorded as evidence |
-| 15 | Documentation updated without historical rewrites; progress logged; report archived | **PASS** | Phase 3E report archived byte-identical (`cmp`); IMPLEMENTATION_PLAN/PROGRESS/ARCHITECTURE/DECISIONS/RISKS/TESTING/TECHNICAL_RESEARCH updated (additive) |
+| Criterion | Verdict | Evidence |
+|-----------|---------|----------|
+| Scenario list/get/create/validate/operations via CLI over the shared engine | PASS | CLI unit 36/36; live test 1 (authoring) |
+| Run execute/replay/list/get/cancel via CLI; engine is the ONLY executor | PASS | `program.ts` calls `engine.scenarioRuns.*` only; unit + live tests 2–5 |
+| Explicit `-n, --network` on execute/replay; never inferred | PASS | commander-required option; unit (missing `--network`), live (ghost network) |
+| Bounded `--timeout`; honest OPERATION_TIMEOUT ("keeps executing"), never success | PASS | unit timeout-honesty tests (execute + cancel) |
+| Exit-code contract (completed*→0; rejected/failed/cancelled/cleanup-failed/timeout→1; validate 0/1; cancel 0 only on OBSERVED terminal) | PASS | unit tests per branch |
+| Engine refusals surfaced with persisted `rejectedRunId` + actionable hint; no misattribution | PASS | unit + live gate-refusal test |
+| Replay provenance + honesty note; re-confirmation of the network | PASS | live test 3 (`replayOfRunId`, distinct fault, note) |
+| Cancellation works ACROSS PROCESSES (canceller ≠ executor); audit history preserved; source immutability | PASS | live test 4: execute in a REAL child process, cancelled by a separate `run cancel`; unit cross-process + write-once tests |
+| Authorization/test-network gates intact (DEC-008); rejected attempts persisted | PASS | engine gates unchanged; live gate-refusal test |
+| API audit complete; no duplicated routes; typed contracts untouched | PASS | §2 — zero API changes |
+| No fabricated data anywhere in CLI output | PASS | every field printed comes from a real engine record |
+| Regression: existing suites stay green after engine changes | PASS | unit 323/323; live scenario-runs 9/9, faults 5/5 |
+| Full T-3.6 (incl. web UI) | BLOCKED (by scope, not by defect) | T-3.6B wiring pending — see §9 |
 
-No criterion is FAIL or BLOCKED.
-
----
-
-## 4. Exact commands and results (2026-10-19)
+## 4. Exact commands and results (2026-10-21)
 
 | Command | Result |
 |---------|--------|
-| `npm run build` | PASS — exit 0 (engine/cli/api/web) |
-| `npm run typecheck` | PASS — exit 0 |
-| `npm run lint` | PASS — exit 0 |
-| `npm test` | First run: **282/283** — one failure in `scenario-run.test.ts` ("stand-in node could not listen on 34741": transient local port-bind contention in the T-3.4 harness; no V3 code involved). Isolated re-run of that file: **37/37 PASS**. Second full run: **283/283 (25 files) PASS** — exit 0 |
-| `npx vitest run --config vitest.integration.config.mts test/integration/v3-probe.int.test.ts` (no gate) | **1 skipped** — the live check does not pass without its gate |
-| `KAIZEN_TEST_V3=1 npx vitest run --config vitest.integration.config.mts test/integration/v3-probe.int.test.ts` | **1/1 PASS** — exit 0 (3.1 s) |
-| `pgrep -af portaldot` after the live run | none — no orphaned processes/connections |
-
----
+| `npm run typecheck` | PASS (exit 0, clean) |
+| `npm run lint` | PASS (exit 0, clean) |
+| `npm run build` | PASS (exit 0; benign rolldown notice) |
+| `npm test` | **323/323 PASS (26 files)** — `scenario-commands` 36/36, `scenario-run` 41/41 |
+| `npm run test:integration` (no gate) | 50 skipped / 12 files — `cli-scenario` 5 skipped (skipped ≠ passed) |
+| `KAIZEN_TEST_LIVE=1 npx vitest run --config vitest.integration.config.mts test/integration/cli-scenario.int.test.ts` | **5/5 PASS** (~32 s, real network) |
+| `KAIZEN_TEST_LIVE=1 … scenario-runs.int.test.ts` (regression re-run) | **9/9 PASS** |
+| `KAIZEN_TEST_LIVE=1 … faults.int.test.ts` (regression re-run) | **5/5 PASS** |
+| `pgrep -af portaldot` (hygiene, after live runs) | none |
 
 ## 5. Mocked vs live evidence (kept separate)
 
-**Mocked (offline, deterministic — `packages/engine/test/v3-probe.test.ts`,
-21/21)**: every required behavior — independence, all six statuses, timeout
-+ cleanup signalling, envelope/id/version validation, JSON-RPC errors,
-mismatch, malformed heights/headers/health, optional-method warnings,
-credential redaction, config precedence, read-only allowlists, single-
-endpoint contract — is proven against INJECTED FAKES. These results say
-nothing about the real endpoints; they prove the probe's logic.
-
-**Live (real endpoints — `test/integration/v3-probe.int.test.ts`, 1/1 with
-gate `KAIZEN_TEST_V3=1`, 2026-10-19T17:51Z)**:
-
-| Endpoint | Status | Observations (verbatim from the `[v3-live]` report) |
-|----------|--------|------------------------------------------------------|
-| `wss://test-node-v3.portaldot.dev` | `ok` (3130 ms) | chain **"PortaldotV3 Test"**; health **{peers: 2, isSyncing: false, shouldHavePeers: false}**; best **#106135**, hash `0x30c7b26621554e0f11cade516994cec379ad9079cbf2a34da9dfbc208d0cab66` |
-| `https://test-evm-rpc-v3.portaldot.dev` | `ok` (1553 ms) | `eth_chainId` **420420777** (`0x190f1ca9`, matches configured expectation); `eth_blockNumber` **#106135** — same height as the Substrate head (one chain, two surfaces); `web3_clientVersion` **"eth-rpc/main-fddd431/x86_64-unknown-linux-gnu/rustc1.98.0"** |
-| `https://node-console.portaldot.dev` | `ok` (888 ms) | **HTTP 200**, `text/html`, document title **"Portaldot Node Console"** (bounded 2 KiB read); availability-only scope recorded in the result's warnings |
-
-Overall: `healthy: true`; report timestamps 2026-10-19T17:51:00.66–03.79Z;
-endpoints origin-redacted; zero credentials. Manual pre-checks (curl POST
-`eth_chainId`; Node `ws` reads) at 17:27–17:28 UTC agreed and showed the
-chain advancing (#105907 → #106135), corroborating a live chain.
-
----
+- **Mocked (offline)**: all 36 CLI unit tests use a scripted fake engine
+  through the DI seam — they prove parsing, envelopes, exit codes, and
+  honesty wording, NOT runtime behavior. Engine unit additions run real
+  SQLite + the real injector against harness stand-in nodes.
+- **Live (real `portaldot_dev`, disposable designatedTest networks)**:
+  the 5 tests in `cli-scenario.int.test.ts` — the network is created by
+  Kaizen itself; every execution claim is backed by an INDEPENDENT
+  observation (own RPC polling + process identity), not just the CLI's
+  printed record:
+  1. authoring via CLI (validate never saves);
+  2. a real pause run completes via `run execute`; the victim is
+     reachable again with the SAME pid and a moving chain head;
+  3. `run replay` replays a finished run as a NEW run with provenance
+     (`replayOfRunId` + honesty note) and a DISTINCT fault record;
+  4. **cross-process cancel**: the execute runs in a REAL child process
+     (built bin, same `KAIZEN_DATA_DIR`); `run cancel` from the test
+     process durably records the request; the child's engine interrupts
+     the hold and the child honestly reports `{ok:false,
+     state:"cancelled"}` with exit 1; the node returns with the SAME pid
+     and RPC reachable; cancelling the finished run →
+     SCENARIO_RUN_CONFLICT;
+  5. gate refusals: ghost network refused with a persisted, inspectable
+     rejected run; replay-of-rejected refused (no new run); missing
+     `--network`; unknown ids → NOT_FOUND.
+- Each engine cross-process fix followed: live failure observed → fix →
+  live proof → unit regression test. Nothing was marked VERIFIED on
+  mocked evidence alone.
 
 ## 6. What was NOT implemented (deliberate scope boundaries)
 
-- No API route or UI surface for the probe (DEC-023: config-only targets;
-  a future surface must keep that posture).
-- No contract deployment, registry contracts, wallet authorization, or any
-  later T-8.x task — undefined without a brief; not started.
-- No T-3.6 CLI/UI surfaces; Phases 4–7 untouched.
-- No EVM library (ethers/viem), no headless browser, no explorer scraper.
-- No deep explorer verification (SPA data views) — documented as PARTIALLY
-  VERIFIED in R-24 rather than overclaimed.
-- No `docs/EVIDENCE.md` — it does not exist, and AGENTS.md fixes research
-  facts in `docs/TECHNICAL_RESEARCH.md` (R-23/R-24); live vs mocked
-  evidence is separated here and in TESTING §15.
-- No changes to mainnet posture (DEC-008 intact — the probe is read-only
-  against designated public test endpoints only; it cannot touch a local
-  managed network's control plane).
-
----
+- **T-3.6B web-UI surface**: the imported UI was neither designed,
+  regenerated, restyled, nor wired in this slice; existing UI files are
+  untouched. Backend/CLI contracts and typed-client compatibility are
+  preserved so the wiring task can start cleanly.
+- No `--detach` mode (would lie about executor ownership; bounded waits
+  instead — DEC-024).
+- No API changes (audit found nothing missing); no new routes, no
+  contract changes, no new dependencies.
+- No wallet signing, no chain writes, no new T-8.x features; no
+  Kubernetes/Helm work; no mainnet contact (DEC-008 gates intact).
 
 ## 7. Security considerations & risks
 
-- **SSRF/absteering**: impossible by construction — the probe accepts no
-  request input and no URL; only explicit options and `KAIZEN_V3_*` env
-  (trusted operator configuration) select targets (DEC-023).
-- **Credential leakage**: endpoint URLs may carry userinfo/path/query
-  secrets in overridden environments; results embed origin-only forms,
-  messages are sanitized (config-URL → origin, generic userinfo strip,
-  `redactSecrets`), and config-validation errors name keys, never values —
-  all unit-tested.
-- **Read-only guarantee**: EVM calls are a fixed allowlist with empty
-  params; substrate reads go through the existing client's read-only
-  path; no signing, auth headers, or state-changing methods exist in the
-  module.
-- **New risk recorded**: **RSK-29** (live check depends on external
-  endpoint availability) — mitigated by the dedicated gate (ungated =
-  skipped, verified), the fully offline unit suite, and honest typed
-  `unavailable`/`timeout` statuses that are never converted to healthy.
-
----
+- The CLI never executes shell strings or host commands on behalf of the
+  UI; all process execution stays engine-side (argv arrays, allowlists,
+  timeouts — unchanged).
+- Target selection is explicit and engine-gated: `--network` is a
+  required flag resolved against designated-test networks; a refusal
+  persists a rejected run (audit trail). Nothing in the CLI can aim a
+  destructive operation at mainnet.
+- Cancellation remains single-mechanism (`faults.cancel`, once) — the
+  cross-process path never introduces a second executor or kills
+  processes directly; signalling identity stays on the verified pid.
+- `executor_pid` is stamped once and never updated (provenance
+  semantics); reconcile only touches runs whose owner is verifiably
+  dead — it can no longer disrupt a live operator session.
+- No secrets, keys, or machine-specific paths in the diff; `.kaizen/`
+  remains gitignored runtime state; the repo stays demo-able from a
+  clean clone.
 
 ## 8. Cleanup / resource-release verification
 
-- The Substrate one-shot helper closes the WS connection in `finally` on
-  success, failure, and timeout; the probe's per-endpoint AbortController
-  fires on the hard deadline, and transports stop work on abort (fetch
-  `AbortSignal.any`; the real substrate transport rejects on abort and the
-  client's own deadlines close the socket).
-- Unit suite asserts the cleanup SIGNAL (`signal.aborted` true, abort
-  listener fired exactly once) and bounded elapsed time with a hung
-  transport; `RealSubstrateTransport`'s pre-aborted path is exercised
-  offline.
-- Live run hygiene: `pgrep -af portaldot` after → none; the probe opens no
-  long-lived resources (no listeners, no ports).
-
----
+- Live suites stop their networks in `afterAll`; the CLI child process
+  is SIGKILLed in `afterAll` if it somehow outlives a failed test; runs
+  always terminalize (cancel, deadline, or bounded timeout — a timeout
+  reports honestly that the run keeps executing).
+- `pgrep -af portaldot` after every live run: no leaked node processes.
+- Temp debug instrumentation used during diagnosis was fully removed
+  (grep-clean) before commit; engine/cli dist rebuilt from clean sources.
 
 ## 9. Remaining work & next task
 
-- **Remaining (not started by instruction)**: later V3 integration tasks
-  (contract deployment, registry, wallet authorization) — each requires
-  its own brief; explorer deep-checks only if a published API surface
-  justifies it (R-24).
-- **Next roadmap task when resumed**: **T-3.6** — Failure Lab CLI/API and
-  UI integration surfaces, calling `engine.scenarioRuns.execute()` /
-  `.replay()` exactly like the API does. Per instruction, work STOPPED
-  after T-8.1.
+- **Remaining for full T-3.6**: T-3.6B — wire the imported web UI to
+  the existing Failure Lab API/typed client (no fabricated data, no
+  restyling; UI wiring only). T-3.6 stays PARTIAL until that flow
+  exists and its evidence is recorded.
+- **Next task (recommended)**: **T-3.6B — Failure Lab UI integration**
+  (imported UI → typed client → existing API routes), or the next
+  roadmap task as directed.

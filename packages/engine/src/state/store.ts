@@ -177,6 +177,12 @@ const MIGRATIONS: string[] = [
   //     history stays append-only and both directions stay queryable.
   `ALTER TABLE scenario_runs ADD COLUMN replay_of_run_id TEXT;`,
   `CREATE INDEX IF NOT EXISTS scenario_runs_replay_idx ON scenario_runs(replay_of_run_id);`,
+  // 13: run executor ownership (T-3.6A multi-process topology). Startup
+  //     reconciliation must distinguish a crash orphan from a run another
+  //     LIVE process is executing right now — "unfinished" alone never
+  //     proves a crash when CLI/API processes are concurrent and short-
+  //     lived. Set once at insert (never rewritten by updates).
+  `ALTER TABLE scenario_runs ADD COLUMN executor_pid INTEGER;`,
 ];
 
 interface NetworkRow {
@@ -284,6 +290,7 @@ interface ScenarioRunRow {
   cleanup: string | null;
   cancellation: string | null;
   replay_of_run_id: string | null;
+  executor_pid: number | null;
   created_at: string;
   started_at: string | null;
   updated_at: string;
@@ -846,9 +853,9 @@ export class StateStore {
           `INSERT INTO scenario_runs
            (id, scenario_id, scenario_name, scenario_schema_version, network_id, network_name,
             state, current_step_id, requested_by, snapshot, target_nodes, steps, validation,
-            warnings, error, cleanup, cancellation, replay_of_run_id,
+            warnings, error, cleanup, cancellation, replay_of_run_id, executor_pid,
             created_at, started_at, updated_at, finished_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           record.id,
@@ -871,6 +878,9 @@ export class StateStore {
           // provenance is immutable and set once at insert (a replay never
           // rewrites the SOURCE row; the update statement does not touch it)
           record.replayOfRunId,
+          // executor ownership is likewise set once at insert (the update
+          // statement does not touch it) — consulted by startup reconciliation
+          record.executorPid ?? null,
           record.createdAt,
           record.startedAt,
           record.updatedAt,
@@ -881,7 +891,14 @@ export class StateStore {
     }
   }
 
-  /** Atomic full-row rewrite (single statement — no partial transitions). */
+  /**
+   * Atomic full-row rewrite (single statement — no partial transitions).
+   *
+   * `cancellation` is write-once/append-only (DEC-025): a durable request
+   * persisted by another process must never be clobbered back to null by a
+   * concurrent full-row rewrite from this process (lost update), so the SQL
+   * keeps the existing value whenever the incoming record carries none.
+   */
   updateScenarioRun(record: ScenarioRunRecord): void {
     let changes = 0;
     try {
@@ -890,7 +907,7 @@ export class StateStore {
           `UPDATE scenario_runs SET
              scenario_name = ?, scenario_schema_version = ?, network_id = ?, network_name = ?,
              state = ?, current_step_id = ?, snapshot = ?, target_nodes = ?, steps = ?,
-             validation = ?, warnings = ?, error = ?, cleanup = ?, cancellation = ?,
+             validation = ?, warnings = ?, error = ?, cleanup = ?, cancellation = COALESCE(?, cancellation),
              started_at = ?, updated_at = ?, finished_at = ?
            WHERE id = ?`,
         )
@@ -1240,6 +1257,7 @@ function mapScenarioRunRow(row: ScenarioRunRow): ScenarioRunRecord {
       targetNodes: targetNodes as ScenarioRunTargetNode[],
       requestedBy: row.requested_by,
       replayOfRunId: row.replay_of_run_id ?? null,
+      executorPid: row.executor_pid ?? null,
       steps: steps as ScenarioStepRun[],
       validation: validation as ScenarioValidationResult | null,
       warnings: warnings as string[],

@@ -580,3 +580,113 @@ Format: context → decision → alternatives → consequences. Newest entries a
   `docs/TECHNICAL_RESEARCH.md` (R-23/R-24) per AGENTS.md rather than a new
   `docs/EVIDENCE.md` (which does not exist and was not created — the
   phase report separates live vs mocked evidence).
+
+## DEC-024 — Failure Lab CLI: two command groups over the shared engine, explicit target selection, honest exit codes
+
+- **Context**: T-3.6A adds the operator-facing CLI surface for scenarios
+  and runs (authoring, execution, replay, inspection, cancellation).
+  The design risks were: (a) a second execution path in the CLI that
+  bypasses the engine's gates; (b) silent target inference (a run landing
+  on the wrong network); (c) misleading exit codes (a cancelled or
+  rejected run reported as success); (d) duplicating operation logic that
+  the engine already owns (DEC-002).
+- **Decision**:
+  1. **Two command groups, one shared engine.** `kaizen scenario
+     (list | get <id> | create <file> | validate <file> | operations)`
+     and `kaizen run (execute <scenarioId> | replay <runId> | list |
+     get <runId> | cancel <runId>)`. Every command calls the SAME engine
+     pathways the API uses (`engine.scenarioRuns.execute()`, `.replay()`,
+     `.cancel()`, …) through a DI factory (`buildProgram(deps?)`) — the
+     CLI never re-implements gates, validation, target resolution, or
+     execution; a refusal is the engine's typed error, surfaced verbatim.
+  2. **Explicit target selection, never inferred.** `execute` and
+     `replay` REQUIRE `-n, --network <idOrName>`; the engine's gates
+     (designated test networks, DEC-008) still apply server-side. Replay
+     re-confirms the network explicitly — it is never inherited from the
+     source run.
+  3. **Honest exit-code contract.** Terminal states `completed` /
+     `completed-with-warnings` → 0; `rejected` / `failed` / `cancelled` /
+     `cleanup-failed` → 1; `scenario validate` → 0 valid / 1 invalid;
+     `run cancel` exits 0 only when the run was OBSERVED reaching a
+     terminal state (`cancelled`, or completed*) and 1 otherwise. A wait
+     timeout is reported as `OPERATION_TIMEOUT` ("the run keeps
+     executing"), never as success; a cancellation nobody observed is
+     never reported as success.
+  4. **Rejected runs are surfaced, not swallowed.** When the engine
+     refuses an execution (gate rejection), the CLI reports the typed
+     error AND, when a persisted rejected run matches the attempt window,
+     its id with a `kaizen run get <id>` hint — it never guesses.
+  5. **Bounded waits only.** `--timeout <ms>` (default 300000 for
+     execute/replay; 60000 for cancel) bounds every wait; there is no
+     `--detach` (the engine's `close()` cancels locally-owned runs, so a
+     detached mode would lie about ownership).
+- **Alternatives**: one flat `kaizen lab …` command tree — rejected
+  (scenario authoring is not lab-specific); inferring the network from
+  the scenario or the last run — rejected (silent targeting is exactly
+  the failure mode DEC-008 exists to prevent); `--detach` — rejected for
+  now (would require a durable executor-ownership story; the CLI polls a
+  bounded wait instead).
+- **Consequences**: a scriptable, auditable operator surface with no
+  second executor; mocked coverage in
+  `packages/cli/test/scenario-commands.test.ts` (36) and live coverage in
+  `test/integration/cli-scenario.int.test.ts` (5, incl. a REAL
+  cross-process cancel where the execute runs in a child process); the
+  web UI surface remains pending and must call the same engine/API
+  pathways.
+
+## DEC-025 — Cross-process run control: durable cancellation is write-once; the executor honors foreign requests; reconcile defers to live owners
+
+- **Context**: making `run cancel` work across processes (the cancelling
+  process is not the executor) exposed three real defects, each observed
+  live before it was fixed: (a) the pause adapter's liveness check used
+  an in-memory-only view, so a node RUNNING IN ANOTHER PROCESS looked
+  dead and the pause preflight refused; (b) the executor's own full-row
+  persistence could overwrite a durable cancellation written by another
+  process back to `null` (lost update) — the owner then never observed
+  the request; (c) every engine creation ran startup reconciliation,
+  which terminalized still-live runs owned by other processes as
+  `INTERRUPTED`.
+- **Decision**:
+  1. **Liveness is process-scoped, not engine-scoped.** `nodeAlive()`
+     (pause adapter) accepts a fresh running record whose OS pid is
+     alive (`isExternalPidAlive`) — the same rule stop/terminate/network
+     services already used. Identity for signalling stays on the
+     verified pid.
+  2. **Cancellation is durable and write-once.** `cancel()` persists a
+     request for any non-terminal run (no local entry required — never a
+     second executor; the request travels through the store only). The
+     `scenario_runs.cancellation` column is append-only: the UPDATE uses
+     `COALESCE(?, cancellation)` so a stale full-row rewrite can never
+     clobber a persisted request back to null.
+  3. **The executor honors foreign requests.** A 400 ms watcher around
+     the in-flight fault polls the persisted flag once per run
+     (`interruptIssued`) and interrupts through the SAME supported
+     mechanism the local path uses (`faults.cancel`), once. A pending
+     cancellation that lands while the interrupted fault ends
+     `failed`/rejected (e.g. its hold-effect verification observes the
+     recovering node) records the step/run as `cancelled` — the
+     operator's request is the truth and the interruption is never
+     misattributed to a genuine fault failure. `cleanup-failed` still
+     quarantines (an unverified recovery is never hidden).
+  4. **Ownership is stamped, and reconcile defers to live owners.** Each
+     run records `executor_pid` once at insert (migration #13; never
+     updated — like `replay_of_run_id`). Startup reconciliation defers
+     (no write, honest `deferred` report entry) when the owner pid is
+     alive, and terminalizes only dead-owner or pid-less orphans as
+     before.
+  5. **Terminal-state honesty is unchanged.** Cancelling a terminal run
+     is still `SCENARIO_RUN_CONFLICT`; the CLI cancel polls until the
+     run reaches a terminal state or the bounded timeout expires.
+- **Alternatives**: refusing cross-process cancel (status quo — rejected:
+  the API/CLI cancelling process is normally not the executor); a
+  separate cancellation table/journal — rejected (one write-once column
+  on the run row keeps the audit trail in one place); excluding the
+  owner's own pid from the reconcile defer — rejected (the rule is
+  simply "owner alive → defer", which is correct for every process,
+  including the reconciling one).
+- **Consequences**: cancellation and ownership now hold across real
+  process boundaries (proven live: the CLI execute child process is
+  cancelled by a separate `run cancel` and reports the honest
+  `cancelled` outcome); regressions are pinned by unit tests
+  (`scenario-run.test.ts`: write-once guard, cross-process cancel,
+  live/dead-owner reconcile) and the live cancel test.

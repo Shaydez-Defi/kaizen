@@ -382,6 +382,16 @@ export interface ScenarioRunRecord {
   requestedBy: string;
   /** Source run this run REPLAYS (null for original executions, T-3.5). */
   replayOfRunId: string | null;
+  /**
+   * OS pid of the process executing this run — set at insert by the owning
+   * engine and immutable afterwards (like `replayOfRunId`). Startup
+   * reconciliation consults it: a non-terminal run whose executor pid is
+   * still alive is NOT an orphan and is never terminalized — nodes are
+   * daemons and CLI/API processes are short-lived and concurrent (T-3.6A),
+   * so "unfinished" alone never proves a crash. Absent/null on rows created
+   * before this field existed → treated as unknown → reconciled as before.
+   */
+  executorPid?: number | null;
   state: ScenarioRunState;
   currentStepId: string | null;
   currentStepOrder: number | null;
@@ -456,7 +466,12 @@ export interface InterruptedRunOutcome {
 
 export interface ScenarioRunReconcileReport {
   at: string;
-  /** Runs that were unfinished at startup and were terminalized. */
+  /**
+   * Runs that were unfinished at startup: terminalized when their executor
+   * process is gone (crash orphans), or DEFERRED — `finalState` unchanged,
+   * `detail` names the live executor — when another live process still owns
+   * them (multi-process CLI/API topology, T-3.6A). Never resumed either way.
+   */
   runs: InterruptedRunOutcome[];
   /** True when at least one target stayed quarantined. */
   quarantined: boolean;

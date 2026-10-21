@@ -136,7 +136,9 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     monitoring,
   });
   // Crash recovery (T-3.4): terminalize runs interrupted by a previous
-  // process and reconcile their stuck faults. Idempotent, never rejects,
+  // process and reconcile their stuck faults — DEFERRING any run whose
+  // recorded executor pid is still alive (owned by a live process, not an
+  // orphan: concurrent CLI/API topology, T-3.6A). Idempotent, never rejects,
   // NEVER resumes execution. (Kicked off now; awaited in close().)
   void scenarioRuns.reconcileOnStartup();
 

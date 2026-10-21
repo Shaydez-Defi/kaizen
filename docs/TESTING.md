@@ -801,3 +801,82 @@ explorer HTTP 200 `text/html` title "Portaldot Node Console" / 888 ms;
 | `npm test` | First full run: 282/283 — one failure in `scenario-run.test.ts` ("stand-in node could not listen on 34741", a transient local port-bind contention in the harness, not V3 code); isolated re-run of that file: 37/37 PASS; second full run: **283/283 (25 files) PASS** |
 | `npx vitest run --config vitest.integration.config.mts test/integration/v3-probe.int.test.ts` (no gate) | 1 skipped — the live check does not pass without its gate |
 | `KAIZEN_TEST_V3=1 npx vitest run --config vitest.integration.config.mts test/integration/v3-probe.int.test.ts` | **1/1 PASS** (exit 0, 3.1 s probe; observations in §15.2 / R-23 / R-24) |
+
+## 16. Tests Executed in Phase 3F — Failure Lab CLI/API Integration (T-3.6A)
+
+### 16.1 CLI unit suite — `packages/cli/test/scenario-commands.test.ts` (36 tests, mocked engine — offline)
+
+- **Harness**: `buildProgram({ engineFactory })` DI with a scripted fake
+  engine; commander `exitOverride()` per command; output captured at all
+  three levels (configureOutput, console spies, `process.stdout/stderr`
+  write spies — subcommands do not inherit configureOutput after
+  buildProgram); `process.exitCode` save/restored per invocation.
+- **Coverage**: help surface of every command; `--json` envelopes and
+  human mode; `--timeout`/`--limit`/`--offset` parsing (non-numeric,
+  out-of-range); scenario create/validate (valid, invalid JSON, missing
+  file, duplicate name, status/limit errors); `run execute` missing
+  `--network` (commander-required) and ghost network → engine refusal
+  surfaced + persisted `rejectedRunId` + human hint; replay-eligibility
+  refusal with NO `rejectedRunId` misattribution; `run get` provenance +
+  honesty note; `run cancel` unknown id → NOT_FOUND, finished run →
+  CONFLICT, wait-timeout honesty (OPERATION_TIMEOUT, "keeps
+  executing", exit 1), cancel-timeout honesty (never success), and a
+  cancel-success path (exit 0 on observed `cancelled`).
+
+### 16.2 Engine unit additions — `scenario-run.test.ts` (now 41), `store.test.ts` (now 8)
+
+- **Cross-process cancel**: a second `ScenarioEngine` over the SAME
+  store (the topology of a separate `kaizen run cancel` process)
+  durably records the request; the executing engine observes it at its
+  watcher, interrupts through `faults.cancel` (one mechanism, never a
+  second executor), and the run terminalizes `cancelled` with audit
+  history, verified cleanup, and independent rollback observation.
+- **Write-once cancellation guard** (DEC-025): a foreign persisted
+  request survives the executor's own stale full-row rewrite
+  (`COALESCE`); regression for the live-observed lost update.
+- **Ownership/reconcile**: `executor_pid` set once at insert; startup
+  reconcile DEFERS while the owner pid is live (no write, honest
+  `deferred` entry) and still terminalizes dead-owner/pid-less orphans
+  (`INTERRUPTED`).
+- **Migration**: `store.test.ts` schemaVersion 17 → 18 (v18 =
+  `scenario_runs.executor_pid`) — the only pre-existing assertion
+  updated; nothing weakened.
+- Store-level SQL visibility (WAL, two connections, one file) verified
+  separately while diagnosing; the durable-cancel path is covered by the
+  tests above.
+
+### 16.3 LIVE integration — `test/integration/cli-scenario.int.test.ts` (gated `KAIZEN_TEST_LIVE=1`; real `portaldot_dev`, disposable designatedTest network)
+
+Five tests, each with INDEPENDENT observations beyond the CLI's own
+printed record:
+1. **Authoring**: validate (no save), create, get, list, operations.
+2. **Execute**: a real pause run through the CLI; node reachable again
+   with the SAME pid + moving chain head (own RPC polling).
+3. **Replay**: a NEW run via `run replay` with `replayOfRunId`
+   provenance + honesty note + a DISTINCT fault record; node healthy.
+4. **Cancel (cross-process)**: the execute runs in a REAL CHILD PROCESS
+   (built bin, same `KAIZEN_DATA_DIR`); `run cancel` from the test
+   process durably records the request; the child's engine interrupts
+   the hold; the child honestly reports `{ok:false, state:"cancelled"}`
+   exit 1; the run reached `cancelled` (not failed — pending
+   cancellation honored); node back with the SAME pid + RPC reachable;
+   cancelling the finished run → SCENARIO_RUN_CONFLICT.
+   (The bg child also isolates the harness's global spies — in-process
+   CLI invocations are strictly sequential by design.)
+5. **Gate refusals**: ghost network → refused + persisted rejected run
+   inspectable by id; replay-of-rejected refused (no new run); missing
+   `--network`; unknown ids → NOT_FOUND with actionable messages.
+
+### 16.4 Commands and actual results (2026-10-21)
+
+| Command | Result |
+|---------|--------|
+| `npm run typecheck` | PASS (exit 0) |
+| `npm run lint` | PASS (exit 0) |
+| `npm run build` | PASS (exit 0; rolldown notice only) |
+| `npm test` | **323/323 PASS (26 files)** — CLI 36/36; `scenario-run.test.ts` 41/41 |
+| `npm run test:integration` (no gate) | 50 skipped (cli-scenario 5 skipped — never passed without its gate) |
+| `KAIZEN_TEST_LIVE=1 … cli-scenario.int.test.ts` | **5/5 PASS** (~32 s) |
+| `KAIZEN_TEST_LIVE=1 … scenario-runs.int.test.ts` (regression re-run; engine touched) | **9/9 PASS** |
+| `KAIZEN_TEST_LIVE=1 … faults.int.test.ts` (regression re-run; pause adapter touched) | **5/5 PASS** |
+| Hygiene: `pgrep -af portaldot` after live runs | none |
