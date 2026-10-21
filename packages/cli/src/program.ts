@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
+import { formatUpSummary, kaizenUp, UP_DEFAULT_NAME, UP_DEFAULT_PRESET } from './up';
 import {
   createEngine,
   isKaizenError,
@@ -163,6 +164,30 @@ export function buildProgram(deps: CliDependencies = {}): Command {
         }
         for (const problem of status.problems) console.log(`  - ${problem}`);
         if (!status.available) process.exitCode = 1;
+      });
+    });
+
+  program
+    .command('up')
+    .description(
+      'One command to a running local network: setup the binary if missing, create (or reuse) a preset network, start it health-gated, print endpoints',
+    )
+    .option('-n, --name <name>', 'network name (reused if it already exists)', UP_DEFAULT_NAME)
+    .option('-p, --preset <preset>', 'preset for a new network: single-node | two-node | four-validator | validator-fullnode', UP_DEFAULT_PRESET)
+    .option('-t, --target <target>', 'local (docker and kubernetes are planned — Phase 6)', 'local')
+    .option('--no-setup', 'fail instead of downloading the binary when it is missing')
+    .action(async (cmdOpts: { name: string; preset: string; target: string; setup: boolean }) => {
+      await run(async (engine, opts) => {
+        const summary = await kaizenUp(engine, cmdOpts, opts.json ? undefined : (l) => console.log(l));
+        if (opts.json) {
+          printJson(summary);
+        } else if (summary.ok) {
+          console.log('');
+          for (const l of formatUpSummary(summary)) console.log(l);
+        } else {
+          console.error(`start FAILED — [${summary.error?.code}] ${summary.error?.message}`);
+        }
+        if (!summary.ok) process.exitCode = 1;
       });
     });
 

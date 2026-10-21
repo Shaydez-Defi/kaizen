@@ -22,6 +22,12 @@ export default tseslint.config(
     },
   },
   {
+    // CommonJS bin shim (T-3.6C): loads the built CLI.
+    files: ['packages/cli/bin/**/*.js'],
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', process: 'readonly', console: 'readonly' } },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     // Node ESM test scripts (experiment harnesses) run under Node, not the
     // browser — declare the Node/runtime globals they legitimately use.
     files: ['test/**/*.mjs', 'contracts/**/*.mjs'],
