@@ -35,6 +35,7 @@ import {
 import type {
   KaizenErrorJson,
 } from '../errors';
+import type { V3AnchorRecord, V3ContractRecord } from '../v3/anchor/types';
 import type {
   NetworkPreset,
   NetworkRecord,
@@ -183,6 +184,46 @@ const MIGRATIONS: string[] = [
   //     proves a crash when CLI/API processes are concurrent and short-
   //     lived. Set once at insert (never rewritten by updates).
   `ALTER TABLE scenario_runs ADD COLUMN executor_pid INTEGER;`,
+  // 19-22: V3 testnet anchoring (T-8.2). Anchor rows are persisted BEFORE
+  //     submission and updated with what the chain reported; they hold only
+  //     public data (hashes, addresses, block refs) — never signer secrets.
+  //     A run hash may be anchored at most once per chain (genesis) and
+  //     method; failed attempts are kept for audit and do not block retry.
+  `CREATE TABLE IF NOT EXISTS v3_anchors (
+     id TEXT PRIMARY KEY,
+     run_id TEXT NOT NULL,
+     run_hash TEXT NOT NULL,
+     method TEXT NOT NULL,
+     status TEXT NOT NULL,
+     payload TEXT NOT NULL,
+     contract_address TEXT,
+     signer_address TEXT NOT NULL,
+     chain_name TEXT,
+     genesis_hash TEXT,
+     tx_hash TEXT,
+     block_hash TEXT,
+     block_number INTEGER,
+     extrinsic_index INTEGER,
+     error TEXT,
+     requested_by TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );`,
+  `CREATE INDEX IF NOT EXISTS v3_anchors_run_idx ON v3_anchors(run_id);`,
+  `CREATE INDEX IF NOT EXISTS v3_anchors_hash_idx ON v3_anchors(run_hash);`,
+  `CREATE TABLE IF NOT EXISTS v3_contracts (
+     address TEXT NOT NULL,
+     genesis_hash TEXT NOT NULL,
+     name TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     deployer_address TEXT NOT NULL,
+     chain_name TEXT NOT NULL,
+     tx_hash TEXT NOT NULL,
+     block_hash TEXT NOT NULL,
+     block_number INTEGER NOT NULL,
+     created_at TEXT NOT NULL,
+     PRIMARY KEY (address, genesis_hash)
+   );`,
 ];
 
 interface NetworkRow {
@@ -1031,6 +1072,127 @@ export class StateStore {
     return runs;
   }
 
+  // -------------------------------------------------------------------------
+  // V3 anchors (T-8.2)
+
+  insertV3Anchor(record: V3AnchorRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO v3_anchors (id, run_id, run_hash, method, status, payload, contract_address,
+           signer_address, chain_name, genesis_hash, tx_hash, block_hash, block_number,
+           extrinsic_index, error, requested_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.runId,
+        record.runHash,
+        record.method,
+        record.status,
+        record.payload,
+        record.contractAddress,
+        record.signerAddress,
+        record.chainName,
+        record.genesisHash,
+        record.txHash,
+        record.blockHash,
+        record.blockNumber,
+        record.extrinsicIndex,
+        record.error,
+        record.requestedBy,
+        record.createdAt,
+        record.updatedAt,
+      );
+  }
+
+  updateV3Anchor(record: V3AnchorRecord): void {
+    this.db
+      .prepare(
+        `UPDATE v3_anchors SET status = ?, contract_address = ?, chain_name = ?, genesis_hash = ?,
+           tx_hash = ?, block_hash = ?, block_number = ?, extrinsic_index = ?, error = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        record.status,
+        record.contractAddress,
+        record.chainName,
+        record.genesisHash,
+        record.txHash,
+        record.blockHash,
+        record.blockNumber,
+        record.extrinsicIndex,
+        record.error,
+        record.updatedAt,
+        record.id,
+      );
+  }
+
+  tryGetV3Anchor(id: string): V3AnchorRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM v3_anchors WHERE id = ?').get(id) as V3AnchorRow | undefined;
+    return row ? mapV3Anchor(row) : undefined;
+  }
+
+  listV3Anchors(filter: { runId?: string; runHash?: string; limit?: number } = {}): V3AnchorRecord[] {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (filter.runId !== undefined) {
+      where.push('run_id = ?');
+      args.push(filter.runId);
+    }
+    if (filter.runHash !== undefined) {
+      where.push('run_hash = ?');
+      args.push(filter.runHash);
+    }
+    const sql = `SELECT * FROM v3_anchors ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`;
+    args.push(Math.min(Math.max(filter.limit ?? 100, 1), 500));
+    const rows = this.db.prepare(sql).all(...args) as unknown as V3AnchorRow[];
+    return rows.map(mapV3Anchor);
+  }
+
+  insertV3Contract(record: V3ContractRecord): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO v3_contracts (address, genesis_hash, name, code_hash, deployer_address,
+           chain_name, tx_hash, block_hash, block_number, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.address,
+        record.genesisHash,
+        record.name,
+        record.codeHash,
+        record.deployerAddress,
+        record.chainName,
+        record.txHash,
+        record.blockHash,
+        record.blockNumber,
+        record.createdAt,
+      );
+  }
+
+  listV3Contracts(filter: { genesisHash?: string } = {}): V3ContractRecord[] {
+    const rows = (
+      filter.genesisHash !== undefined
+        ? this.db
+            .prepare('SELECT * FROM v3_contracts WHERE genesis_hash = ? ORDER BY created_at DESC, rowid DESC')
+            .all(filter.genesisHash)
+        : this.db.prepare('SELECT * FROM v3_contracts ORDER BY created_at DESC, rowid DESC').all()
+    ) as unknown as V3ContractRow[];
+    return rows.map((r) => ({
+      address: r.address,
+      name: 'KaizenRunRegistry',
+      codeHash: r.code_hash,
+      deployerAddress: r.deployer_address,
+      chainName: r.chain_name,
+      genesisHash: r.genesis_hash,
+      txHash: r.tx_hash,
+      blockHash: r.block_hash,
+      blockNumber: r.block_number,
+      createdAt: r.created_at,
+    }));
+  }
+
   private closed = false;
 
   close(): void {
@@ -1038,6 +1200,63 @@ export class StateStore {
     this.closed = true;
     this.db.close();
   }
+}
+
+interface V3AnchorRow {
+  id: string;
+  run_id: string;
+  run_hash: string;
+  method: string;
+  status: string;
+  payload: string;
+  contract_address: string | null;
+  signer_address: string;
+  chain_name: string | null;
+  genesis_hash: string | null;
+  tx_hash: string | null;
+  block_hash: string | null;
+  block_number: number | null;
+  extrinsic_index: number | null;
+  error: string | null;
+  requested_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface V3ContractRow {
+  address: string;
+  genesis_hash: string;
+  name: string;
+  code_hash: string;
+  deployer_address: string;
+  chain_name: string;
+  tx_hash: string;
+  block_hash: string;
+  block_number: number;
+  created_at: string;
+}
+
+function mapV3Anchor(row: V3AnchorRow): V3AnchorRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    runHash: row.run_hash,
+    method: row.method as V3AnchorRecord['method'],
+    status: row.status as V3AnchorRecord['status'],
+    payload: row.payload,
+    contractAddress: row.contract_address,
+    signerAddress: row.signer_address,
+    chainName: row.chain_name,
+    genesisHash: row.genesis_hash,
+    txHash: row.tx_hash,
+    blockHash: row.block_hash,
+    blockNumber: row.block_number,
+    extrinsicIndex: row.extrinsic_index,
+    error: row.error,
+    requestedBy: row.requested_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function mapNetwork(row: NetworkRow): NetworkRecord {

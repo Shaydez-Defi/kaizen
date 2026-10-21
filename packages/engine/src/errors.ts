@@ -50,6 +50,15 @@ export type KaizenErrorCode =
   | 'SCENARIO_RUN_NOT_REPLAYABLE'
   // fault interruption recovery (T-3.4 startup reconciliation)
   | 'FAULT_INTERRUPTED'
+  // V3 testnet anchoring (T-8.2)
+  | 'V3_SIGNER_NOT_CONFIGURED'
+  | 'V3_SIGNER_INVALID'
+  | 'V3_REGISTRY_NOT_DEPLOYED'
+  | 'V3_RUN_NOT_ANCHORABLE'
+  | 'V3_ALREADY_ANCHORED'
+  | 'V3_INSUFFICIENT_FUNDS'
+  | 'V3_TX_FAILED'
+  | 'V3_ANCHOR_NOT_FOUND'
   | 'INTERNAL';
 
 export interface KaizenErrorJson {

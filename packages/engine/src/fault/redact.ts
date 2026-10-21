@@ -13,11 +13,13 @@ const SECRET_PATTERNS: RegExp[] = [
   // secret-bearing flags/assignments: --password-filename X, password=…, key: …
   /--(?:node-key|password|keystore)[-\w]*(?:[= ])\S+/gi,
   /\b(?:password|passwd|secret|mnemonic|seed[_ -]?phrase|keystore[_ -]?password|private[_ -]?key)\b\s*[:=]\s*\S+/gi,
+  // V3 signer secret URI assignments (T-8.2): KAIZEN_V3_SIGNER_SURI=… / suri: …
+  /\b(?:KAIZEN_V3_SIGNER_SURI|suri)\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)/gi,
 ];
 
 /** Object keys whose entire value is secret material by naming convention. */
 const SECRET_KEY_PATTERN =
-  /password|passwd|secret|mnemonic|seed|passphrase|keystore|private[_ -]?key|credential|token/i;
+  /password|passwd|secret|mnemonic|seed|passphrase|keystore|private[_ -]?key|credential|token|suri$/i;
 
 /** Strip secret-shaped content from a string (best-effort, never throws). */
 export function redactSecrets(text: string): string {

@@ -17,6 +17,7 @@ import { PortAllocator } from './process/ports';
 import { ScenarioService } from './scenario/service';
 import { ScenarioEngine } from './scenario/runner';
 import { StateStore } from './state/store';
+import { V3AnchorService } from './v3/anchor/service';
 
 export const KAIZEN_VERSION = '0.1.0';
 
@@ -56,6 +57,9 @@ export interface KaizenEngine {
    *  through the FailureInjector. Runs are created only by an explicit
    *  execute() request; saving a scenario NEVER runs it. */
   scenarioRuns: ScenarioEngine;
+  /** V3 testnet run anchoring (T-8.2): explicit, operator-signed writes of
+   *  finished run hashes; evidence persisted in SQLite. */
+  v3Anchors: V3AnchorService;
   /** WS RPC url of a node in a network (by node id). */
   wsUrlForNode(nodeId: string): string;
   /** Release engine resources. Managed node processes are NOT killed —
@@ -141,6 +145,7 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
   // orphan: concurrent CLI/API topology, T-3.6A). Idempotent, never rejects,
   // NEVER resumes execution. (Kicked off now; awaited in close().)
   void scenarioRuns.reconcileOnStartup();
+  const v3Anchors = new V3AnchorService({ store, events });
 
   return {
     dataDir,
@@ -154,6 +159,7 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     faults,
     scenarios,
     scenarioRuns,
+    v3Anchors,
     wsUrlForNode(nodeId: string): string {
       const node = store.getNode(nodeId);
       return `ws://127.0.0.1:${node.ports.ws}`;

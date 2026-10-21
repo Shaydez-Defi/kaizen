@@ -2,7 +2,7 @@
   "name": "@kaizen/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Kaizen web UI (Phase 1 scaffold only — real UI is Phase 2)",
+  "description": "Kaizen web console (Vite + React + framer-motion) over the real Kaizen API",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "framer-motion": "^12.43.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4"

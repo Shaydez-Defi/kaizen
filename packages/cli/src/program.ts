@@ -44,6 +44,10 @@ import {
   type ScenarioRunSummary,
   type ScenarioValidationResult,
   type SerializedOperationDefinition,
+  probeV3Connectivity,
+  type V3AnchorMethod,
+  type V3AnchorRecord,
+  type V3ConnectivityReport,
 } from '@kaizen/engine';
 
 interface GlobalOpts {
@@ -916,6 +920,190 @@ export function buildProgram(deps: CliDependencies = {}): Command {
           printRunDetail(final);
         }
         if (!ok) process.exitCode = 1;
+      });
+    });
+
+  // ---------------------------------------------------------------------------
+  // Portaldot V3 testnet (T-8.1 probe surface + T-8.2 anchoring)
+
+  const v3Cmd = program
+    .command('v3')
+    .description('Portaldot V3 TEST network: connectivity probe and on-chain run anchoring');
+
+  function formatTokens(planck: string | null, decimals: number | null, symbol: string | null): string {
+    if (planck === null || decimals === null) return 'unknown';
+    const v = BigInt(planck);
+    const base = 10n ** BigInt(decimals);
+    const whole = v / base;
+    const frac = (v % base).toString().padStart(decimals, '0').slice(0, 4);
+    return `${whole}.${frac} ${symbol ?? ''}`.trim();
+  }
+
+  function printAnchorLine(a: V3AnchorRecord): void {
+    console.log(
+      `  ${a.id}  run=${a.runId}  ${a.method.padEnd(8)} ${a.status.padEnd(9)} block=${a.blockNumber ?? '-'}  tx=${a.txHash ?? '-'}${a.contractAddress ? `  contract=${a.contractAddress}` : ''}`,
+    );
+  }
+
+  function printAnchorDetail(a: V3AnchorRecord, template: string): void {
+    console.log(`anchor ${a.id} — ${a.status.toUpperCase()} via ${a.method}`);
+    console.log(`  run       : ${a.runId}`);
+    console.log(`  run hash  : ${a.runHash}`);
+    console.log(`  payload   : ${a.payload}`);
+    console.log(`  chain     : ${a.chainName ?? '-'} (${a.genesisHash ?? '-'})`);
+    if (a.contractAddress) console.log(`  contract  : ${a.contractAddress}`);
+    console.log(`  signer    : ${a.signerAddress}`);
+    console.log(`  tx hash   : ${a.txHash ?? '-'}`);
+    console.log(`  block     : ${a.blockNumber ?? '-'} ${a.blockHash ?? ''}`);
+    if (a.blockHash) console.log(`  explorer  : ${template.replace('{block}', a.blockHash)}`);
+    if (a.error) console.log(`  error     : ${a.error}`);
+  }
+
+  function printProbe(report: V3ConnectivityReport): void {
+    console.log(`V3 connectivity — ${report.healthy ? 'HEALTHY' : 'DEGRADED'} (${report.at})`);
+    for (const r of [report.substrate, report.evm, report.explorer]) {
+      console.log(`  ${r.role.padEnd(13)} ${r.status.padEnd(18)} ${r.endpoint}  ${r.latencyMs}ms  ${r.detail}`);
+    }
+  }
+
+  v3Cmd
+    .command('probe')
+    .description('Read-only probe of the configured V3 endpoints (Substrate WS, EVM JSON-RPC, explorer)')
+    .action(async () => {
+      await run(async (_engine, opts) => {
+        const report = await probeV3Connectivity();
+        if (opts.json) printJson({ ok: report.healthy, report });
+        else printProbe(report);
+        if (!report.healthy) process.exitCode = 1;
+      });
+    });
+
+  v3Cmd
+    .command('status')
+    .description('Signer (public address + balance), registry in effect, and chain identity — never prints secrets')
+    .action(async () => {
+      await run(async (engine, opts) => {
+        const status = await engine.v3Anchors.status();
+        if (opts.json) {
+          printJson({ ok: status.error === null, status });
+        } else {
+          console.log(`V3 anchoring status (${status.at})`);
+          console.log(`  chain     : ${status.chainName ?? 'unreachable'} ${status.genesisHash ?? ''}`);
+          console.log(
+            `  signer    : ${status.signer.configured ? (status.signer.address ?? 'invalid') : 'not configured (export KAIZEN_V3_SIGNER_SURI)'}`,
+          );
+          if (status.signer.evmAddress) console.log(`  evm addr  : ${status.signer.evmAddress}`);
+          console.log(
+            `  balance   : ${formatTokens(status.signer.freeBalance, status.signer.tokenDecimals, status.signer.tokenSymbol)}`,
+          );
+          console.log(`  registry  : ${status.registryAddress ?? 'none'}${status.registrySource ? ` (${status.registrySource})` : ''}`);
+          if (status.error) console.log(`  error     : ${status.error}`);
+        }
+        if (status.error) process.exitCode = 1;
+      });
+    });
+
+  v3Cmd
+    .command('deploy-registry')
+    .description('Deploy the KaizenRunRegistry contract to the V3 TEST network (spends tPOT from KAIZEN_V3_SIGNER_SURI)')
+    .action(async () => {
+      await run(async (engine, opts) => {
+        const contract = await engine.v3Anchors.deployRegistry();
+        if (opts.json) {
+          printJson({ ok: true, contract });
+          return;
+        }
+        console.log(`KaizenRunRegistry deployed at ${contract.address}`);
+        console.log(`  tx hash : ${contract.txHash}`);
+        console.log(`  block   : ${contract.blockNumber} ${contract.blockHash}`);
+        console.log(`  chain   : ${contract.chainName}`);
+      });
+    });
+
+  v3Cmd
+    .command('import-deployment <blockHash> <txHash>')
+    .description('Record an existing KaizenRunRegistry deployment from chain evidence (read-only; verifies revive.Instantiated)')
+    .action(async (blockHash: string, txHash: string) => {
+      await run(async (engine, opts) => {
+        const contract = await engine.v3Anchors.importDeployment(blockHash, txHash);
+        if (opts.json) printJson({ ok: true, contract });
+        else console.log(`registry ${contract.address} recorded (block ${contract.blockNumber}, tx ${contract.txHash})`);
+      });
+    });
+
+  v3Cmd
+    .command('hash <runId>')
+    .description('Compute the deterministic run hash offline (what `anchor` would write)')
+    .action(async (runId: string) => {
+      await run(async (engine, opts) => {
+        const h = engine.v3Anchors.hashRun(runId);
+        if (opts.json) printJson({ ok: true, ...h });
+        else console.log(`${h.runHash}  run=${h.runId} state=${h.state}${h.anchorable ? '' : ' (not anchorable)'}`);
+      });
+    });
+
+  v3Cmd
+    .command('anchor <runId>')
+    .description(
+      "Anchor a finished run's hash on the V3 TEST network (default: KaizenRunRegistry contract; --method remark for system.remarkWithEvent)",
+    )
+    .option('--method <method>', 'contract | remark (default: contract when a registry is known)')
+    .action(async (runId: string, cmdOpts: { method?: string }) => {
+      await run(async (engine, opts) => {
+        let method: V3AnchorMethod | undefined;
+        if (cmdOpts.method !== undefined) {
+          if (cmdOpts.method !== 'contract' && cmdOpts.method !== 'remark') {
+            throw new KaizenError('INVALID_INPUT', '--method must be contract or remark');
+          }
+          method = cmdOpts.method;
+        }
+        const anchor = await engine.v3Anchors.anchorRun(runId, { requestedBy: 'cli', ...(method ? { method } : {}) });
+        const ok = anchor.status === 'in-block' || anchor.status === 'finalized';
+        if (opts.json) printJson({ ok, anchor });
+        else printAnchorDetail(anchor, engine.v3Anchors.explorerBlockUrlTemplate());
+        if (!ok) process.exitCode = 1;
+      });
+    });
+
+  v3Cmd
+    .command('anchors')
+    .description('List recorded V3 anchors (every status, including failed attempts)')
+    .option('--run <runId>', 'filter by run id')
+    .option('--limit <n>', 'max rows (1-500)', '50')
+    .action(async (cmdOpts: { run?: string; limit: string }) => {
+      await run(async (engine, opts) => {
+        const anchors = engine.v3Anchors.list({
+          limit: parseStrictInt(cmdOpts.limit, '--limit', { min: 1, max: 500 }),
+          ...(cmdOpts.run !== undefined ? { runId: cmdOpts.run } : {}),
+        });
+        const contracts = engine.v3Anchors.contracts();
+        if (opts.json) {
+          printJson({ ok: true, anchors, contracts });
+          return;
+        }
+        for (const c of contracts) console.log(`registry ${c.address} (block ${c.blockNumber}, tx ${c.txHash})`);
+        if (anchors.length === 0) console.log('No anchors recorded.');
+        for (const a of anchors) printAnchorLine(a);
+      });
+    });
+
+  v3Cmd
+    .command('verify <anchorId>')
+    .description('Recompute the run hash and re-check the anchor on chain (block hash, registry anchoredAt, eth_getCode / remark text)')
+    .action(async (anchorId: string) => {
+      await run(async (engine, opts) => {
+        const v = await engine.v3Anchors.verify(anchorId);
+        if (opts.json) printJson({ ok: v.verdict === 'verified', verification: v });
+        else {
+          console.log(`anchor ${v.anchorId} — ${v.verdict.toUpperCase()}`);
+          console.log(`  recorded hash   : ${v.recordedRunHash}`);
+          console.log(`  recomputed hash : ${v.recomputedRunHash ?? 'unavailable'} (${v.hashMatches ? 'match' : 'NO MATCH'})`);
+          if (v.blockHashMatches !== null) console.log(`  block hash      : ${v.blockHashMatches ? 'match' : 'NO MATCH'}`);
+          if (v.onChainAnchoredAt !== null) console.log(`  registry        : anchoredAt=${v.onChainAnchoredAt}`);
+          if (v.contractCodePresent !== null) console.log(`  eth_getCode     : ${v.contractCodePresent ? 'code present' : 'NO CODE'}`);
+          for (const n of v.notes) console.log(`  note: ${n}`);
+        }
+        if (v.verdict !== 'verified') process.exitCode = 1;
       });
     });
 

@@ -1,194 +1,219 @@
 # Kaizen
 
-**Node operations & infrastructure management platform for the Portaldot
-blockchain** — create, monitor, deliberately break, diagnose, recover, and
-deploy Portaldot networks through a web interface and a CLI that drive *real*
-infrastructure operations.
+**Break Portaldot networks on purpose. Prove it on chain.**
+
+Kaizen is a node operations and infrastructure platform for the Portaldot
+blockchain. It creates real multi-node `portaldot_dev` networks, monitors
+them live, breaks them deliberately in a gated Failure Lab with replayable
+scenarios, verifies recovery independently over RPC, and fingerprints every
+finished experiment and anchors it on the **Portaldot V3 test network** —
+from a web console and a CLI that share one engine.
 
 ```
 CREATE → MONITOR → BREAK → DIAGNOSE → RECOVER → DEPLOY
+                                 └──→ ANCHOR ON PORTALDOT V3
 ```
 
-## Why
+Nothing in the UI is mocked: every number comes from real RPC, real process
+state, recorded history, or the V3 chain. Features that are not built yet are
+shown disabled and labelled with their phase — never simulated.
 
-Portaldot (a Substrate-based Layer-0 chain) gives you a node binary and a bag
-of CLI flags. Running a multi-node network means hand-writing chain specs,
-port maps, bootnode wiring, and watching logs — and when something breaks,
-figuring out *what* happened is guesswork. Kaizen turns that into one
-observable workflow: real node lifecycle management, controlled failure
-experiments with history, incident timelines with evidence, and deployment to
-Docker and Kubernetes/Helm.
+## Current status (2026-10-21, Hacker House Week 2)
 
-The web UI and the CLI share one operations engine. Nothing in the UI is
-mocked: every number comes from real RPC, real process state, or recorded
-history.
+| Area | Status |
+|---|---|
+| Node lifecycle (binary download + SHA-256, spawn/stop/purge, ports, logs) | **Verified** on the real binary (Phase 1) |
+| Topologies: single, two-node, four-validator, validator + full node, custom | **Verified** (Phase 2A) |
+| Live monitoring (peers, heads, finality, sync, health state machine, WS events) | **Verified** (Phase 2A/2B) |
+| Failure Lab engine: `pause` (SIGSTOP/SIGCONT), `terminate` (stop + restore), dry run, test-network gate, audit log | **Verified** live (Phase 3B) |
+| Scenarios: authoring, validation, execution with evidence, cancel (cross-process), replay | **Verified** live (Phase 3C–3F) |
+| CLI for scenarios/runs | **Verified** live (T-3.6A) |
+| **Portaldot V3 connectivity probe** (Substrate WS, EVM RPC, node console) | **Verified** live (T-8.1) |
+| **Portaldot V3 run anchoring** (KaizenRunRegistry contract + remark, verify) | **Verified** live on the V3 test network (T-8.2) |
+| Web console (new design): Overview, node drawer, Failure Lab, Scenarios, Incidents evidence, Deployments, Validators, V3, Settings | **Implemented** — 55 jsdom tests; not yet driven in a real browser against a live network (RSK-23) |
+| `peer-disconnect` / `partition` faults | Blocked by the engine with typed reasons (R-22) — shown disabled |
+| Incident detection & correlation | Phase 4 — not built |
+| Validator operations (staking, session keys) | Phase 5 — not built |
+| Docker / Kubernetes (Helm) deployment | Phase 6 — not built (planned scope) |
 
-## Current Implementation Status
+Full detail: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) ·
+[docs/PROGRESS.md](docs/PROGRESS.md) · [docs/PHASE_REPORT.md](docs/PHASE_REPORT.md).
 
-**Phase 3C — Scenario model & authoring: COMPLETE** (2026-10-14), on top of
-**Phase 3B — FailureInjector foundation: COMPLETE** (2026-10-12), on top of
-**Phase 3A — Fault Mechanism Feasibility Study** (2026-10-12), **Phase 2B —
-Web UI & Live Operations Dashboard** (2026-10-12), **Phase 2A — Topology
-Engine & Live Monitoring** (2026-10-10), and Phase 1 — Foundation & Node
-Lifecycle Core (2026-10-09). The monorepo is runnable: the shared engine
-manages real Portaldot node processes, and the CLI, the REST/WS API, and the
-web console all drive those same engine services.
+## Architecture
 
-The web console (`apps/web`) — Overview, Networks (list + create), network
-detail (live monitoring table), node detail (health/sync/real log tail),
-Events — is a thin typed client over the existing API: one shared fetch
-client (timeouts, structured errors), one auto-reconnecting WebSocket for
-the whole app, engine models imported `import type`-only. Every number on
-screen comes from a real API response or WS event; the browser never
-launches processes. Its exact transport code was verified live against a
-real Portaldot network (`test/integration/webclient.int.test.ts`);
-rendering is covered by jsdom component tests — **no real-browser E2E yet**
-(RSK-23).
+```mermaid
+flowchart LR
+  subgraph Clients
+    WEB["Web console<br/>React + framer-motion"]
+    CLI["CLI<br/>kaizen"]
+  end
+  subgraph Backend["Kaizen backend (Node.js)"]
+    API["Fastify API<br/>REST + WebSocket events"]
+    ENG["Shared engine<br/>packages/engine"]
+    NET["NetworkService<br/>topologies + chain specs"]
+    PM["NodeProcessManager"]
+    MON["Monitor<br/>RPC sampling + health"]
+    FI["FailureInjector<br/>pause / terminate"]
+    SC["ScenarioEngine<br/>runs + replay"]
+    V3A["V3AnchorService<br/>run hash → chain"]
+    DB[("SQLite<br/>networks, faults, runs, anchors")]
+  end
+  subgraph Local["Local infrastructure"]
+    NODES["portaldot_dev nodes"]
+  end
+  subgraph V3["Portaldot V3 test network (chain id 420420777)"]
+    WS["Substrate WS"]
+    EVM["EVM JSON-RPC"]
+    REG["KaizenRunRegistry<br/>(pallet-revive)"]
+    NC["Node console"]
+  end
+  WEB <-->|REST + WS| API
+  API --> ENG
+  CLI --> ENG
+  ENG --- NET & PM & MON & FI & SC & V3A & DB
+  PM --> NODES
+  MON <-->|JSON-RPC| NODES
+  FI --> NODES
+  SC --> FI
+  SC -->|finished run| V3A
+  V3A -->|"revive.call anchor(runHash)"| REG
+  V3A -->|"system.remarkWithEvent"| WS
+  V3A -.->|"verify: block hash, anchoredAt, eth_getCode"| EVM
+  WEB -.->|block links| NC
+```
 
-What is verified against the real `portaldot_dev` binary (evidence in
-`docs/PROGRESS.md`, reproduction commands in `docs/TESTING.md`):
+## Portaldot V3 integration
 
-- `kaizen setup` downloads the official artifact, verifies it (SHA-256 TOFU
-  manifest), and smoke-checks `--version`; re-runs are idempotent.
-- The engine starts/stops/restarts real nodes: argv-array spawn, per-node data
-  dirs and ports, log capture, SIGTERM→SIGKILL stop, duplicate/stale-process
-  protection, startup-failure detection — no orphan processes left behind.
-- The RPC client (`@polkadot/api` over WebSocket) reads real data: chain,
-  health, peers (with roles), sync state, block headers, runtime version
-  (`portaldot` spec 1002), and delivers live head subscriptions.
-- Topology presets: **single-node, two-node, four-validator,
-  validator+full-node, and validated custom**. Networks whose authorities
-  exceed the stock spec (Alice+Bob) get a per-network chain spec generated by
-  **patching the plain spec with keys derived from the real binary** and
-  rebuilding it (`build-spec --raw`); an audit sidecar records the baked-in
-  authorities. Live-verified: a 4-validator network full-meshes, **all four
-  authorities author blocks**, GRANDPA finality advances, and a keyless full
-  node syncs to the network head without authoring.
-- Live monitoring: a per-network polling loop samples real HTTP JSON-RPC
-  (peers, best/finalized heads, sync state, genesis hash), interprets health
-  through a pure state machine (`unknown/healthy/unhealthy/unavailable/
-  stale`), and emits typed events (samples, health transitions, peer-count
-  changes, monitoring errors). Killing a node behind the engine's back flips
-  it to `unhealthy` with the crash as evidence; polling stops with the
-  network.
-- Node-level operations: `node list/get/start/stop`, plus `network purge`
-  (refuses while nodes run; wipes chain DBs but keeps identity, ports, and
-  spec — the next start boots from genesis).
-- The CLI (`kaizen network …`, `kaizen node …`) and the Fastify API
-  (REST + typed WS event stream) invoke only shared engine services; inputs
-  are validated and errors are structured.
-- Engine-level fault injection (`engine.faults` — Phase 3B): typed,
-  audit-logged faults against **designated test networks only** (DEC-008).
-  `pause` (SIGSTOP/SIGCONT) and `terminate` (engine stop+restore) are
-  live-verified with independent RPC observation; dry-run is the default
-  and execution is an explicit, revalidated action; blocked mechanisms
-  (`peer-disconnect`, `partition`) fail with typed unsupported results
-  instead of substituting something unreliable. This is the foundation the
-  Failure Lab UI will consume — the UI itself is not built yet.
-- Scenario authoring (`engine.scenarios` + `GET/POST/PUT/DELETE
-  /api/scenarios` — Phase 3C): reusable scenario definitions (ordered
-  steps with typed operations, bounded delays/timeouts, typed pre/post-
-  conditions, explicit failure/cancellation semantics) with deterministic
-  structured validation and SQLite persistence. The safe operation registry
-  mirrors the actual injector adapters, so blocked mechanisms
-  (`peer-disconnect`, `partition`) are never presented as executable;
-  saving a scenario NEVER runs anything — there are no execution endpoints,
-  and scenario execution (T-3.4) and the Failure Lab UI (T-3.6) come later.
+Kaizen treats a finished Failure Lab run as evidence worth proving:
 
-What remains for later phases: scenario execution/replay & the Failure Lab
-UI (Phase 3 remainder), incident timelines (Phase 4), validator transactions
-(Phase 5), and Docker/K8s deployment adapters (Phase 6).
+1. **Fingerprint** — `computeRunHash` = SHA-256 of the canonical JSON of the
+   persisted run record (steps, observations, cleanup, outcome).
+2. **Anchor** — written to the V3 test network either through the
+   **KaizenRunRegistry** Solidity contract (`contracts/KaizenRunRegistry.sol`,
+   EVM bytecode on pallet-revive: `anchor(bytes32 runHash, string meta)`
+   emitting `RunAnchored`) or, when chosen explicitly, via
+   `system.remarkWithEvent("kaizen:v1:<runHash>:<runId>")` (DEC-027).
+   Writes happen only on an explicit, confirmed request, are signed by an
+   operator key read from `KAIZEN_V3_SIGNER_SURI` only, and are dry-run
+   first; records are persisted before submission and a submission without
+   on-chain evidence is recorded as `failed`, never as anchored (DEC-026).
+3. **Verify** — recompute the hash from the stored run and re-read the chain:
+   block hash at the recorded height, registry `anchoredAt(runHash)`,
+   `eth_getCode` for the registry, or the remark text.
 
-## Verified Prerequisites (host)
+Surfaces: CLI `kaizen v3 probe | status | hash | anchor | anchors | verify`
+(plus operator-only `deploy-registry` / `import-deployment`), API
+`/api/v3/probe|status|anchors|runs/:runId/hash`, `POST /api/v3/anchors`,
+`POST /api/v3/anchors/:id/verify`, and the console's **Portaldot V3** screen.
 
-- Linux or macOS (x86_64; Windows: node must run in WSL — upstream ships no
-  Windows binary)
-- Node.js 24+, npm 11+
-- ~1 GiB RAM per running Portaldot node process
-- For later phases: Docker daemon; minikube + kubectl + Helm (for K8s)
+Endpoints (overridable via `KAIZEN_V3_*`): `wss://test-node-v3.portaldot.dev`,
+`https://test-evm-rpc-v3.portaldot.dev`, `https://node-console.portaldot.dev`.
 
-The Portaldot node binary is fetched automatically on first use from the
-official artifact repo and its SHA-256 is recorded locally (no upstream
-checksums are published — see RSK-07).
+### Testnet evidence
 
-## Installation & Development
+Chain **PortaldotV3 Test**, EVM chain id **420420777**, genesis
+`0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd`.
+Signer (public): `5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o`.
+
+| What | Block | Transaction hash | Details |
+|---|---|---|---|
+| KaizenRunRegistry deployed | [136822](https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0x567175bb40b891a5103e00c74b1b15b227a67f3da1aa93ef8264a09f580ecef2) | `0x2fa1c5ae2de79d71ca663d7e7050cc9995e4803b234ade6dd916bc3a8d5eff30` | contract `0x08fdadd1ebe16234c03b723255cc12fd98a5ef07` |
+| Contract anchor — run `run-mvim409r-32019a7e` | [136899](https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0x2efd3f718fd67b044dd23fc7c2135c4cd69c53f6f5dd99170a9fc5e073eb0c69) | `0xa06abaa085c59486bd2a8d8e4d593b30a9a6e521c7908c6de4b3bdbb70f8c5b7` | `pause-alice-drill`, run hash `0x24c2d025…bf1214`, finalized |
+| Contract anchor — run `run-mvim7jct-5df7ea0f` | [136919](https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0x4f8d4617013382d0c07acb54c7a25ae10a737ed4077ed3383e14b7526b2f7a56) | `0x8ae9cfc07d559c9dc058472869ae6daa1c364d8965f597704bcc44893abd4df9` | `terminate-bob-drill`, finalized |
+| Remark anchor — run `run-mvim409r-32019a7e` | [136940](https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0x9a2b7b6d5522e54e0ec44d486f5e8b5d8e1c075797bde732209b2fa4267fa6f3) | `0xa9b15505f07d72738159fb24af61f9959319f7e241125c4b1e82d1c8ab1173ff` | `pause-alice-drill` (same run as 136899), finalized |
+| Remark anchor — run `run-mvim9v7m-875cdcaa` | [136947](https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0x739af302a1aab00977f1af04c619a8cc5ea97d91e8c36a00c1f0e5699fe9e38a) | `0x84027d2397efce0930e1a5abd49b77a741a8820f4373ebb8dc9c97f7fd774f49` | `pause-alice-drill` (replay), run hash `0x26ebf52f…edd9c`, finalized |
+
+All four anchors were re-verified on chain on 2026-10-21 (`verified`: hash and
+block hash match; contract anchors also show registry code present and
+`anchoredAt`). The anchored runs were real `pause` / `terminate` Failure Lab
+runs on a local two-node `portaldot_dev` network; the exact run records are
+in [docs/evidence/runs/](docs/evidence/runs/), the anchor records (including
+two honestly recorded failed attempts) in
+[docs/evidence/v3-anchors.json](docs/evidence/v3-anchors.json), and a unit
+test recomputes every anchored hash from them.
+
+![Portaldot node console, block 136899: the signer's revive.call to KaizenRunRegistry with its revive.ContractEmitted (RunAnchored) event](docs/assets/node-console-block-136899.webp)
+
+Costs observed on the V3 test network: ≈85 tPOT to deploy the registry,
+≈4 tPOT storage deposit per contract anchor, ≈0.02 tPOT per remark (RSK-30).
+
+## Quickstart
+
+Prerequisites: Node.js 24+, npm 11+, Linux x86_64 or macOS (upstream ships no
+linux-arm64 node binary — RSK-31), ~1 GiB RAM per running node.
 
 ```bash
 git clone https://github.com/Shaydez-Defi/kaizen
 cd kaizen
 npm install
-npm run build               # engine → cli → api → web
-npm test                    # fast unit tests (no network, no binary)
+npm run build                       # engine → cli → api → web
+node packages/cli/dist/index.js setup   # download + verify portaldot_dev (SHA-256 recorded)
 ```
 
-Real-node integration tests (downloads the ~30 MB node binary on first run
-into a temp cache, spawns real nodes, cleans up):
+Run the console:
 
 ```bash
-KAIZEN_TEST_LIVE=1 npm run test:integration
+node apps/api/dist/index.js         # API + WS on http://127.0.0.1:4310
+npm run dev -w @kaizen/web          # console on http://127.0.0.1:5173 (proxies /api)
 ```
 
-Without `KAIZEN_TEST_LIVE=1` the live suites are **skipped** (never reported
-as passing). `npm run lint` and `npm run typecheck` complete the gates.
+Open the console → **Create network** (e.g. 2 node) → watch **Overview** →
+**Failure Lab**: pause a node, watch the live fault log and verified recovery
+→ **Scenarios**: run or replay a drill → **Portaldot V3**: anchor the finished
+run and verify it.
 
-## CLI Quickstart (Phase 2A surface)
-
-The CLI runs the engine in-process; the API exposes the same services over
-REST/WS (`npm run build && node apps/api/dist/index.js` → `http://127.0.0.1:4310`).
+Or from the CLI (same engine):
 
 ```bash
-node packages/cli/dist/index.js setup        # explicit binary download + verify
-node packages/cli/dist/index.js status       # binary availability (never downloads)
-
-# topologies: single-node | two-node | four-validator | validator-fullnode
-node packages/cli/dist/index.js network create demo --preset four-validator
-node packages/cli/dist/index.js network create custom-demo \
-  --nodes 'alice:validator,bob:validator,archive:full'   # validated custom topology
-node packages/cli/dist/index.js network start demo
-node packages/cli/dist/index.js network status demo      # real RPC: height, peers, spec
-node packages/cli/dist/index.js network monitor demo     # live snapshot: peers/sync/health
-node packages/cli/dist/index.js node list demo           # per-node roles, ports, pids
-node packages/cli/dist/index.js node stop demo bob       # stop/start a single node
-node packages/cli/dist/index.js --json network list      # machine-readable everywhere
-node packages/cli/dist/index.js network stop demo
-node packages/cli/dist/index.js network purge demo       # wipe chain DBs, keep identity
-node packages/cli/dist/index.js network remove demo
+K=node packages/cli/dist/index.js
+$K network create demo --preset two-node
+$K network start demo
+$K network monitor demo
+$K scenario create my-drill.json        # see docs/evidence/runs/*.json → snapshot for a valid shape
+$K run execute <scenarioId> -n demo
+$K v3 probe                             # read-only
+$K v3 status                            # signer address + balance, registry in effect
+KAIZEN_V3_SIGNER_SURI='…' $K v3 anchor <runId> --method remark
+$K v3 verify <anchorId>
+$K network stop demo
 ```
 
-Runtime state (SQLite db, node data dirs, logs, binary cache) lives in
+Writes to V3 need a funded test account in `KAIZEN_V3_SIGNER_SURI`
+(never committed, never passed over HTTP). Runtime state lives in
 `./.kaizen/` (gitignored) or `$KAIZEN_DATA_DIR`.
 
-## Web UI Quickstart (Phase 2B)
+What was verified, where: build/typecheck/lint/unit suite (379 tests) on
+2026-10-21; API start + V3 probe/status/verify live on 2026-10-21; node
+lifecycle and Failure Lab flows live in earlier phases (commands and results
+in [docs/TESTING.md](docs/TESTING.md)).
+
+## Development
 
 ```bash
-npm run build
-node apps/api/dist/index.js          # API + WS on http://127.0.0.1:4310
-npm run dev -w @kaizen/web           # console on http://127.0.0.1:5173
+npm test                            # unit + jsdom tests (no network, no binary)
+npm run typecheck && npm run lint
+KAIZEN_TEST_LIVE=1 npm run test:integration   # real nodes (x86_64 host)
+KAIZEN_TEST_V3=1 …                            # live V3 probe
+KAIZEN_TEST_V3_WRITE=1 KAIZEN_V3_SIGNER_SURI=… …  # live V3 anchoring (spends tPOT)
 ```
 
-The dev server proxies `/api` (REST **and** WebSocket) to the local backend,
-so the console is same-origin — no CORS setup. Open the console, create a
-network from the Networks screen, start it, and watch the live monitoring
-table, node health, log tails, and the typed event feed. `VITE_KAIZEN_API`
-overrides the API origin when not using the proxy. All operations pass
-through the backend and shared engine — the browser never executes shell
-commands or spawns processes.
+Gated suites are **skipped** without their flag and never reported as passed.
 
 ## Documentation
 
 | Document | Purpose |
 |---|---|
-| [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) | Locked scope, goals, functional requirements, acceptance criteria |
-| [docs/TECHNICAL_RESEARCH.md](docs/TECHNICAL_RESEARCH.md) | Portaldot capability matrix with VERIFIED/PARTIALLY/UNVERIFIED/BLOCKED statuses |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, communication, security boundaries, stack |
-| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phases, task IDs, acceptance criteria, statuses |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | Chronological engineering log (start here for "what happened") |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture/implementation decision records |
-| [docs/TESTING.md](docs/TESTING.md) | Test strategy, executed tests, evidence, reproduction |
-| [docs/PHASE_REPORT.md](docs/PHASE_REPORT.md) | Phase reports with per-acceptance-criteria verdicts |
-| [docs/reports/](docs/reports/) | Archived phase reports (e.g. PHASE_02A_REPORT.md) |
-| [docs/RISKS.md](docs/RISKS.md) | Risk register with mitigations |
-| [AGENTS.md](AGENTS.md) | Durable build-governance instructions for agents |
+| [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) | Locked scope, goals, acceptance criteria |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, V3 anchoring path, security boundaries |
+| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phases, task IDs, statuses |
+| [docs/PROGRESS.md](docs/PROGRESS.md) | Chronological engineering log |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Decision records (DEC-026/027 V3 anchoring, DEC-028 console) |
+| [docs/TESTING.md](docs/TESTING.md) | Test strategy, commands, actual results |
+| [docs/RISKS.md](docs/RISKS.md) | Risk register |
+| [docs/TECHNICAL_RESEARCH.md](docs/TECHNICAL_RESEARCH.md) | Portaldot capability matrix |
+| [docs/PHASE_REPORT.md](docs/PHASE_REPORT.md) · [docs/reports/](docs/reports/) | Phase reports |
+| [docs/DEMO.md](docs/DEMO.md) · [docs/SUBMISSION.md](docs/SUBMISSION.md) | Demo shot list, DoraHacks Week 2 fields |
+| [AGENTS.md](AGENTS.md) | Build governance for agents |
 
 ## License
 

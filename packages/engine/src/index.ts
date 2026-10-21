@@ -44,6 +44,42 @@ export type { RpcClientOptions, SubstrateProbeRead } from './rpc/client';
 // checks of the official Portaldot V3 endpoints (DEC-023). No route/UI
 // surface exists: this is an engine service with injectable transports.
 export { V3ConnectivityProbe, probeV3Connectivity } from './v3/probe';
+// V3 run anchoring (T-8.2) — explicit, operator-signed writes of finished
+// run hashes to the V3 TEST network (KaizenRunRegistry or remark, DEC-026/027).
+export { V3AnchorService, V3_REGISTRY_ENV_KEY } from './v3/anchor/service';
+export type { V3AnchorServiceOptions } from './v3/anchor/service';
+export { PolkadotV3ChainConnector } from './v3/anchor/chain';
+export type { V3ChainConnector, V3ChainSession, V3ChainInfo, V3TxReceipt, V3SubmitOptions } from './v3/anchor/chain';
+export {
+  canonicalJson,
+  computeRunHash,
+  runAnchorDocument,
+  runAnchorMeta,
+  remarkPayload,
+  KAIZEN_ANCHOR_VERSION,
+} from './v3/anchor/canonical';
+export {
+  encodeAnchorCall,
+  encodeAnchoredAtCall,
+  decodeRunAnchoredLog,
+  decodeUintReturn,
+  selectorOf,
+  REGISTRY_SIGNATURES,
+  RUN_ANCHORED_TOPIC,
+} from './v3/anchor/abi';
+export type { RegistryLog, DecodedRunAnchored } from './v3/anchor/abi';
+export { KAIZEN_RUN_REGISTRY_ARTIFACT } from './v3/anchor/registry-artifact';
+export { loadV3Signer, v3SignerConfigured, makeScrubber, V3_SIGNER_ENV_KEY } from './v3/anchor/signer';
+export type { V3Signer } from './v3/anchor/signer';
+export type {
+  V3AnchorMethod,
+  V3AnchorStatus,
+  V3AnchorRecord,
+  V3ContractRecord,
+  V3AnchorVerification,
+  V3SignerStatus,
+  V3AnchorStatusReport,
+} from './v3/anchor/types';
 export type { V3ProbeOptions } from './v3/probe';
 export {
   V3_ENDPOINT_DEFAULTS,

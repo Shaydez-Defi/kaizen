@@ -32,6 +32,18 @@ import type {
   ScenarioRunResponse,
   ScenarioRunState,
   ScenarioValidateResponse,
+  FaultDryRunResponse,
+  FaultExecuteResponse,
+  FaultListResponse,
+  FaultRequestInput,
+  FaultResponse,
+  V3AnchorListResponse,
+  V3AnchorMethod,
+  V3AnchorResponse,
+  V3ProbeResponse,
+  V3RunHashResponse,
+  V3StatusResponse,
+  V3VerifyResponse,
 } from './types';
 
 /** Stable machine-readable failure classification for the UI. */
@@ -130,7 +142,9 @@ export class KaizenApiClient {
           err?.message ?? `Request failed with HTTP ${res.status}`,
           err?.code ?? `HTTP_${res.status}`,
           res.status,
-          err?.details,
+          // Bodies without an error envelope (e.g. a 403 dry-run preview with
+          // its full check list) are kept as details so callers can render them.
+          err?.details ?? (err ? undefined : ((payload as Record<string, unknown> | null) ?? undefined)),
         );
       }
       return payload as T;
@@ -341,7 +355,83 @@ export class KaizenApiClient {
       body: { mode: 'execute', ...request },
     });
   }
+
+  // ---- faults (T-3.2; Failure Lab) ----------------------------------------
+  // Execute blocks server-side until the fault is applied, held, removed and
+  // recovery is verified — the client timeout covers the hold plus margin.
+
+  /** Preflight + plan (never executes). A gate denial answers 403 with the
+   *  preview in ApiError.details.preview. */
+  dryRunFault(networkId: string, input: FaultRequestInput): Promise<FaultDryRunResponse> {
+    return this.request('POST', `/api/networks/${encodeURIComponent(networkId)}/faults/dry-run`, { body: input });
+  }
+
+  executeFault(networkId: string, input: FaultRequestInput): Promise<FaultExecuteResponse> {
+    const hold = input.options?.durationMs ?? 0;
+    return this.request('POST', `/api/networks/${encodeURIComponent(networkId)}/faults/execute`, {
+      body: { mode: 'execute', ...input },
+      timeoutMs: hold + START_TIMEOUT_MS,
+    });
+  }
+
+  listFaults(networkId: string): Promise<FaultListResponse> {
+    return this.request('GET', `/api/networks/${encodeURIComponent(networkId)}/faults`);
+  }
+
+  getFault(faultId: string): Promise<FaultResponse> {
+    return this.request('GET', `/api/faults/${encodeURIComponent(faultId)}`);
+  }
+
+  /** Cancel an in-flight fault: the injector rolls the effect back first. */
+  cancelFault(faultId: string): Promise<unknown> {
+    return this.request('POST', `/api/faults/${encodeURIComponent(faultId)}/cancel`, {
+      body: {},
+      timeoutMs: STOP_TIMEOUT_MS,
+    });
+  }
+
+  // ---- Portaldot V3 (T-8.1 probe, T-8.2 anchoring) -------------------------
+
+  v3Probe(): Promise<V3ProbeResponse> {
+    return this.request('GET', '/api/v3/probe', { timeoutMs: V3_READ_TIMEOUT_MS });
+  }
+
+  v3Status(): Promise<V3StatusResponse> {
+    return this.request('GET', '/api/v3/status', { timeoutMs: V3_READ_TIMEOUT_MS });
+  }
+
+  v3Anchors(filter: { runId?: string; limit?: number } = {}): Promise<V3AnchorListResponse> {
+    const params = new URLSearchParams();
+    if (filter.runId !== undefined) params.set('runId', filter.runId);
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    const qs = params.toString();
+    return this.request('GET', `/api/v3/anchors${qs ? `?${qs}` : ''}`);
+  }
+
+  /** Explicit, operator-confirmed write to the V3 TEST network. */
+  anchorRun(runId: string, method?: V3AnchorMethod): Promise<V3AnchorResponse> {
+    return this.request('POST', '/api/v3/anchors', {
+      body: { mode: 'execute', runId, requestedBy: 'web', ...(method ? { method } : {}) },
+      timeoutMs: V3_ANCHOR_TIMEOUT_MS,
+    });
+  }
+
+  verifyAnchor(anchorId: string): Promise<V3VerifyResponse> {
+    return this.request('POST', `/api/v3/anchors/${encodeURIComponent(anchorId)}/verify`, {
+      body: {},
+      timeoutMs: V3_READ_TIMEOUT_MS,
+    });
+  }
+
+  runHash(runId: string): Promise<V3RunHashResponse> {
+    return this.request('GET', `/api/v3/runs/${encodeURIComponent(runId)}/hash`);
+  }
 }
+
+/** Remote V3 calls cross the public internet (bounded server-side too). */
+export const V3_READ_TIMEOUT_MS = 60_000;
+/** An anchor waits for inclusion + finality (server bounds: 120s + 60s). */
+export const V3_ANCHOR_TIMEOUT_MS = 240_000;
 
 /** Default client: same-origin (dev server proxies /api → backend). */
 export const apiClient = new KaizenApiClient({

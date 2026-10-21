@@ -203,6 +203,28 @@ export interface KaizenEventMap {
     warnings: number;
     at: string;
   };
+  /** V3 testnet anchoring lifecycle (T-8.2): an anchor record was
+   *  persisted (`pending`) or updated with what the chain reported.
+   *  Carries only public data — never signer material. */
+  'v3.anchor': {
+    anchorId: string;
+    runId: string;
+    runHash: string;
+    method: 'contract' | 'remark';
+    status: 'pending' | 'in-block' | 'finalized' | 'failed';
+    txHash: string | null;
+    blockNumber: number | null;
+    contractAddress: string | null;
+    error: string | null;
+    at: string;
+  };
+  /** A KaizenRunRegistry deployment was observed on the V3 test network. */
+  'v3.contract': {
+    address: string;
+    txHash: string;
+    blockNumber: number;
+    at: string;
+  };
 }
 
 export type KaizenEventName = keyof KaizenEventMap;
