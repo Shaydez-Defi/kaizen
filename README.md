@@ -30,7 +30,8 @@ shown disabled and labelled with their phase — never simulated.
 | CLI for scenarios/runs | **Verified** live (T-3.6A) |
 | **Portaldot V3 connectivity probe** (Substrate WS, EVM RPC, node console) | **Verified** live (T-8.1) |
 | **Portaldot V3 run anchoring** (KaizenRunRegistry contract + remark, verify) | **Verified** live on the V3 test network (T-8.2) |
-| Web console (new design): Overview, node drawer, Failure Lab, Scenarios, Incidents evidence, Deployments, Validators, V3, Settings | **Implemented** — 55 jsdom tests; not yet driven in a real browser against a live network (RSK-23) |
+| Web console (new design): Overview, Networks, node drawer, Failure Lab, Scenarios, Incidents evidence, Deployments, Validators, V3, Settings | **Implemented** — 61 jsdom tests; rendered in headless Chromium over fixture API data (T-3.6C); not yet driven against a live network (RSK-23) |
+| `kaizen up` (setup if needed → preset network → health-gated start → endpoints) | **Implemented** — 5 unit tests with a fake engine; live run needs an x86_64 host (T-3.6C) |
 | `peer-disconnect` / `partition` faults | Blocked by the engine with typed reasons (R-22) — shown disabled |
 | Incident detection & correlation | Phase 4 — not built |
 | Validator operations (staking, session keys) | Phase 5 — not built |
@@ -38,6 +39,21 @@ shown disabled and labelled with their phase — never simulated.
 
 Full detail: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) ·
 [docs/PROGRESS.md](docs/PROGRESS.md) · [docs/PHASE_REPORT.md](docs/PHASE_REPORT.md).
+
+## Screenshots
+
+Rendered from the real console code in headless Chromium (1440 px) with the
+dev-only harness `apps/web/scripts/screenshots.mjs`, which answers `/api/*`
+and the event WebSocket with **fixture data** (a four-validator
+`meridian-test` network). They show the UI, not a live network run.
+
+| | |
+|---|---|
+| ![Landing page hero: "A Portaldot network in one command." with the npx kaizen up pill and terminal card](docs/assets/ui/landing-hero.webp) | ![Overview: Network healthy, four glass validator cards joined by live arcs, recent events, stats strip](docs/assets/ui/overview.webp) |
+| ![Failure Lab: Break it on purpose, inject-failure panel and fault type strip with blocked types labelled](docs/assets/ui/lab.webp) | ![Failure active: Validator 03 offline, live log, dashed red links, stats](docs/assets/ui/lab-active.webp) |
+| ![Incident #0001: cause → effect timeline, what happened, impact, recovery, node log tail](docs/assets/ui/incident.webp) | ![Deployments: real local processes, and the labelled, empty Kubernetes preview (Phase 6)](docs/assets/ui/deployments.webp) |
+
+Full landing page: [docs/assets/ui/landing-full.webp](docs/assets/ui/landing-full.webp).
 
 ## Architecture
 
@@ -147,8 +163,16 @@ git clone https://github.com/Shaydez-Defi/kaizen
 cd kaizen
 npm install
 npm run build                       # engine → cli → api → web
-node packages/cli/dist/index.js setup   # download + verify portaldot_dev (SHA-256 recorded)
+npx kaizen up                       # setup binary if missing → create "kaizen-local"
+                                    # (four-validator) → start, health-gated → print endpoints
 ```
+
+`kaizen up` only orchestrates existing engine calls; it reuses the network if
+it already exists, `--no-setup` refuses to download, `--name`/`--preset`
+choose another network, and `--target docker|kubernetes` is refused as
+Phase 6 (not built). The step-by-step equivalent is
+`kaizen setup` → `kaizen network create … --preset four-validator` →
+`kaizen network start …`.
 
 Run the console:
 
@@ -157,7 +181,7 @@ node apps/api/dist/index.js         # API + WS on http://127.0.0.1:4310
 npm run dev -w @kaizen/web          # console on http://127.0.0.1:5173 (proxies /api)
 ```
 
-Open the console → **Create network** (e.g. 2 node) → watch **Overview** →
+Open the console → **Overview** (or **Create network**) → watch the live topology →
 **Failure Lab**: pause a node, watch the live fault log and verified recovery
 → **Scenarios**: run or replay a drill → **Portaldot V3**: anchor the finished
 run and verify it.

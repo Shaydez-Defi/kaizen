@@ -127,6 +127,9 @@ const SCENES = {
   deployments: { path: '/deployments', full: true },
   networks: { path: '/networks' },
   scenarios: { path: '/scenarios' },
+  create: { path: '/create' },
+  validators: { path: '/validators' },
+  settings: { path: '/settings' },
 };
 
 function events(scene) {

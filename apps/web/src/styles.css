@@ -285,15 +285,14 @@ a.ext{text-decoration:underline;text-underline-offset:3px}
 .cycle b{display:block;font:300 25px/1.3 var(--sans);letter-spacing:-.02em;margin:4px 0 8px}
 .cycle span.d{display:block;font-size:14px;line-height:1.45;color:var(--mute);padding:0 14px}
 .cycle .planned{margin-top:10px;font-size:10.5px;padding:2px 9px}
-.react{display:grid;grid-template-columns:minmax(0,520px) minmax(0,1fr);gap:40px;align-items:center}
+.react{display:grid;grid-template-columns:minmax(0,460px) minmax(0,1fr);gap:40px;align-items:center}
 .react h2{margin-bottom:28px}
 .rstats{display:grid;grid-template-columns:auto 1fr;border-top:1px solid var(--line2);padding-top:20px;max-width:540px}
 .rstats>div{padding:0 26px 22px;min-width:0}.rstats>div:nth-child(odd){padding-left:0;border-right:1px solid var(--line);min-width:140px}
 .rstats .num{font-size:44px}
 .illu{position:relative}
 .illu .stage{background:radial-gradient(55% 70% at 50% 85%,rgba(139,92,255,.38),transparent 70%)}
-.illu .node{width:140px}
-.illu figcaption{font-size:11.5px;color:var(--dim);text-align:right;margin-top:6px}
+.illu figcaption{font-size:11.5px;color:var(--dim);text-align:right;margin-top:64px}
 .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
 .three>div{padding:0 34px;min-width:0}.three>div:first-child{padding-left:0}.three>div+div{border-left:1px solid var(--line)}
 .three .eyebrow{display:flex;gap:10px;align-items:center;margin-bottom:16px}

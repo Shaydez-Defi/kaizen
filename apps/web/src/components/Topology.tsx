@@ -87,7 +87,7 @@ export function TopoView({ nodes, edges, sel, onSelect, testId }: { nodes: TopoN
             type="button"
             key={v.id}
             className={`node ${v.tone === 'bad' ? 'bad' : ''} ${v.tone === 'rec' ? 'rec' : ''} ${v.tone === 'pau' ? 'pau' : ''} ${sel === v.id ? 'sel' : ''}`}
-            style={{ left: `${(X(i) / W) * 100}%`, x: '-50%', width }}
+            style={{ left: `${(X(i) / W) * 100}%`, x: '-50%', width: `min(${width}px, calc(${100 / Math.max(n, 1)}% - 10px))` }}
             whileHover={onSelect ? { y: -3 } : undefined}
             whileTap={onSelect ? { scale: 0.985 } : undefined}
             transition={{ duration: 0.2, ease }}

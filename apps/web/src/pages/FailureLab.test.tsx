@@ -153,7 +153,7 @@ describe('Scenarios', () => {
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('pause-alice-drill'));
     await userEvent.click(screen.getByRole('button', { name: /Run scenario/ }));
     expect(api.executeScenario).not.toHaveBeenCalled();
-    await userEvent.click(within(screen.getByRole('dialog', { name: 'Confirm run' })).getByRole('button', { name: 'Run' }));
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Confirm run' })).getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(api.executeScenario).toHaveBeenCalledWith('scn-1', { networkIdOrName: 'net_1', requestedBy: 'web' }));
     expect(api.updateScenario).toHaveBeenCalled();
     expect(await screen.findByLabelText('Current run')).toHaveTextContent('Step 1/1: pause alice · running');
@@ -168,8 +168,10 @@ describe('Scenarios', () => {
     const history = await screen.findByLabelText('Run history');
     await waitFor(() => expect(within(history).getByText('pause-alice-drill')).toBeInTheDocument());
     expect(within(history).getByRole('button', { name: 'Anchor' })).toBeInTheDocument();
-    await userEvent.click(within(history).getByRole('button', { name: 'Replay' }));
-    await userEvent.click(within(screen.getByRole('dialog', { name: 'Confirm run' })).getByRole('button', { name: 'Replay' }));
+    const replayBtn = within(history).getByRole('button', { name: 'Replay' });
+    await waitFor(() => expect(replayBtn).toBeEnabled());
+    await userEvent.click(replayBtn);
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Confirm run' })).getByRole('button', { name: 'Replay' }));
     expect(api.replayScenarioRun).toHaveBeenCalledWith('run-old', { networkIdOrName: 'net_1', requestedBy: 'web' });
   });
 
