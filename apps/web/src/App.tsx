@@ -1,5 +1,5 @@
 /**
- * Kaizen operations console shell (T-3.6B): the imported design's sidebar,
+ * Kaizen operations console shell (T-3.6B, restyled to the design in T-3.6C): the sidebar,
  * lifecycle stepper and page transitions, wired to the real API through
  * ConsoleProvider (REST state + WS invalidation). Nothing is simulated.
  */
@@ -12,6 +12,10 @@ import { NodeDrawer } from './components/NodeDrawer';
 import { STEPS, ease } from './components/ui';
 import { ConsoleProvider, useConsole } from './state/ConsoleContext';
 import { useEventsContext } from './state/EventsContext';
+import { useAsync } from './state/useAsync';
+import { apiClient } from './api/client';
+import { ACTIVE_FAULT_STATES } from './lib/model';
+import { Networks } from './pages/Networks';
 import { Landing } from './pages/Landing';
 import { Create } from './pages/Create';
 import { Overview } from './pages/Overview';
@@ -31,14 +35,18 @@ interface NavItem {
 
 export const NAV: NavItem[] = [
   { path: '/overview', label: 'Overview', needsNet: false },
+  { path: '/networks', label: 'Networks', needsNet: false },
   { path: '/validators', label: 'Validators', needsNet: true },
   { path: '/lab', label: 'Failure Lab', needsNet: true },
   { path: '/scenarios', label: 'Scenarios', needsNet: false },
   { path: '/incidents', label: 'Incidents', needsNet: true },
   { path: '/deployments', label: 'Deployments', needsNet: true },
-  { path: '/v3', label: 'Portaldot V3', needsNet: false },
   { path: '/settings', label: 'Settings', needsNet: false },
+  { path: '/v3', label: 'Portaldot V3', needsNet: false },
 ];
+
+/** Where each lifecycle pill navigates. */
+const STEP_PATHS = ['/create', '/overview', '/lab', '/incidents', '/lab', '/deployments'];
 
 /** Lifecycle step for the current route (−1 = not a lifecycle page). */
 export function stepFor(path: string): number {
@@ -50,11 +58,32 @@ export function stepFor(path: string): number {
   return -1;
 }
 
-function NetSelect(): JSX.Element | null {
-  const { networks, selectedId, select, network } = useConsole();
-  if (!networks.length) return null;
+/** Faint page-title watermark behind each screen (design). */
+export function watermarkFor(path: string, faultActive: boolean): string {
+  const section = path.split('/')[1] ?? '';
+  if (section === 'lab') return faultActive ? 'FAILURE' : 'BREAK';
+  const words: Record<string, string> = {
+    overview: 'KAIZEN',
+    networks: 'NETWORKS',
+    create: 'CREATE',
+    validators: 'VALIDATORS',
+    scenarios: 'SCENARIOS',
+    incidents: 'DIAGNOSE',
+    deployments: 'DEPLOY',
+    settings: 'SETTINGS',
+    v3: 'PORTALDOT',
+  };
+  return words[section] ?? 'KAIZEN';
+}
+
+function NetChip(): JSX.Element | null {
+  const { networks, selectedId, select, network, nodes } = useConsole();
+  if (!networks.length || !network) return null;
+  const bad = network.status !== 'running';
   return (
-    <div className="netsel">
+    <label className="netchip" title="Switch network">
+      <span>{network.name}</span>·<span>{network.preset}</span>·<span>{nodes.length} nodes</span>
+      <span className={`st ${bad ? 'bad' : ''}`}>· {network.status}</span>
       <select aria-label="Selected network" value={selectedId ?? ''} onChange={(e) => select(e.target.value || null)}>
         {networks.map((n) => (
           <option key={n.id} value={n.id}>
@@ -62,7 +91,22 @@ function NetSelect(): JSX.Element | null {
           </option>
         ))}
       </select>
-      {network && <span className="chip">{network.status}</span>}
+    </label>
+  );
+}
+
+/** Real control-plane reachability (health endpoint + event stream). */
+function ControlPlane(): JSX.Element {
+  const { status } = useEventsContext();
+  const health = useAsync((_s) => apiClient.health({ timeoutMs: 4000 }), []);
+  const up = status === 'open' || Boolean(health.data);
+  const port = typeof window !== 'undefined' ? window.location.port || (window.location.protocol === 'https:' ? '443' : '80') : '';
+  return (
+    <div className="cp" aria-label="Control plane status">
+      control plane
+      <br />
+      <span className={`dotc ${up ? '' : 'off'}`} />
+      <b>{up ? 'connected' : health.loading ? 'checking' : 'unreachable'}</b> · :{port}
     </div>
   );
 }
@@ -70,18 +114,18 @@ function NetSelect(): JSX.Element | null {
 function Shell(): JSX.Element {
   const loc = useLocation();
   const nav = useNavigate();
-  const { network } = useConsole();
-  const { status } = useEventsContext();
+  const { network, faults } = useConsole();
   const ph = stepFor(loc.pathname);
   const section = '/' + (loc.pathname.split('/')[1] ?? '');
+  const faultActive = faults.some((f) => f.mode === 'execute' && ACTIVE_FAULT_STATES.has(f.state));
   return (
     <>
-      <Backdrop />
+      <Backdrop word={watermarkFor(loc.pathname, faultActive)} />
       <div className="app">
         <aside className="side">
-          <button type="button" className="brand" onClick={() => nav('/')}>
+          <Link to="/" className="brand" aria-label="Kaizen home">
             KAIZEN
-          </button>
+          </Link>
           <LayoutGroup id="nav">
             <nav aria-label="Console">
               {NAV.map((n) => {
@@ -104,28 +148,27 @@ function Shell(): JSX.Element {
               })}
             </nav>
           </LayoutGroup>
-          <Link to="/create" className="btn sm line" style={{ marginTop: 18 }}>
-            New network
-          </Link>
-          <div className="cp">
-            Event stream
-            <br />
-            <b className={status === 'open' ? 'ok' : 'warn'}>{status}</b>
-          </div>
+          <ControlPlane />
         </aside>
         <main className="main">
           <header className="top">
             <LayoutGroup id="steps">
               <ol className="steps" aria-label="Lifecycle">
-                {STEPS.map((x, i) => (
-                  <li key={x} className={i === ph ? 'on' : i < ph ? 'past' : ''}>
-                    {i === ph && <motion.span layoutId="steppill" className="pill" transition={{ duration: 0.35, ease }} />}
-                    <span>{x}</span>
-                  </li>
-                ))}
+                {STEPS.map((x, i) => {
+                  const alarm = i === 2 && faultActive;
+                  const cls = alarm ? 'alarm' : i === ph ? 'on' : i < ph ? 'past' : '';
+                  return (
+                    <li key={x} className={cls}>
+                      <Link to={STEP_PATHS[i] ?? '/overview'} aria-current={i === ph ? 'step' : undefined}>
+                        {(i === ph || alarm) && <motion.span layoutId={alarm ? 'alarmpill' : 'steppill'} className="pill" transition={{ duration: 0.35, ease }} />}
+                        <span>{x}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ol>
             </LayoutGroup>
-            <NetSelect />
+            <NetChip />
           </header>
           <AnimatePresence mode="wait">
             <motion.div
@@ -139,6 +182,7 @@ function Shell(): JSX.Element {
               <Routes location={loc}>
                 <Route path="/create" element={<Create />} />
                 <Route path="/overview" element={<Overview />} />
+                <Route path="/networks" element={<Networks />} />
                 <Route path="/validators" element={<Validators />} />
                 <Route path="/lab" element={<Lab />} />
                 <Route path="/scenarios" element={<Scenarios />} />
@@ -164,10 +208,7 @@ export function App(): JSX.Element {
         <Route
           index
           element={
-            <>
-              <Backdrop />
-              <Landing />
-            </>
+            <Landing />
           }
         />
         <Route path="/*" element={<Shell />} />

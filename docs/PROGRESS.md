@@ -1368,3 +1368,18 @@ K8s/Helm — untouched.
   (RSK-23); T-3.6B stays IMPLEMENTED and T-3.6 PARTIAL.
 - Next: live UI smoke on an x86_64 host (create → monitor → Failure Lab
   pause → V3 remark anchor → verify); refund the deployer; Phase 4.
+
+
+---
+
+## 2026-10-22 — T-3.6C: console + landing match the original design
+
+**Files**: `apps/web/**` (styles, fonts, Landing, shell, Overview, Failure Lab, Incidents, Deployments, Networks, Topology, tests, `scripts/screenshots.mjs`), `packages/cli` (`kaizen up` + tests, root launcher), `README.md`, `docs/assets/ui/*.webp`, `docs/IMPLEMENTATION_PLAN.md`.
+
+**Work**: The running console had drifted from the intended design (missing landing sections; headings fell back to a system serif because fonts were not loaded). Rebuilt the landing and console layouts against the design pages, keeping all real API/WS wiring. Added a real `kaizen up` command so the landing's hero command is truthful; Docker/Kubernetes targets are refused with a Phase 6 message. Deliberate differences: one "Recover node" action (engine has a single rollback), real peer/incident numbers, Docker/K8s marked soon.
+
+**Results**: typecheck, lint, build green; web jsdom suite green (61); flaky Scenarios replay test fixed by waiting for the Replay button to enable (network loads async) — 5/5 consecutive passes. Screenshots rendered in headless Chromium against fixture API data; no horizontal overflow at 1280/1440px.
+
+**Status**: IMPLEMENTED, not VERIFIED — not yet driven against a live portaldot_dev network; `kaizen up` not run live (arm64 sandbox, RSK-31).
+
+**Next step**: live smoke in Codespaces (`npx kaizen up`, then API + web), then record the demo.

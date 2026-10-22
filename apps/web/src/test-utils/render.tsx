@@ -10,6 +10,23 @@ import { EventsProvider } from '../state/EventsContext';
 import { KaizenEventStream } from '../api/events';
 import { FakeWebSocket } from './fake';
 
+// jsdom has no IntersectionObserver; framer-motion's whileInView (landing
+// sections) needs one. Inert stub: never reports intersections.
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  class InertIntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = '';
+    readonly thresholds: number[] = [];
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): [] {
+      return [];
+    }
+  }
+  globalThis.IntersectionObserver = InertIntersectionObserver as unknown as typeof IntersectionObserver;
+}
+
 // Register cleanup + jest-dom matchers for every jsdom test file that
 // imports this module.
 afterEach(() => {

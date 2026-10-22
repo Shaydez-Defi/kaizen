@@ -1,5 +1,5 @@
 /**
- * Overview (design import, T-3.6B): live topology + network status over the
+ * Overview (design import, T-3.6B; design match T-3.6C): live topology + network status over the
  * REAL monitoring snapshot. Start/stop are backend operations (FR-1).
  */
 
@@ -9,14 +9,15 @@ import { useNavigate } from 'react-router-dom';
 import { ApiError, apiClient } from '../api/client';
 import { Topology } from '../components/Topology';
 import { Btn, ErrorBox, NoNet, Num, Stat, ease } from '../components/ui';
-import { bestHeight, finalizedHeight, healthyCount, liveLinks } from '../lib/model';
+import { ACTIVE_FAULT_STATES, bestHeight, finalizedHeight, healthyCount, liveLinks } from '../lib/model';
+import { formatUptime } from '../components/fmt';
 import { eventLevel, eventText, eventTime, isNotable } from '../lib/eventText';
 import { useConsole } from '../state/ConsoleContext';
 import { useEventsContext } from '../state/EventsContext';
 
 export function Overview() {
   const nav = useNavigate();
-  const { vnet, network, openNode, refresh, detailError, networksError, networksLoaded } = useConsole();
+  const { vnet, network, openNode, refresh, detailError, networksError, networksLoaded, faults } = useConsole();
   const { events } = useEventsContext();
   const [busy, setBusy] = useState<'start' | 'stop' | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -49,63 +50,84 @@ export function Overview() {
     }
   };
 
+  const vals = vnet.nodes.filter((v) => v.role === 'Validator');
+  const valsUp = vals.filter((v) => v.state === 'running').length;
+  const best = bestHeight(vnet);
+  const fin = finalizedHeight(vnet);
+  const uptimes = vnet.nodes.map((v) => v.sample?.uptimeMs).filter((x): x is number => typeof x === 'number');
+  const uptime = running && uptimes.length ? formatUptime(Math.max(...uptimes)) : null;
+  const openFaults = faults.filter((f) => f.mode === 'execute' && ACTIVE_FAULT_STATES.has(f.state));
+  const word = ok ? 'healthy' : running ? 'degraded' : network.status === 'starting' ? 'starting' : network.status;
+
   return (
-    <>
-      <div className="head">
-        <div>
-          <div className={`lab ${ok ? 'ok' : running ? 'bad' : ''}`}>
-            {label} · {network.name} · {network.preset}
-          </div>
-          <h1>{headline}</h1>
-          <div className="actions">
-            {running ? (
-              <>
-                <Btn tone="pri" arrow onClick={() => nav('/lab')}>
-                  Open Failure Lab
-                </Btn>
-                <Btn onClick={() => void op('stop')} disabled={busy !== null}>
-                  {busy === 'stop' ? 'Stopping…' : 'Stop network'}
-                </Btn>
-              </>
-            ) : (
-              <Btn tone="pri" arrow onClick={() => void op('start')} disabled={busy !== null || network.status === 'starting'}>
-                {busy === 'start' ? 'Starting… (health-gated)' : 'Start network'}
-              </Btn>
-            )}
-          </div>
-          <ErrorBox error={error} />
+    <div className="ov">
+      <div>
+        <div className={`eyebrow ${ok ? '' : running ? 'bad' : ''}`}>
+          {label}
+          {uptime ? ` · up ${uptime}` : ''} · {network.name}
         </div>
-        <aside className="events" aria-label="Recent events">
-          <div className="lab">Recent events (live stream)</div>
-          {recent.length === 0 && <div className="sub" style={{ paddingTop: 9 }}>No events for this network since the console opened.</div>}
-          <AnimatePresence initial={false}>
-            {recent.map((e) => (
-              <motion.div key={e.seq} layout className="evt" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease }}>
-                <span className={eventLevel(e)}>{eventText(e)}</span>
-                <time>{eventTime(e)}</time>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </aside>
+        <h1 aria-label={headline}>
+          Network <span className={ok || !running ? 'g' : 'gc'}>{word}</span>
+        </h1>
+        <div className="actions">
+          {running ? (
+            <Btn tone="pri" arrow onClick={() => nav('/lab')}>
+              Open Failure Lab
+            </Btn>
+          ) : (
+            <Btn tone="pri" arrow onClick={() => void op('start')} disabled={busy !== null || network.status === 'starting'}>
+              {busy === 'start' ? 'Starting… (health-gated)' : 'Start network'}
+            </Btn>
+          )}
+          <Btn onClick={() => nav('/create')}>Create network</Btn>
+          {running && (
+            <button type="button" className="linkbtn" onClick={() => void op('stop')} disabled={busy !== null}>
+              {busy === 'stop' ? 'Stopping…' : 'Stop network'}
+            </button>
+          )}
+        </div>
+        <ErrorBox error={error} />
       </div>
-      <Topology net={vnet} onSelect={openNode} />
-      <div className="sub" style={{ textAlign: 'center', marginTop: -8 }}>
-        Select a node to inspect it. Solid links: observed by monitoring ({observed} via peer ids); dashed red: not observed.
+      <aside className="events ov-events" aria-label="Recent events">
+        <div className="lab">Recent events</div>
+        {recent.length === 0 && <div className="sub" style={{ paddingTop: 4 }}>No events for this network since the console opened.</div>}
+        <AnimatePresence initial={false}>
+          {recent.map((e) => (
+            <motion.div key={e.seq} layout className={`evt ${eventLevel(e) === 'bad' ? 'hot' : ''}`} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease }}>
+              <span className={eventLevel(e)}>{eventText(e).split(`${network.name}-`).join('')}</span>
+              <time>{eventTime(e)}</time>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </aside>
+      <div className="ov-stage">
+        <Topology net={vnet} onSelect={openNode} />
+        <div className="topo-note">
+          Select a node to inspect it · solid links observed by monitoring ({observed} via peer ids) · dashed red: not observed
+        </div>
       </div>
-      <div className="stats">
-        <Stat label="Healthy nodes" sub={ok ? 'All synced' : running ? 'Some not healthy' : 'Network not running'} tone={running && !ok ? 'bad' : undefined}>
-          <Num v={healthy} />/{n}
+      <div className="stats" style={{ gridColumn: '1 / -1', marginTop: 12 }}>
+        <Stat label="Validators" sub={!running ? 'Network not running' : valsUp === vals.length ? 'All active' : `${vals.length - valsUp} not healthy`} tone={running && valsUp < vals.length ? 'bad' : undefined}>
+          <Num v={valsUp} />/{vals.length}
         </Stat>
-        <Stat label="Best block" sub="Highest observed head">
-          <Num v={bestHeight(vnet)} />
+        <Stat label="Block height" sub={fin !== null && best !== null ? `Finalized #${fin.toLocaleString('en-US')} · ${Math.max(0, best - fin)} behind` : 'Not observed yet'}>
+          <Num v={best} fmt={compactHeight} />
         </Stat>
-        <Stat label="Finalized" sub="GRANDPA (highest observed)">
-          <Num v={finalizedHeight(vnet)} />
-        </Stat>
-        <Stat label="Peer links" sub={`of ${vnet.edges.length} expected (full mesh)`}>
+        <Stat label="Peer links" sub={live === vnet.edges.length && live > 0 ? 'Full mesh' : `of ${vnet.edges.length} expected`} tone={running && live < vnet.edges.length ? 'bad' : undefined}>
           <Num v={live} />
         </Stat>
+        <Stat label="Incidents" sub={openFaults.length ? `${openFaults[0]!.type} on ${openFaults[0]!.nodeName}` : 'None open'} tone={openFaults.length ? 'warn' : undefined}>
+          <Num v={openFaults.length} />
+        </Stat>
       </div>
-    </>
+    </div>
   );
+}
+
+/** 1284306 → "1.28M"; small heights stay exact. */
+export function compactHeight(n: number): string {
+  const r = Math.round(n);
+  if (r >= 1_000_000) return `${(r / 1_000_000).toFixed(2)}M`;
+  if (r >= 100_000) return `${(r / 1_000).toFixed(1)}k`;
+  return r.toLocaleString('en-US');
 }

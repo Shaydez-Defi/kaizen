@@ -11,6 +11,14 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { EventsProvider } from './state/EventsContext';
+// Self-hosted fonts (T-3.6C): no runtime Google Fonts dependency.
+import '@fontsource/hanken-grotesk/300.css';
+import '@fontsource/hanken-grotesk/400.css';
+import '@fontsource/hanken-grotesk/500.css';
+import '@fontsource/hanken-grotesk/600.css';
+import '@fontsource/bodoni-moda/400.css';
+import '@fontsource/source-code-pro/400.css';
+import '@fontsource/source-code-pro/500.css';
 import './styles.css';
 
 const rootEl = document.getElementById('root');

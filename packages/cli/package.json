@@ -1,12 +1,12 @@
 {
   "name": "@kaizen/cli",
   "version": "0.1.0",
-  "description": "Kaizen CLI — scriptable interface to the shared operations engine",
+  "description": "Kaizen CLI \u2014 scriptable interface to the shared operations engine",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "kaizen": "dist/index.js"
+    "kaizen": "bin/kaizen.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

@@ -22,6 +22,20 @@ export default tseslint.config(
     },
   },
   {
+    // Dev-only screenshot harness (T-3.6C): Node script whose page.evaluate
+    // callbacks run in the browser.
+    files: ['apps/web/scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly', URL: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly', window: 'readonly', document: 'readonly' },
+    },
+  },
+  {
+    // CommonJS bin shim (T-3.6C): loads the built CLI.
+    files: ['packages/cli/bin/**/*.js'],
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', process: 'readonly', console: 'readonly' } },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     // Node ESM test scripts (experiment harnesses) run under Node, not the
     // browser — declare the Node/runtime globals they legitimately use.
     files: ['test/**/*.mjs', 'contracts/**/*.mjs'],
