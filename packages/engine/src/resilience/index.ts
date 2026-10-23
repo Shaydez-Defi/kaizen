@@ -44,3 +44,19 @@ export { verifyCertificate, verifyChainEvidence } from './verify';
 export type { BlockCheck, CertificateVerification, ChainCheck, ChainCheckStatus } from './verify';
 export { RESILIENCE_SCORE_PARAMS, RESILIENCE_SCORE_VERSION, computeResilienceScore, scoreRun } from './score';
 export type { ResilienceScore, ScoredRun, ScoredRunInput } from './score';
+export {
+  CERTIFICATE_RECORDED_TOPIC,
+  EVIDENCE_FLAGS,
+  RESILIENCE_REGISTRY_SIGNATURES,
+  UNKNOWN_U16,
+  UNKNOWN_U32,
+  decodeLatest,
+  decodeScore,
+  encodeGetLatestCall,
+  encodeGetScoreCall,
+  encodeRecordCall,
+  recordInputFromCertificate,
+  validatorKey,
+} from './registry-abi';
+export type { OnChainCertificate, RecordCallInput } from './registry-abi';
+export { KAIZEN_RESILIENCE_REGISTRY_ARTIFACT } from './registry-artifact';
