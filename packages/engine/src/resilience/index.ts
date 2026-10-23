@@ -42,3 +42,5 @@ export {
 export type { LoadResilienceSignerOptions, ResilienceSigner, ResilienceSignerSource } from './signer';
 export { verifyCertificate, verifyChainEvidence } from './verify';
 export type { BlockCheck, CertificateVerification, ChainCheck, ChainCheckStatus } from './verify';
+export { RESILIENCE_SCORE_PARAMS, RESILIENCE_SCORE_VERSION, computeResilienceScore, scoreRun } from './score';
+export type { ResilienceScore, ScoredRun, ScoredRunInput } from './score';
