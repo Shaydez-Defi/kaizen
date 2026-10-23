@@ -40,3 +40,5 @@ export {
   resilienceSignerConfigured,
 } from './signer';
 export type { LoadResilienceSignerOptions, ResilienceSigner, ResilienceSignerSource } from './signer';
+export { verifyCertificate, verifyChainEvidence } from './verify';
+export type { BlockCheck, CertificateVerification, ChainCheck, ChainCheckStatus } from './verify';
