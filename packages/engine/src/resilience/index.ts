@@ -23,3 +23,20 @@ export type {
 } from './evidence';
 export { ChainUnreachableError, createHttpChainReader } from './rpc';
 export type { ChainReader, FetchLike, HttpChainReaderOptions } from './rpc';
+export {
+  KAIZEN_CERTIFICATE_VERSION,
+  certificateDocument,
+  certificateMessage,
+  checkCertificateSignature,
+  computeCertificateFingerprint,
+  issueCertificate,
+} from './certificate';
+export type { CertificateSignature, ResilienceCertificate, SignatureCheck } from './certificate';
+export {
+  DEV_RESILIENCE_SIGNER_URI,
+  RESILIENCE_SIGNER_ENV_KEY,
+  RESILIENCE_SIGNER_FILE_ENV_KEY,
+  loadResilienceSigner,
+  resilienceSignerConfigured,
+} from './signer';
+export type { LoadResilienceSignerOptions, ResilienceSigner, ResilienceSignerSource } from './signer';
