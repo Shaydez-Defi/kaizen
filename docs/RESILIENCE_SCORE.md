@@ -1,6 +1,6 @@
 # Resilience Score — specification (v1)
 
-Status: IMPLEMENTED (T-9.3) — `packages/engine/src/resilience/score.ts`,
+Status: v1 IMPLEMENTED (T-9.3); v2 trust model PLANNED (§7) — `packages/engine/src/resilience/score.ts`,
 pinned by `packages/engine/test/resilience-score.test.ts`. Decision: DEC-029.
 
 The resilience score is a **0–100 number per validator** computed from the
@@ -108,3 +108,71 @@ off-chain by `kaizen score --verify` / the API.
 - Scores from local test networks show what the validator setup survives
   under Kaizen's fault catalogue (pause, terminate); they are not a claim
   about mainnet behaviour.
+
+## 7. Trust model — PLANNED (v2; not implemented)
+
+v1 certificates are honest about what they are: chain-bound (every
+observed block hash is re-checkable by anyone with RPC access) and signed,
+but the **drill itself and the recovery metrics are operator-run and
+operator-measured**. v2 removes reliance on operator self-reporting. None
+of the items below is built yet; they are recorded here so the v1 record
+format stays forward-compatible.
+
+### 7.1 Unpredictable drills (commit-reveal on a future block hash)
+
+- The operator (or a scheduler) first **commits** on chain: validator id,
+  network, and a target block number `N` in the future (e.g. current + 20).
+- Drill parameters are derived only once block `N` is finalized:
+  `seed = blake2_256("kaizen:drill:v2" ‖ validatorId ‖ hash(N))`;
+  fault type = `seed mod |catalogue|`, start offset = a bounded window
+  after `N` derived from the next seed bytes, duration likewise.
+- The certificate records `drill = { commitBlock, commitTx, seedBlock: N,
+  seedBlockHash, derived: { faultType, startAfterBlocks, durationMs } }`.
+  A verifier re-fetches `hash(N)`, recomputes the derivation, and checks
+  that the recorded fault and its timing (block numbers in the evidence)
+  match. A drill run at a time or with a fault the seed did not select is
+  `mismatch`. Operators therefore cannot pre-stage or cherry-pick a drill.
+
+### 7.2 Chain-observable recovery evidence (preferred over operator metrics)
+
+- **Authorship**: for each block in the window [before-fault − K,
+  after-recovery + K], read the BABE pre-runtime digest (slot + authority
+  index) from public RPC and map the index to the session's authority set
+  (`Session.Validators` / `Babe.Authorities` at that block). Record which
+  slots the validator's keys **authored** before the fault, which they
+  missed during it, and the **first block authored after the fault** — the
+  chain-observable recovery point.
+- **Finality progress**: finalized-head numbers at the same blocks, from
+  GRANDPA justifications / `chain_getFinalizedHead` history — also
+  re-derivable by any verifier.
+- Recorded as `chainObserved = { authoredBefore, missedSlots,
+  firstAuthoredAfter: { number, hash, slot }, finalityResumedAt: { number,
+  hash } }` plus the block range so a verifier can recompute it
+  independently from public RPC.
+- The v1 operator-measured metrics (`timeToRecoverMs`, wall-clock based)
+  remain as **secondary** evidence.
+
+### 7.3 Score weighting by evidence class
+
+- Each run gets an evidence class: `chain-observed` (7.2 present and
+  independently re-derived), `chain-bound` (v1: hashes verifiable, metrics
+  operator-measured), `self-reported` (no verifiable chain binding).
+- Planned v2 run weight: `w_i = decay_i · c_i` with `c = 1.0` for
+  chain-observed, `0.5` for chain-bound, `0.1` for self-reported; recovery
+  time derived from slots (first authored block after the fault) replaces
+  the wall-clock `timeToRecoverMs` when present. Seeded drills (7.1) are
+  required for the `chain-observed` class.
+- This is a new score version (`RESILIENCE_SCORE_VERSION = 2`); v1 scores
+  stay recomputable from v1 certificates.
+
+### 7.4 Format compatibility
+
+- v2 fields (`drill`, `chainObserved`, `evidenceClass`) are **optional
+  additions** to `ChainEvidence`. The canonical JSON encoder drops
+  `undefined` members, so every v1 certificate's fingerprint is unchanged
+  and v1 verification keeps working; v2 verifiers treat their absence as
+  "class = chain-bound".
+- `KaizenResilienceRegistry` stores an `evidenceFlags` bitfield per
+  certificate (bit 0 chain-bound hashes, bit 1 dev key, bit 2 seeded drill,
+  bit 3 chain-observed authorship) so v2 certificates fit the same
+  contract; v1 writers set only bits 0–1.
