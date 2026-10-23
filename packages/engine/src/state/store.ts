@@ -7,6 +7,8 @@
  * base dir, referenced by path only.
  */
 
+import type { ResilienceCertificate } from '../resilience/certificate';
+import type { ChainEvidence } from '../resilience/evidence';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -224,6 +226,28 @@ const MIGRATIONS: string[] = [
      created_at TEXT NOT NULL,
      PRIMARY KEY (address, genesis_hash)
    );`,
+  // 23-25: Proof-of-Resilience (T-9.5). Chain evidence captured around a
+  //     run's fault (one row per run), and signed certificates keyed by
+  //     fingerprint (INSERT OR IGNORE: issuing twice is idempotent). Public
+  //     data only — never signer secrets.
+  `CREATE TABLE IF NOT EXISTS resilience_evidence (
+     run_id TEXT PRIMARY KEY,
+     network_id TEXT NOT NULL,
+     validator_id TEXT NOT NULL,
+     evidence TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );`,
+  `CREATE TABLE IF NOT EXISTS resilience_certificates (
+     fingerprint TEXT PRIMARY KEY,
+     run_id TEXT NOT NULL,
+     validator_id TEXT NOT NULL,
+     network_id TEXT NOT NULL,
+     signer_address TEXT NOT NULL,
+     dev INTEGER NOT NULL,
+     certificate TEXT NOT NULL,
+     signed_at TEXT NOT NULL
+   );`,
+  `CREATE INDEX IF NOT EXISTS resilience_certificates_validator_idx ON resilience_certificates(validator_id);`,
 ];
 
 interface NetworkRow {
@@ -1070,6 +1094,75 @@ export class StateStore {
       }
     }
     return runs;
+  }
+
+  // -------------------------------------------------------------------------
+  // Proof-of-Resilience (T-9.5)
+
+  upsertResilienceEvidence(runId: string, evidence: ChainEvidence): void {
+    this.db
+      .prepare(
+        `INSERT INTO resilience_evidence (run_id, network_id, validator_id, evidence, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET network_id = excluded.network_id,
+           validator_id = excluded.validator_id, evidence = excluded.evidence`,
+      )
+      .run(runId, evidence.networkId, evidence.validatorId, JSON.stringify(evidence), new Date().toISOString());
+  }
+
+  getResilienceEvidence(runId: string): ChainEvidence | null {
+    const row = this.db.prepare('SELECT evidence FROM resilience_evidence WHERE run_id = ?').get(runId) as
+      | { evidence: string }
+      | undefined;
+    return row ? (JSON.parse(row.evidence) as ChainEvidence) : null;
+  }
+
+  /** Returns false when a certificate with this fingerprint already exists. */
+  insertResilienceCertificate(cert: ResilienceCertificate): boolean {
+    const r = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO resilience_certificates
+         (fingerprint, run_id, validator_id, network_id, signer_address, dev, certificate, signed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        cert.fingerprint,
+        cert.runId,
+        cert.validatorId,
+        cert.networkId,
+        cert.signature.address,
+        cert.signature.dev ? 1 : 0,
+        JSON.stringify(cert),
+        cert.signedAt,
+      );
+    return Number(r.changes) > 0;
+  }
+
+  getResilienceCertificate(fingerprint: string): ResilienceCertificate | null {
+    const row = this.db
+      .prepare('SELECT certificate FROM resilience_certificates WHERE fingerprint = ?')
+      .get(fingerprint) as { certificate: string } | undefined;
+    return row ? (JSON.parse(row.certificate) as ResilienceCertificate) : null;
+  }
+
+  listResilienceCertificates(filter: { validatorId?: string; runId?: string } = {}): ResilienceCertificate[] {
+    const where: string[] = [];
+    const args: string[] = [];
+    if (filter.validatorId !== undefined) {
+      where.push('validator_id = ?');
+      args.push(filter.validatorId);
+    }
+    if (filter.runId !== undefined) {
+      where.push('run_id = ?');
+      args.push(filter.runId);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT certificate FROM resilience_certificates ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY signed_at DESC, fingerprint`,
+      )
+      .all(...args) as { certificate: string }[];
+    return rows.map((r) => JSON.parse(r.certificate) as ResilienceCertificate);
   }
 
   // -------------------------------------------------------------------------

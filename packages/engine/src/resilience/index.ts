@@ -60,3 +60,5 @@ export {
 } from './registry-abi';
 export type { OnChainCertificate, RecordCallInput } from './registry-abi';
 export { KAIZEN_RESILIENCE_REGISTRY_ARTIFACT } from './registry-artifact';
+export { RESILIENCE_CAPTURE_ENV_KEY, ResilienceService } from './service';
+export type { ResilienceServiceOptions } from './service';
