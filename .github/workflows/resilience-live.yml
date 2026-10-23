@@ -1,0 +1,43 @@
+# Live Proof-of-Resilience verification on x86_64 (RSK-31: portaldot_dev is
+# an x86_64 binary; the dev sandbox is arm64). Boots a real two-node
+# portaldot_dev network, runs a pause drill with evidence capture, certifies
+# it with the PUBLIC dev key (no secrets), verifies it against the chain, and
+# uploads the certificate + verification JSON as an artifact.
+name: resilience-live
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/proof-of-resilience]
+    paths:
+      - 'packages/engine/src/resilience/**'
+      - 'test/integration/resilience.int.test.ts'
+      - '.github/workflows/resilience-live.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (resilience)
+        run: npx vitest run --config vitest.config.mts packages/engine/test/resilience-*.test.ts
+      - name: Live drill + certificate (real portaldot_dev)
+        env:
+          KAIZEN_TEST_LIVE: '1'
+          KAIZEN_ATTESTATION_DIR: ${{ github.workspace }}/attestations
+        run: npx vitest run --config vitest.integration.config.mts test/integration/resilience.int.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resilience-attestations
+          path: attestations/
+          if-no-files-found: warn
