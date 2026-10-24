@@ -21,6 +21,8 @@ import { Waves } from '../components/Backdrop';
 
 export const UP_COMMAND = 'npx kaizen up';
 const REPO = 'https://github.com/Shaydez-Defi/kaizen';
+/** Static public deployment (no Kaizen API behind it): point visitors at the live drills. */
+const PUBLIC_DEMO = import.meta.env?.['VITE_KAIZEN_PUBLIC'] === '1';
 export const V3_REGISTRY = '0x08fdadd1ebe16234c03b723255cc12fd98a5ef07';
 export const V3_CHAIN_ID = 420420777;
 /** Same block-link format as the engine (V3AnchorService.blockUrlTemplate). */
@@ -257,12 +259,13 @@ export function Landing() {
             <a href="#product">Product</a>
             <a href="#lab">Failure Lab</a>
             <a href="#v3">Portaldot V3</a>
+            <Link to="/live">Live proof</Link>
             <a href={`${REPO}#readme`} target="_blank" rel="noreferrer">
               Docs
             </a>
           </nav>
-          <Btn tone="pri" arrow onClick={() => nav('/overview')}>
-            Launch console
+          <Btn tone="pri" arrow onClick={() => nav(PUBLIC_DEMO ? '/live' : '/overview')}>
+            {PUBLIC_DEMO ? 'See a live drill' : 'Launch console'}
           </Btn>
         </header>
       </div>

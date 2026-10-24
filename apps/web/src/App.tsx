@@ -7,6 +7,7 @@
 import type { JSX } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Live } from './pages/Live';
 import { Backdrop } from './components/Backdrop';
 import { NodeDrawer } from './components/NodeDrawer';
 import { STEPS, ease } from './components/ui';
@@ -26,6 +27,10 @@ import { Incidents } from './pages/Incidents';
 import { Deployments } from './pages/Deployments';
 import { V3 } from './pages/V3';
 import { Settings } from './pages/Settings';
+import { Live } from './pages/Live';
+
+/** Hosted deployment (Vercel): no engine behind it; drills run on GitHub Actions. */
+export const HOSTED = import.meta.env?.['VITE_KAIZEN_HOSTED'] === '1';
 
 interface NavItem {
   path: string;
@@ -34,6 +39,7 @@ interface NavItem {
 }
 
 export const NAV: NavItem[] = [
+  { path: '/live', label: 'Live drills', needsNet: false },
   { path: '/overview', label: 'Overview', needsNet: false },
   { path: '/networks', label: 'Networks', needsNet: false },
   { path: '/validators', label: 'Validators', needsNet: true },
@@ -72,6 +78,7 @@ export function watermarkFor(path: string, faultActive: boolean): string {
     deployments: 'DEPLOY',
     settings: 'SETTINGS',
     v3: 'PORTALDOT',
+    live: 'PROOF',
   };
   return words[section] ?? 'KAIZEN';
 }
@@ -189,8 +196,9 @@ function Shell(): JSX.Element {
                 <Route path="/incidents" element={<Incidents />} />
                 <Route path="/deployments" element={<Deployments />} />
                 <Route path="/v3" element={<V3 />} />
+                <Route path="/live" element={<Live />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="/overview" replace />} />
+                <Route path="*" element={<Navigate to={HOSTED ? '/live' : '/overview'} replace />} />
               </Routes>
             </motion.div>
           </AnimatePresence>
@@ -211,6 +219,7 @@ export function App(): JSX.Element {
             <Landing />
           }
         />
+        <Route path="/live" element={<Live />} />
         <Route path="/*" element={<Shell />} />
       </Routes>
     </ConsoleProvider>
