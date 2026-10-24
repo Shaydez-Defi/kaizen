@@ -1435,3 +1435,13 @@ K8s/Helm — untouched.
 **Limits (claimed exactly)**: the anchored certificate comes from a CI drill on a local two-node `portaldot_dev` network, not a drill on V3; it is DEV-key signed (integrity, not identity); the score is operator-computed v1 and only stored on chain; test network, not mainnet. Seeded drills (T-9.6) and BABE authorship + score v2 (T-9.7) remain roadmap. Real costs are far above the run-registry estimates (≈261.7 vs ≈85 to deploy, ≈30.8 vs ≈4 per record, RSK-30): ~2 more records fit in the remaining balance.
 
 **Next step**: review/merge this PR after 2026-10-27; T-9.6 commit-reveal drills; consider a cheaper certificate layout (event-only storage) before recording many certificates.
+
+## 2026-10-24 03:00 WAT — T-9.6 step 1: seeded drill derivation (short session, daily usage cap)
+
+- Added `deriveDrill` (packages/engine/src/resilience/drill-seed.ts): blake2_256 over a
+  domain tag, length-prefixed validator id and a future block hash picks the fault
+  (default catalogue: real-node-verified `pause`, `terminate`), start offset and duration.
+- Tests: `resilience-drill-seed.test.ts` (4 pass); engine typecheck and lint clean.
+- Branch `feat/commit-reveal-drills` (off PR #4); main untouched (freeze until 2026-10-27).
+- Next: on-chain commit of target block N, reveal once N is finalized, certificate
+  `drill` field + verifier mismatch check, then T-9.7 BABE authorship.
