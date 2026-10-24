@@ -125,7 +125,6 @@ function words(data: string, n: number): string[] {
   return Array.from({ length: n }, (_, i) => raw.slice(i * 64, (i + 1) * 64));
 }
 
-const unknownOr = (v: number, max: number): number | null => (v === max ? null : v);
 
 /** Stored per-certificate state: everything else lives in the CertificateRecorded event. */
 export interface OnChainCertificate {
