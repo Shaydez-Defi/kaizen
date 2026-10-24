@@ -16,6 +16,8 @@ import { useEventsContext } from './state/EventsContext';
 import { useAsync } from './state/useAsync';
 import { apiClient } from './api/client';
 import { ACTIVE_FAULT_STATES } from './lib/model';
+import { REPLAY } from './lib/mode';
+import { ReplayBanner } from './components/ReplayBanner';
 import { Networks } from './pages/Networks';
 import { Landing } from './pages/Landing';
 import { Create } from './pages/Create';
@@ -28,8 +30,8 @@ import { Deployments } from './pages/Deployments';
 import { V3 } from './pages/V3';
 import { Settings } from './pages/Settings';
 
-/** Hosted deployment (Vercel): no engine behind it; drills run on GitHub Actions. */
-export const HOSTED = import.meta.env?.['VITE_KAIZEN_PUBLIC'] === '1';
+/** Hosted deployment (Vercel): no engine behind it; the console runs in replay mode. */
+export const HOSTED = REPLAY;
 
 interface NavItem {
   path: string;
@@ -103,6 +105,23 @@ function NetChip(): JSX.Element | null {
 
 /** Real control-plane reachability (health endpoint + event stream). */
 function ControlPlane(): JSX.Element {
+  if (REPLAY) return <ReplayPlane />;
+  return <LivePlane />;
+}
+
+/** Replay mode: no control plane; data comes from recorded drills. */
+function ReplayPlane(): JSX.Element {
+  return (
+    <div className="cp" aria-label="Control plane status">
+      data source
+      <br />
+      <span className="dotc" />
+      <b>replay</b> · recorded drills
+    </div>
+  );
+}
+
+function LivePlane(): JSX.Element {
   const { status } = useEventsContext();
   const health = useAsync((_s) => apiClient.health({ timeoutMs: 4000 }), []);
   const up = status === 'open' || Boolean(health.data);
@@ -176,6 +195,7 @@ function Shell(): JSX.Element {
             </LayoutGroup>
             <NetChip />
           </header>
+          {REPLAY && <ReplayBanner />}
           <AnimatePresence mode="wait">
             <motion.div
               key={section}
@@ -197,7 +217,7 @@ function Shell(): JSX.Element {
                 <Route path="/v3" element={<V3 />} />
                 <Route path="/live" element={<Live />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to={HOSTED ? '/live' : '/overview'} replace />} />
+                <Route path="*" element={<Navigate to="/overview" replace />} />
               </Routes>
             </motion.div>
           </AnimatePresence>
@@ -218,7 +238,6 @@ export function App(): JSX.Element {
             <Landing />
           }
         />
-        <Route path="/live" element={<Live />} />
         <Route path="/*" element={<Shell />} />
       </Routes>
     </ConsoleProvider>

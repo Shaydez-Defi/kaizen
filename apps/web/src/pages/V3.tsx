@@ -16,6 +16,7 @@ import { formatTs, shortId } from '../components/fmt';
 import { blockUrl, formatTokens } from '../lib/model';
 import { useEventsContext } from '../state/EventsContext';
 import { useAsync } from '../state/useAsync';
+import { REPLAY } from '../lib/mode';
 
 /** Observed V3 costs (T-8.2 live run, see docs/RISKS.md RSK-30). */
 export const CONTRACT_ANCHOR_COST_NOTE =
@@ -162,7 +163,7 @@ export function V3() {
             <>
               <div className="kv">
                 <span>Signer</span>
-                <b className="mono-s">{st.signer.configured ? st.signer.address : 'not configured (KAIZEN_V3_SIGNER_SURI)'}</b>
+                <b className="mono-s">{st.signer.configured ? st.signer.address : REPLAY ? 'none — replay is read-only (the browser never signs)' : 'not configured (KAIZEN_V3_SIGNER_SURI)'}</b>
               </div>
               <div className="kv">
                 <span>Free balance</span>
@@ -182,7 +183,15 @@ export function V3() {
             const href = blockUrl(template, c.blockHash);
             return (
               <div className="kv" key={c.address}>
-                <span>Deployed</span>
+                <span>
+                  Deployed
+                  {c.name ? (
+                    <>
+                      <br />
+                      <small className="sub">{c.name}</small>
+                    </>
+                  ) : null}
+                </span>
                 <b className="mono-s">
                   {href ? (
                     <a className="ext" href={href} target="_blank" rel="noreferrer">

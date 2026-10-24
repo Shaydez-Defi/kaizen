@@ -103,6 +103,7 @@ const FAQ: [string, string][] = [
 
 function useHealthLine() {
   const health = useAsync((_s) => apiClient.health({ timeoutMs: 4000 }), []);
+  if (PUBLIC_DEMO) return { ok: true, text: 'Hosted console · replay of real recorded drills (read-only)' };
   if (health.data) return { ok: true, text: `Control plane connected · v${health.data.version}` };
   if (health.loading) return { ok: false, text: 'Checking control plane…' };
   return { ok: false, text: 'Control plane unreachable — start it with node apps/api/dist/index.js' };
@@ -264,9 +265,12 @@ export function Landing() {
               Docs
             </a>
           </nav>
-          <Btn tone="pri" arrow onClick={() => nav(PUBLIC_DEMO ? '/live' : '/overview')}>
-            {PUBLIC_DEMO ? 'See a live drill' : 'Launch console'}
-          </Btn>
+          <span className="lnav-cta">
+            {PUBLIC_DEMO && <Btn onClick={() => nav('/live')}>See a live drill</Btn>}
+            <Btn tone="pri" arrow onClick={() => nav('/overview')}>
+              Launch console
+            </Btn>
+          </span>
         </header>
       </div>
 

@@ -13,6 +13,7 @@ import { ACTIVE_FAULT_STATES, bestHeight, finalizedHeight, healthyCount, liveLin
 import { formatUptime } from '../components/fmt';
 import { eventLevel, eventText, eventTime, isNotable } from '../lib/eventText';
 import { useConsole } from '../state/ConsoleContext';
+import { REPLAY } from '../lib/mode';
 import { useEventsContext } from '../state/EventsContext';
 
 export function Overview() {
@@ -90,7 +91,7 @@ export function Overview() {
       </div>
       <aside className="events ov-events" aria-label="Recent events">
         <div className="lab">Recent events</div>
-        {recent.length === 0 && <div className="sub" style={{ paddingTop: 4 }}>No events for this network since the console opened.</div>}
+        {recent.length === 0 && <div className="sub" style={{ paddingTop: 4 }}>{REPLAY ? 'Replay: no live event stream. The recorded fault evidence for this drill is under Incidents.' : 'No events for this network since the console opened.'}</div>}
         <AnimatePresence initial={false}>
           {recent.map((e) => (
             <motion.div key={e.seq} layout className={`evt ${eventLevel(e) === 'bad' ? 'hot' : ''}`} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease }}>

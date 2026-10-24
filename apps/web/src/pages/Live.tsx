@@ -15,12 +15,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { Btn } from '../components/ui';
+import { useConsole } from '../state/ConsoleContext';
 import { consoleBlockUrl } from './Landing';
 
 const OWNER = 'Shaydez-Defi';
 const NAME = 'kaizen';
-const REPO = `https://github.com/${OWNER}/${NAME}`;
 const DATA = `https://raw.githubusercontent.com/${OWNER}/${NAME}/demo-data`;
 const RUNS = `https://api.github.com/repos/${OWNER}/${NAME}/actions/workflows/drill-live.yml/runs?per_page=6`;
 const V3_RPC = 'https://test-node-v3.portaldot.dev';
@@ -153,9 +154,11 @@ function nextScheduled(): Date {
   return t;
 }
 
-const footnote = { fontSize: 12.5, marginTop: 10, color: '#e4dcff' } as const;
+const footnote = { fontSize: 12.5, marginTop: 10, color: 'var(--mute)' } as const;
 
 export function Live(): JSX.Element {
+  const nav = useNavigate();
+  const { select } = useConsole();
   const [items, setItems] = useState<IndexItem[] | null>(null);
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [checks, setChecks] = useState<Check[] | null>(null);
@@ -223,199 +226,186 @@ export function Live(): JSX.Element {
   };
 
   const m = bundle?.certificate.chain.metrics;
+  const openInConsole = (b: Bundle) => {
+    const netId = (b.run as { networkId?: string } | null)?.networkId;
+    if (netId) select(netId);
+    nav('/overview');
+  };
   return (
-    <div className="landing" id="top">
-      <div className="wrap">
-        <header className="lnav">
-          <Link to="/" className="brand">
-            KAIZEN
-          </Link>
-          <nav aria-label="Live">
-            <a href="#latest">Latest drill</a>
-            <a href="#history">History</a>
-            <a href={`${REPO}#readme`} target="_blank" rel="noreferrer">
-              Docs
-            </a>
-          </nav>
-          <a className="btn pri" href={`${REPO}/actions/workflows/drill-live.yml`} target="_blank" rel="noreferrer">
-            Watch drills run
-          </a>
-        </header>
-
-        <section className="hero" style={{ display: 'block', paddingBottom: 24 }}>
-          <div className="eyebrow">Live proof of resilience</div>
+    <>
+      <div className="head">
+        <div>
+          <div className="lab">Live proof of resilience · GitHub Actions</div>
           <h1>
-            We break a validator.
-            <br />
-            <span className="g">The chain proves it came back.</span>
+            Live <span className="g">drills</span>
           </h1>
           <p style={{ maxWidth: 760 }}>
-            Every three hours a GitHub runner boots a real two-node Portaldot network, pauses a validator, and reads recovery from GRANDPA finality. The run is
-            certified and its fingerprint is written to the Portaldot V3 test network. This page re-checks each one in your browser. Nothing here is mocked.
+            Every three hours a fresh GitHub runner boots a real two-node Portaldot network, pauses a validator, and reads recovery from GRANDPA finality. The run is
+            certified and its fingerprint can be written to the Portaldot V3 test network. This page re-checks each drill in your browser. Nothing here is mocked.
           </p>
-          <div className="glass card" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', justifyContent: 'space-between', marginTop: 18 }}>
-            {active ? (
-              <span>
-                <span className="chip warn">Drill running now</span>{' '}
-                <span>
-                  started {ago(active.run_started_at ?? active.created_at)} · {active.event}
-                </span>{' '}
-                <a href={active.html_url} target="_blank" rel="noreferrer">
-                  watch the live log →
-                </a>
-              </span>
-            ) : (
-              <span>
-                <span className="chip ok">Idle</span> <span>next scheduled drill {nextScheduled().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              </span>
-            )}
-            <span style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              {req.text && <span className={req.state === 'ok' ? 'ok' : ''}>{req.text}</span>}
-              <button className="btn sm line" type="button" disabled={req.state === 'busy' || Boolean(active)} onClick={() => void runNow()}>
-                {req.state === 'busy' ? 'Requesting…' : 'Run a drill now'}
-              </button>
-            </span>
-          </div>
-        </section>
+        </div>
+        <div className="actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          <Btn tone="pri" arrow disabled={req.state === 'busy' || Boolean(active)} onClick={() => void runNow()}>
+            {req.state === 'busy' ? 'Requesting…' : 'Run a drill now'}
+          </Btn>
+          {req.text && <span className={`sub ${req.state === 'ok' ? 'ok' : ''}`}>{req.text}</span>}
+        </div>
+      </div>
 
-        {error && !items && (
-          <div className="glass card" style={{ marginBottom: 24 }}>
-            {error}
-          </div>
+      <div className="glass card" aria-label="Runner status" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+        {active ? (
+          <span>
+            <span className="chip warn">Drill running now</span>{' '}
+            <span className="sub">
+              started {ago(active.run_started_at ?? active.created_at)} · {active.event}
+            </span>{' '}
+            <a className="ext" href={active.html_url} target="_blank" rel="noreferrer">
+              watch the live log →
+            </a>
+          </span>
+        ) : (
+          <span>
+            <span className="chip ok">Idle</span>{' '}
+            <span className="sub">next scheduled drill {nextScheduled().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </span>
         )}
+      </div>
 
-        {bundle && m && (
-          <section id="latest" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 20, marginBottom: 28, alignItems: 'start' }}>
-            <div className="glass card">
-              <div className="lab">Drill {items?.[0]?.id === bundle.id ? '(latest)' : ''}</div>
-              <h2 style={{ margin: '6px 0 2px' }}>{m.recovered ? 'Recovered' : 'Did not recover'}</h2>
+      {error && !items && <div className="errbox" role="alert">{error}</div>}
+
+      {bundle && m && (
+        <section id="latest" className="livegrid" aria-label="Selected drill">
+          <div className="glass card">
+            <div className="lab">Drill {items?.[0]?.id === bundle.id ? '(latest)' : ''}</div>
+            <h2 style={{ margin: '6px 0 2px' }}>{m.recovered ? <span className="g">Recovered</span> : <span className="gc">Did not recover</span>}</h2>
+            <div className="sub">
+              validator {bundle.certificate.validatorId} · {ago(bundle.publishedAt)}
+            </div>
+            <div className="livemetrics">
               <div>
-                validator {bundle.certificate.validatorId} · {ago(bundle.publishedAt)}
+                <div className="lab">Time to recover</div>
+                <b>{secs(m.timeToRecoverMs)}</b>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
-                <div>
-                  <div className="dim">Time to recover</div>
-                  <b>{secs(m.timeToRecoverMs)}</b>
-                </div>
-                <div>
-                  <div className="dim">Finality gap</div>
-                  <b>{m.finalityGapBlocks ?? '—'} blocks</b>
-                </div>
-                <div>
-                  <div className="dim">Blocks missed</div>
-                  <b>{m.blocksMissed ?? '—'}</b>
-                </div>
-                <div>
-                  <div className="dim">Resilience score</div>
-                  <b>{bundle.score?.score ?? '—'}/100</b>
-                </div>
+              <div>
+                <div className="lab">Finality gap</div>
+                <b>{m.finalityGapBlocks ?? '—'} blocks</b>
               </div>
-              <div className="mono-s" style={{ marginTop: 14 }}>
-                fingerprint {bundle.certificate.fingerprint}
+              <div>
+                <div className="lab">Blocks missed</div>
+                <b>{m.blocksMissed ?? '—'}</b>
               </div>
-              <div style={footnote}>
-                The score grows with repeated certified drills; one drill caps confidence. Signed with{' '}
-                {bundle.certificate.signature.dev ? 'the public dev key (integrity, not operator identity).' : bundle.certificate.signature.address}
+              <div>
+                <div className="lab">Resilience score</div>
+                <b>{bundle.score?.score ?? '—'}/100</b>
               </div>
             </div>
+            <div className="mono-s" style={{ marginTop: 14 }}>
+              fingerprint {bundle.certificate.fingerprint}
+            </div>
+            <div style={footnote}>
+              The score grows with repeated certified drills; one drill caps confidence. Signed with{' '}
+              {bundle.certificate.signature.dev ? 'the public dev key (integrity, not operator identity).' : bundle.certificate.signature.address}
+            </div>
+          </div>
 
-            <div className="glass card">
-              <div className="lab">Verified in your browser</div>
-              {!checks && <div>checking…</div>}
-              {checks?.map((c) => (
-                <div key={c.label} style={{ display: 'flex', gap: 10, margin: '10px 0' }}>
-                  <b style={{ width: 18, flex: 'none', fontSize: 16 }}>{mark(c.ok)}</b>
-                  <div style={{ minWidth: 0 }}>
-                    <div>{c.label}</div>
-                    <div className="mono-s">{c.detail}</div>
-                  </div>
+          <div className="glass card">
+            <div className="lab">Verified in your browser</div>
+            {!checks && <div className="sub">checking…</div>}
+            {checks?.map((c) => (
+              <div key={c.label} style={{ display: 'flex', gap: 10, margin: '10px 0' }}>
+                <b style={{ width: 18, flex: 'none', fontSize: 16 }}>{mark(c.ok)}</b>
+                <div style={{ minWidth: 0 }}>
+                  <div>{c.label}</div>
+                  <div className="mono-s">{c.detail}</div>
                 </div>
-              ))}
-              <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {bundle.anchor.blockHash && (
-                  <a className="btn sm pri" href={consoleBlockUrl(bundle.anchor.blockHash)} target="_blank" rel="noreferrer">
-                    V3 block #{bundle.anchor.blockNumber}
-                  </a>
-                )}
-                {bundle.workflow && (
-                  <a className="btn sm line" href={bundle.workflow.url} target="_blank" rel="noreferrer">
-                    Runner log
-                  </a>
-                )}
-                <a className="btn sm line" href={`${DATA}/drills/${bundle.id}.json`} target="_blank" rel="noreferrer">
-                  Raw bundle
+              </div>
+            ))}
+            <div className="actions" style={{ marginTop: 12 }}>
+              {bundle.anchor.blockHash && (
+                <a className="btn sm pri" href={consoleBlockUrl(bundle.anchor.blockHash)} target="_blank" rel="noreferrer">
+                  V3 block #{bundle.anchor.blockNumber}
                 </a>
-              </div>
+              )}
+              {bundle.workflow && (
+                <a className="btn sm line" href={bundle.workflow.url} target="_blank" rel="noreferrer">
+                  Runner log
+                </a>
+              )}
+              <a className="btn sm line" href={`${DATA}/drills/${bundle.id}.json`} target="_blank" rel="noreferrer">
+                Raw bundle
+              </a>
+              <Btn small tone="line" onClick={() => openInConsole(bundle)}>
+                Open in console
+              </Btn>
             </div>
+          </div>
 
-            <div className="glass card">
-              <div className="lab">What the chain recorded</div>
-              <table style={{ width: '100%', fontSize: 13, marginTop: 8 }}>
-                <thead>
-                  <tr className="dim">
-                    <td>phase</td>
-                    <td>best</td>
-                    <td>finalized</td>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bundle.certificate.chain.observations.map((o, i) => (
-                    <tr key={i}>
-                      <td>{o.phase}</td>
-                      <td>#{o.best.number}</td>
-                      <td title={o.finalized.hash}>
-                        #{o.finalized.number} <span className="mono-s">· {short(o.finalized.hash)}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div style={footnote}>Recovery is declared only when finality advances past where it stalled.</div>
-            </div>
-          </section>
-        )}
-
-        {items && (
-          <section id="history" className="glass card" style={{ marginBottom: 40 }}>
-            <div className="lab">Drill history ({items.length})</div>
-            <table style={{ width: '100%', fontSize: 13, marginTop: 8 }}>
+          <div className="glass card">
+            <div className="lab">What the chain recorded</div>
+            <table className="livetbl">
               <thead>
-                <tr className="dim">
-                  <td>when</td>
-                  <td>validator</td>
-                  <td>recovered</td>
-                  <td>time</td>
-                  <td>V3 anchor</td>
-                  <td>fingerprint</td>
+                <tr>
+                  <td>phase</td>
+                  <td>best</td>
+                  <td>finalized</td>
                 </tr>
               </thead>
               <tbody>
-                {items.map((it) => (
-                  <tr key={it.id} onClick={() => setSelected(it.id)} style={{ cursor: 'pointer', fontWeight: it.id === selected ? 700 : 400 }}>
-                    <td>{ago(it.publishedAt)}</td>
-                    <td>{it.validatorId}</td>
-                    <td style={{ fontSize: 16 }}>{mark(it.recovered)}</td>
-                    <td>{secs(it.timeToRecoverMs)}</td>
-                    <td>{it.anchor.blockNumber ? `#${it.anchor.blockNumber}` : it.anchor.status}</td>
-                    <td className="mono-s">{short(it.fingerprint)}</td>
+                {bundle.certificate.chain.observations.map((o, i) => (
+                  <tr key={i}>
+                    <td>{o.phase}</td>
+                    <td>#{o.best.number}</td>
+                    <td title={o.finalized.hash}>
+                      #{o.finalized.number} <span className="mono-s">· {short(o.finalized.hash)}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </section>
-        )}
+            <div style={footnote}>Recovery is declared only when finality advances past where it stalled.</div>
+          </div>
+        </section>
+      )}
 
-        <footer style={{ padding: '24px 0 48px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <span>© 2026 Kaizen · Portaldot Hacker House 2026</span>
-          <span style={{ display: 'flex', gap: 16 }}>
-            <Link to="/">Home</Link>
-            <a href={REPO} target="_blank" rel="noreferrer">
-              GitHub
-            </a>
-            <a href="#top">Back to top ↑</a>
-          </span>
-        </footer>
-      </div>
-    </div>
+      {items && (
+        <section id="history" className="glass card" aria-label="Drill history">
+          <div className="lab">Drill history ({items.length})</div>
+          <table className="livetbl">
+            <thead>
+              <tr>
+                <td>when</td>
+                <td>validator</td>
+                <td>recovered</td>
+                <td>time</td>
+                <td>V3 anchor</td>
+                <td>fingerprint</td>
+                <td>runner</td>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it) => (
+                <tr key={it.id} className={it.id === selected ? 'sel' : ''} onClick={() => setSelected(it.id)} style={{ cursor: 'pointer' }}>
+                  <td>{ago(it.publishedAt)}</td>
+                  <td>{it.validatorId}</td>
+                  <td style={{ fontSize: 16 }}>{mark(it.recovered)}</td>
+                  <td>{secs(it.timeToRecoverMs)}</td>
+                  <td>{it.anchor.blockNumber ? `#${it.anchor.blockNumber}` : it.anchor.status}</td>
+                  <td className="mono-s">{short(it.fingerprint)}</td>
+                  <td>
+                    {it.workflowUrl ? (
+                      <a href={it.workflowUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                        log ↗
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </>
   );
 }
