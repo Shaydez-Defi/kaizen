@@ -1,0 +1,109 @@
+{
+  "status": "verified",
+  "reasons": [
+    "chain: 11 block hash(es) match the network",
+    "DEV KEY: signed with a public test key — proves integrity, not operator identity"
+  ],
+  "integrity": {
+    "fingerprintMatches": true,
+    "recomputedFingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+    "signatureValid": true,
+    "addressMatchesKey": true,
+    "dev": true
+  },
+  "chain": {
+    "status": "verified",
+    "reason": "11 block hash(es) match the network",
+    "checks": [
+      {
+        "phase": "genesis",
+        "kind": "genesis",
+        "number": 0,
+        "expected": "0x4a5946e4511032ae7262379f88711368af31b0cc79c8fbec6cab41bfd4f48a5c",
+        "actual": "0x4a5946e4511032ae7262379f88711368af31b0cc79c8fbec6cab41bfd4f48a5c",
+        "ok": true
+      },
+      {
+        "phase": "before-fault",
+        "kind": "best",
+        "number": 4,
+        "expected": "0x8080d660a62de8ab0fe2eaecc17c17b38e21fd9d59f4c17c0e9771e1c391f7c1",
+        "actual": "0x8080d660a62de8ab0fe2eaecc17c17b38e21fd9d59f4c17c0e9771e1c391f7c1",
+        "ok": true
+      },
+      {
+        "phase": "before-fault",
+        "kind": "finalized",
+        "number": 2,
+        "expected": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "actual": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "ok": true
+      },
+      {
+        "phase": "during-fault",
+        "kind": "best",
+        "number": 4,
+        "expected": "0x8080d660a62de8ab0fe2eaecc17c17b38e21fd9d59f4c17c0e9771e1c391f7c1",
+        "actual": "0x8080d660a62de8ab0fe2eaecc17c17b38e21fd9d59f4c17c0e9771e1c391f7c1",
+        "ok": true
+      },
+      {
+        "phase": "during-fault",
+        "kind": "finalized",
+        "number": 2,
+        "expected": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "actual": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "ok": true
+      },
+      {
+        "phase": "during-fault",
+        "kind": "best",
+        "number": 5,
+        "expected": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63",
+        "actual": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63",
+        "ok": true
+      },
+      {
+        "phase": "during-fault",
+        "kind": "finalized",
+        "number": 2,
+        "expected": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "actual": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "ok": true
+      },
+      {
+        "phase": "after-recovery",
+        "kind": "best",
+        "number": 5,
+        "expected": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63",
+        "actual": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63",
+        "ok": true
+      },
+      {
+        "phase": "after-recovery",
+        "kind": "finalized",
+        "number": 2,
+        "expected": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "actual": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e",
+        "ok": true
+      },
+      {
+        "phase": "after-recovery",
+        "kind": "best",
+        "number": 5,
+        "expected": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63",
+        "actual": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63",
+        "ok": true
+      },
+      {
+        "phase": "after-recovery",
+        "kind": "finalized",
+        "number": 3,
+        "expected": "0x6d502d2713d3ee757a039f57ea0faf3bfd804f0612d3fece5c3bf505f9776314",
+        "actual": "0x6d502d2713d3ee757a039f57ea0faf3bfd804f0612d3fece5c3bf505f9776314",
+        "ok": true
+      }
+    ]
+  },
+  "devKey": true
+}

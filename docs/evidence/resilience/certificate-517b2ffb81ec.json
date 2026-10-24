@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "fingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+  "runId": "run-mvlmxtrq-0744ea75",
+  "runHash": "0xc9069fec8518d3018998795969590e812e54eba20ee554408243a1e32c97b808",
+  "validatorId": "res-it-bob",
+  "networkId": "net_d80f9569",
+  "chain": {
+    "version": 1,
+    "networkId": "net_d80f9569",
+    "validatorId": "res-it-bob",
+    "observerNodeId": "net_d80f9569-a",
+    "genesisHash": "0x4a5946e4511032ae7262379f88711368af31b0cc79c8fbec6cab41bfd4f48a5c",
+    "faultStartedAt": "2026-10-24T00:03:02.030Z",
+    "faultEndedAt": "2026-10-24T00:03:20.046Z",
+    "recoveredAt": "2026-10-24T00:03:22.066Z",
+    "observations": [
+      {
+        "phase": "before-fault",
+        "at": "2026-10-24T00:03:02.027Z",
+        "best": {
+          "number": 4,
+          "hash": "0x8080d660a62de8ab0fe2eaecc17c17b38e21fd9d59f4c17c0e9771e1c391f7c1"
+        },
+        "finalized": {
+          "number": 2,
+          "hash": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e"
+        }
+      },
+      {
+        "phase": "during-fault",
+        "at": "2026-10-24T00:03:02.035Z",
+        "best": {
+          "number": 4,
+          "hash": "0x8080d660a62de8ab0fe2eaecc17c17b38e21fd9d59f4c17c0e9771e1c391f7c1"
+        },
+        "finalized": {
+          "number": 2,
+          "hash": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e"
+        }
+      },
+      {
+        "phase": "during-fault",
+        "at": "2026-10-24T00:03:20.046Z",
+        "best": {
+          "number": 5,
+          "hash": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63"
+        },
+        "finalized": {
+          "number": 2,
+          "hash": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e"
+        }
+      },
+      {
+        "phase": "after-recovery",
+        "at": "2026-10-24T00:03:20.062Z",
+        "best": {
+          "number": 5,
+          "hash": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63"
+        },
+        "finalized": {
+          "number": 2,
+          "hash": "0xcb6f1d268b149c2f5233f12b21d460fc10e622d1f35a4b371832617f5b3d6c8e"
+        }
+      },
+      {
+        "phase": "after-recovery",
+        "at": "2026-10-24T00:03:22.066Z",
+        "best": {
+          "number": 5,
+          "hash": "0x8339ec2c2d5b5076d4bd0371408e5e4cf7c597c19848a2361bcd498a195a5f63"
+        },
+        "finalized": {
+          "number": 3,
+          "hash": "0x6d502d2713d3ee757a039f57ea0faf3bfd804f0612d3fece5c3bf505f9776314"
+        }
+      }
+    ],
+    "gaps": [],
+    "metrics": {
+      "recovered": true,
+      "timeToRecoverMs": 2020,
+      "finalityGapBlocks": 3,
+      "blocksMissed": 2,
+      "expectedBlockTimeMs": 6000
+    }
+  },
+  "signature": {
+    "address": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+    "publicKey": "0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d",
+    "scheme": "sr25519",
+    "source": "dev",
+    "dev": true,
+    "signature": "0x3aaa250413d17f926967accae3cd0c8ee24e054d86e6b4a9c1a4cc31f3cd0346ee10540601cec58531007d05d80ef310e32f6bb3bb46f78d3a1526775cc6ab8b"
+  },
+  "signedAt": "2026-10-24T00:03:22.163Z"
+}
