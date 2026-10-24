@@ -1,0 +1,20 @@
+{
+  "drills": [
+    {
+      "id": "2026-10-24T15-05-40-467Z-e2a5cb69",
+      "publishedAt": "2026-10-24T15:05:40.467Z",
+      "fingerprint": "0xe2a5cb691dff37d1243fe65231c0f4a0f071c915325ffc7577110c29b77fa3cf",
+      "validatorId": "res-it-bob",
+      "recovered": true,
+      "timeToRecoverMs": 2009,
+      "finalityGapBlocks": 4,
+      "score": 35,
+      "anchor": {
+        "status": "skipped",
+        "blockNumber": null
+      },
+      "workflowUrl": "https://github.com/Shaydez-Defi/kaizen/actions/runs/40105314125"
+    }
+  ],
+  "updatedAt": "2026-10-24T15:05:40.467Z"
+}
