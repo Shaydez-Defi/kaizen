@@ -76,3 +76,10 @@ export type {
 } from './onchain';
 export { RESILIENCE_CAPTURE_ENV_KEY, ResilienceService } from './service';
 export type { ResilienceServiceOptions } from './service';
+export {
+  DEFAULT_DRILL_CATALOGUE,
+  DEFAULT_DRILL_SEED_BOUNDS,
+  DRILL_SEED_DOMAIN,
+  deriveDrill,
+} from './drill-seed';
+export type { DeriveDrillInput, DerivedDrill, DrillSeedBounds } from './drill-seed';

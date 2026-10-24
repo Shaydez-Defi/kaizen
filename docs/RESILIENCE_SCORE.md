@@ -123,7 +123,10 @@ format stays forward-compatible.
 - The operator (or a scheduler) first **commits** on chain: validator id,
   network, and a target block number `N` in the future (e.g. current + 20).
 - Drill parameters are derived only once block `N` is finalized:
-  `seed = blake2_256("kaizen:drill:v2" ‖ validatorId ‖ hash(N))`;
+  `seed = blake2_256("kaizen:drill:v2" ‖ u32le(len(validatorId)) ‖ validatorId ‖ hash(N))`
+  (the length prefix keeps id/hash boundaries unambiguous; implemented in
+  `packages/engine/src/resilience/drill-seed.ts`, catalogue defaults to the
+  real-node-verified faults `pause`, `terminate`);
   fault type = `seed mod |catalogue|`, start offset = a bounded window
   after `N` derived from the next seed bytes, duration likewise.
 - The certificate records `drill = { commitBlock, commitTx, seedBlock: N,
