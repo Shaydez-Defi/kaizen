@@ -3,7 +3,7 @@
  * scripted fake V3ChainConnector; the certificate is the REAL signed one
  * from CI run 40042905143 (docs/evidence/resilience/), signed with the
  * public DEV key; the V3 signer is the public //Alice DEV URI.
- * Live evidence: docs/evidence/v3-resilience-registry.json.
+ * Live evidence: docs/evidence/v3-resilience-registry-v1.json.
  */
 
 import fs from 'node:fs';
@@ -110,21 +110,8 @@ class FakeChain implements V3ChainConnector {
           const n = self.opts.count ?? 1;
           return '0x' + word(n ? 35 : 0) + word(n ? 1_761_264_000 : 0) + word(n);
         }
-        // getLatest
-        return (
-          '0x' +
-          cert.fingerprint.slice(2) +
-          cert.runHash.slice(2) +
-          cert.signature.publicKey.slice(2) +
-          word(2020) +
-          word(3) +
-          word(2) +
-          word(35) +
-          word(3) +
-          word(1_761_264_000) +
-          '00'.repeat(12) +
-          '31'.repeat(20)
-        );
+        // certOf
+        return '0x' + word(35) + word(167478);
       },
       close: async () => undefined,
     };
@@ -221,27 +208,26 @@ describe('ResilienceRegistryService.anchor', () => {
 });
 
 describe('ResilienceRegistryService.read', () => {
-  it('decodes getScore + getLatest + recorded', async () => {
+  it('decodes getScore + recorded + certOf', async () => {
     const svc = new ResilienceRegistryService({ connector: new FakeChain({ recorded: true }), env: DEV_ENV });
     const r = await svc.read('res-it-bob', { registry: REGISTRY, fingerprint: cert.fingerprint });
-    expect(r.score).toEqual({ score: 35, certifiedAt: 1_761_264_000, count: 1 });
-    expect(r.latest?.fingerprint).toBe(cert.fingerprint);
-    expect(r.latest?.timeToRecoverMs).toBe(2020);
+    expect(r.score).toEqual({ score: 35, block: 1_761_264_000, count: 1 });
+    expect(r.cert).toEqual({ score: 35, block: 167478 });
     expect(r.recorded).toBe(true);
   });
 
-  it('skips getLatest for a validator with no certificates', async () => {
+  it('skips certOf for a validator with no certificates', async () => {
     const chain = new FakeChain({ count: 0 });
     const r = await new ResilienceRegistryService({ connector: chain, env: DEV_ENV }).read('nobody', { registry: REGISTRY });
     expect(r.score.count).toBe(0);
-    expect(r.latest).toBeNull();
+    expect(r.cert).toBeNull();
     expect(chain.calls).toHaveLength(1);
   });
 });
 
-describe('committed V3 evidence (docs/evidence/v3-resilience-registry.json)', () => {
+describe('committed V3 evidence, v1 registry (docs/evidence/v3-resilience-registry-v1.json)', () => {
   const evidence = JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, '../../../docs/evidence/v3-resilience-registry.json'), 'utf8'),
+    fs.readFileSync(path.resolve(__dirname, '../../../docs/evidence/v3-resilience-registry-v1.json'), 'utf8'),
   ) as {
     network: { evmChainId: number };
     deployment: { address: string; initCodeKeccak: string };
@@ -252,7 +238,8 @@ describe('committed V3 evidence (docs/evidence/v3-resilience-registry.json)', ()
   it('matches the committed certificate, artifact and codec', async () => {
     const { keccakAsHex } = await import('@polkadot/util-crypto');
     expect(evidence.network.evmChainId).toBe(420420777);
-    expect(evidence.deployment.initCodeKeccak).toBe(keccakAsHex(KAIZEN_RESILIENCE_REGISTRY_ARTIFACT.bytecode, 256));
+    const v1 = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../docs/evidence/resilience-registry-v1.artifact.json'), 'utf8')) as { bytecode: string };
+    expect(evidence.deployment.initCodeKeccak).toBe(keccakAsHex(v1.bytecode, 256));
     const a = evidence.anchors[0]!;
     expect(a.fingerprint).toBe(cert.fingerprint);
     expect(a.validatorKey).toBe(validatorKey(cert.validatorId));

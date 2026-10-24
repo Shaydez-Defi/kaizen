@@ -11,9 +11,8 @@ import type { ResilienceCertificate } from './certificate';
 
 export const RESILIENCE_REGISTRY_SIGNATURES = {
   record: 'record(bytes32,bytes32,bytes32,bytes32,uint32,uint16,uint16,uint8,uint8,bytes)',
-  getLatest: 'getLatest(bytes32)',
+  certOf: 'certOf(bytes32)',
   getScore: 'getScore(bytes32)',
-  certificateCount: 'certificateCount(bytes32)',
   recorded: 'recorded(bytes32)',
   certificateRecordedEvent:
     'CertificateRecorded(bytes32,bytes32,bytes32,bytes32,uint8,uint8,uint32,uint16,uint16,uint64,bytes)',
@@ -113,8 +112,8 @@ export function recordInputFromCertificate(cert: ResilienceCertificate, score: n
   };
 }
 
-export const encodeGetLatestCall = (validator: string): string =>
-  sel(RESILIENCE_REGISTRY_SIGNATURES.getLatest) + b32(validator, 'validator');
+export const encodeCertOfCall = (fingerprint: string): string =>
+  sel(RESILIENCE_REGISTRY_SIGNATURES.certOf) + b32(fingerprint, 'fingerprint');
 export const encodeGetScoreCall = (validator: string): string =>
   sel(RESILIENCE_REGISTRY_SIGNATURES.getScore) + b32(validator, 'validator');
 export const encodeRecordedCall = (fingerprint: string): string =>
@@ -128,37 +127,18 @@ function words(data: string, n: number): string[] {
 
 const unknownOr = (v: number, max: number): number | null => (v === max ? null : v);
 
+/** Stored per-certificate state: everything else lives in the CertificateRecorded event. */
 export interface OnChainCertificate {
-  fingerprint: string;
-  runHash: string;
-  signer: string;
-  timeToRecoverMs: number | null;
-  finalityGapBlocks: number | null;
-  blocksMissed: number | null;
   score: number;
-  evidenceFlags: number;
-  certifiedAt: number;
-  submitter: string;
+  block: number;
 }
 
-export function decodeLatest(data: string): OnChainCertificate {
-  const w = words(data, 10);
-  const n = (i: number): number => Number(BigInt(`0x${w[i]}`));
-  return {
-    fingerprint: `0x${w[0]}`,
-    runHash: `0x${w[1]}`,
-    signer: `0x${w[2]}`,
-    timeToRecoverMs: unknownOr(n(3), UNKNOWN_U32),
-    finalityGapBlocks: unknownOr(n(4), UNKNOWN_U16),
-    blocksMissed: unknownOr(n(5), UNKNOWN_U16),
-    score: n(6),
-    evidenceFlags: n(7),
-    certifiedAt: n(8),
-    submitter: `0x${w[9]!.slice(24)}`,
-  };
+export function decodeCertOf(data: string): OnChainCertificate {
+  const w = words(data, 2).map((x) => Number(BigInt(`0x${x}`)));
+  return { score: w[0]!, block: w[1]! };
 }
 
-export function decodeScore(data: string): { score: number; certifiedAt: number; count: number } {
+export function decodeScore(data: string): { score: number; block: number; count: number } {
   const w = words(data, 3).map((x) => Number(BigInt(`0x${x}`)));
-  return { score: w[0]!, certifiedAt: w[1]!, count: w[2]! };
+  return { score: w[0]!, block: w[1]!, count: w[2]! };
 }

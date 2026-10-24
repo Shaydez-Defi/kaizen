@@ -10,9 +10,9 @@ import {
   EVIDENCE_FLAGS,
   KAIZEN_RESILIENCE_REGISTRY_ARTIFACT,
   RESILIENCE_REGISTRY_SIGNATURES,
-  decodeLatest,
+  decodeCertOf,
   decodeScore,
-  encodeGetLatestCall,
+  encodeCertOfCall,
   encodeGetScoreCall,
   encodeRecordCall,
   issueCertificate,
@@ -29,7 +29,7 @@ const b = (byte: string): string => `0x${byte.repeat(32)}`;
 describe('KaizenResilienceRegistry artifact', () => {
   it('codec selectors match solc methodIdentifiers', () => {
     const ids = art.methodIdentifiers as Record<string, string>;
-    for (const key of ['record', 'getLatest', 'getScore', 'certificateCount', 'recorded'] as const) {
+    for (const key of ['record', 'certOf', 'getScore', 'recorded'] as const) {
       const sig = RESILIENCE_REGISTRY_SIGNATURES[key];
       expect(`0x${ids[sig]}`, sig).toBe(selectorOf(sig));
     }
@@ -87,24 +87,12 @@ describe('codec', () => {
     expect(() => encodeRecordCall({ ...base, timeToRecoverMs: -1 })).toThrow();
   });
 
-  it('decodes getLatest/getScore returns', () => {
+  it('decodes certOf/getScore returns', () => {
     const word = (n: bigint | number) => BigInt(n).toString(16).padStart(64, '0');
-    const latest = `0x${'02'.repeat(32)}${'03'.repeat(32)}${'04'.repeat(32)}${word(0xffffffff)}${word(6)}${word(0xffff)}${word(67)}${word(3)}${word(1_700_000_000)}${'0'.repeat(24)}${'ee'.repeat(20)}`;
-    expect(decodeLatest(latest)).toEqual({
-      fingerprint: b('02'),
-      runHash: b('03'),
-      signer: b('04'),
-      timeToRecoverMs: null,
-      finalityGapBlocks: 6,
-      blocksMissed: null,
-      score: 67,
-      evidenceFlags: 3,
-      certifiedAt: 1_700_000_000,
-      submitter: `0x${'ee'.repeat(20)}`,
-    });
-    expect(decodeScore(`0x${word(67)}${word(5)}${word(2)}`)).toEqual({ score: 67, certifiedAt: 5, count: 2 });
+    expect(decodeCertOf(`0x${word(67)}${word(1234)}`)).toEqual({ score: 67, block: 1234 });
+    expect(decodeScore(`0x${word(67)}${word(5)}${word(2)}`)).toEqual({ score: 67, block: 5, count: 2 });
     expect(() => decodeScore('0x1234')).toThrow();
-    expect(encodeGetLatestCall(b('01'))).toBe(selectorOf(RESILIENCE_REGISTRY_SIGNATURES.getLatest) + '01'.repeat(32));
+    expect(encodeCertOfCall(b('02'))).toBe(selectorOf(RESILIENCE_REGISTRY_SIGNATURES.certOf) + '02'.repeat(32));
     expect(encodeGetScoreCall(b('01')).slice(0, 10)).toBe(selectorOf(RESILIENCE_REGISTRY_SIGNATURES.getScore));
   });
 
