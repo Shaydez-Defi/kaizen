@@ -1445,3 +1445,9 @@ K8s/Helm — untouched.
 - Branch `feat/commit-reveal-drills` (off PR #4); main untouched (freeze until 2026-10-27).
 - Next: on-chain commit of target block N, reveal once N is finalized, certificate
   `drill` field + verifier mismatch check, then T-9.7 BABE authorship.
+
+## 2026-10-24 22:00 WAT session: lite registry (plan item 1)
+
+- `KaizenResilienceRegistry` rewritten to two storage slots per anchor (certHash -> score/block marker; validator latest score/block/count). Everything else is in `CertificateRecorded`. Runtime 1586 bytes vs 3183 (v1). Verified by in-memory EVM test (6 pass), engine vitest, tsc, eslint.
+- Codec: `getLatest`/`certificateCount` removed, `certOf(fingerprint)` added; `getScore` now returns (score, block, count).
+- NOT deployed: V3 dry run says `revive.StorageDepositNotEnoughFunds`. v1 cost 195 tPOT code deposit for 3183 bytes plus 66 tPOT instantiate; signer holds 90.64 tPOT. Needs a tPOT top-up (Portaldot Discord ticket), est. ~150 tPOT. v1 stays the live registry until then; v1 evidence kept as `docs/evidence/v3-resilience-registry-v1.json`.
