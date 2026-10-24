@@ -59,6 +59,11 @@ export type KaizenErrorCode =
   | 'V3_INSUFFICIENT_FUNDS'
   | 'V3_TX_FAILED'
   | 'V3_ANCHOR_NOT_FOUND'
+  // Proof-of-Resilience (T-9.x)
+  | 'RESILIENCE_SIGNER_NOT_CONFIGURED'
+  | 'RESILIENCE_SIGNER_INVALID'
+  | 'RESILIENCE_NOT_CERTIFIABLE'
+  | 'RESILIENCE_CERTIFICATE_NOT_FOUND'
   | 'INTERNAL';
 
 export interface KaizenErrorJson {

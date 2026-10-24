@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "validatorId": "res-it-bob",
+  "score": 35,
+  "quality": 0.8811508281034239,
+  "confidence": 0.3934693393952823,
+  "effectiveRuns": 0.9999999970584031,
+  "runs": 1,
+  "faultsSurvived": 1,
+  "latestCertifiedAt": "2026-10-24T00:03:22.163Z",
+  "asOf": "2026-10-24T00:03:22.174Z",
+  "perRun": [
+    {
+      "runId": "run-mvlmxtrq-0744ea75",
+      "survived": true,
+      "quality": 0.8811508281034239,
+      "weight": 0.9999999970584031,
+      "ageDays": 1.2731481481481482e-7
+    }
+  ],
+  "excluded": []
+}

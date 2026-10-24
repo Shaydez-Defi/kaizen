@@ -18,6 +18,7 @@ import { ScenarioService } from './scenario/service';
 import { ScenarioEngine } from './scenario/runner';
 import { StateStore } from './state/store';
 import { V3AnchorService } from './v3/anchor/service';
+import { ResilienceService } from './resilience/service';
 
 export const KAIZEN_VERSION = '0.1.0';
 
@@ -35,6 +36,9 @@ export interface EngineOptions {
   healthTimeoutMs?: number;
   /** Monitoring poll cadence per network (default 2000ms). */
   monitorIntervalMs?: number;
+  /** Capture chain evidence around scenario runs (T-9.5). Default:
+   *  KAIZEN_RESILIENCE_EVIDENCE=1. */
+  resilienceCapture?: boolean;
 }
 
 export interface KaizenEngine {
@@ -60,6 +64,9 @@ export interface KaizenEngine {
   /** V3 testnet run anchoring (T-8.2): explicit, operator-signed writes of
    *  finished run hashes; evidence persisted in SQLite. */
   v3Anchors: V3AnchorService;
+  /** Proof-of-Resilience (T-9.5): chain-evidence capture around runs (opt-in,
+   *  KAIZEN_RESILIENCE_EVIDENCE=1), explicit signed certificates, scores. */
+  resilience: ResilienceService;
   /** WS RPC url of a node in a network (by node id). */
   wsUrlForNode(nodeId: string): string;
   /** Release engine resources. Managed node processes are NOT killed —
@@ -146,6 +153,7 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
   // NEVER resumes execution. (Kicked off now; awaited in close().)
   void scenarioRuns.reconcileOnStartup();
   const v3Anchors = new V3AnchorService({ store, events });
+  const resilience = new ResilienceService({ store, events, capture: options.resilienceCapture });
 
   return {
     dataDir,
@@ -160,6 +168,7 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
     scenarios,
     scenarioRuns,
     v3Anchors,
+    resilience,
     wsUrlForNode(nodeId: string): string {
       const node = store.getNode(nodeId);
       return `ws://127.0.0.1:${node.ports.ws}`;
@@ -169,6 +178,7 @@ export function createEngine(options: EngineOptions = {}): KaizenEngine {
       // path while the injector is still alive, then roll back faults.
       await scenarioRuns.close();
       await faults.shutdown();
+      await resilience.close();
       monitoring.stopAll();
       store.close();
     },

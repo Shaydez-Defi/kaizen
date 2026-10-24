@@ -111,6 +111,11 @@ const anchorBody = z.object({
   requestedBy: z.string().min(1).max(64).optional(),
 });
 const anchorIdParam = z.object({ anchorId: z.string().min(1).max(64) });
+// Proof-of-Resilience (T-9.5): read-only HTTP surface. Certification (a
+// signing operation) is CLI-only (`kaizen certify`), like registry deploys.
+const fingerprintParam = z.object({ fingerprint: z.string().regex(/^0x[0-9a-f]{64}$/) });
+const validatorParam = z.object({ validatorId: z.string().min(1).max(128) });
+const certificateListQuery = z.object({ validator: z.string().min(1).max(128).optional() });
 const anchorListQuery = z.object({
   runId: z.string().min(1).max(64).optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
@@ -136,6 +141,7 @@ function statusFor(code: string): number {
     case 'SCENARIO_NOT_FOUND':
     case 'SCENARIO_RUN_NOT_FOUND':
     case 'V3_ANCHOR_NOT_FOUND':
+    case 'RESILIENCE_CERTIFICATE_NOT_FOUND':
       return 404;
     case 'NETWORK_ALREADY_EXISTS':
     case 'NETWORK_ALREADY_RUNNING':
@@ -149,6 +155,9 @@ function statusFor(code: string): number {
     case 'SCENARIO_RUN_CONFLICT':
     case 'SCENARIO_RUN_NOT_REPLAYABLE':
     case 'V3_SIGNER_NOT_CONFIGURED':
+    case 'RESILIENCE_NOT_CERTIFIABLE':
+    case 'RESILIENCE_SIGNER_NOT_CONFIGURED':
+    case 'RESILIENCE_SIGNER_INVALID':
     case 'V3_SIGNER_INVALID':
     case 'V3_REGISTRY_NOT_DEPLOYED':
     case 'V3_RUN_NOT_ANCHORABLE':
@@ -707,6 +716,51 @@ export function createServer(engine: KaizenEngine, options: ServerOptions = {}):
       const params = requireParam(runIdParam, req.params, reply);
       if (!params) return;
       reply.send({ ok: true, ...engine.v3Anchors.hashRun(params.runId) });
+    });
+    // ---- Proof-of-Resilience (T-9.5, read-only) ------------------------------
+    scope.get('/api/resilience/scores', async () => {
+      const scores = [];
+      for (const id of engine.resilience.listValidators()) scores.push(await engine.resilience.score(id));
+      return { ok: true, scores };
+    });
+
+    scope.get('/api/resilience/scores/:validatorId', async (req, reply) => {
+      const params = requireParam(validatorParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, score: await engine.resilience.score(params.validatorId) });
+    });
+
+    scope.get('/api/resilience/certificates', async (req, reply) => {
+      const q = certificateListQuery.safeParse(req.query ?? {});
+      if (!q.success) {
+        reply.status(400).send({
+          ok: false,
+          error: { code: 'INVALID_INPUT', message: 'Invalid certificate query', details: { issues: q.error.issues } },
+        });
+        return;
+      }
+      reply.send({
+        ok: true,
+        certificates: engine.resilience.listCertificates(q.data.validator !== undefined ? { validatorId: q.data.validator } : {}),
+      });
+    });
+
+    scope.get('/api/resilience/certificates/:fingerprint', async (req, reply) => {
+      const params = requireParam(fingerprintParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, certificate: engine.resilience.getCertificate(params.fingerprint) });
+    });
+
+    scope.post('/api/resilience/certificates/:fingerprint/verify', async (req, reply) => {
+      const params = requireParam(fingerprintParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, verification: await engine.resilience.verify(params.fingerprint) });
+    });
+
+    scope.get('/api/resilience/runs/:runId/evidence', async (req, reply) => {
+      const params = requireParam(runIdParam, req.params, reply);
+      if (!params) return;
+      reply.send({ ok: true, evidence: engine.resilience.getEvidence(params.runId) });
     });
   });
   // Never expose setup/download over the API: binary acquisition is an

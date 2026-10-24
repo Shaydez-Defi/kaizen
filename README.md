@@ -1,17 +1,47 @@
 # Kaizen
 
-**Break Portaldot networks on purpose. Prove it on chain.**
+**Monitors tell you a validator is up. Kaizen proves it survives going down.**
 
-Kaizen is a node operations and infrastructure platform for the Portaldot
-blockchain. It creates real multi-node `portaldot_dev` networks, monitors
-them live, breaks them deliberately in a gated Failure Lab with replayable
-scenarios, verifies recovery independently over RPC, and fingerprints every
-finished experiment and anchors it on the **Portaldot V3 test network** —
-from a web console and a CLI that share one engine.
+Kaizen runs fault drills against Portaldot validators — pause a node, kill
+it, bring it back — and turns each drill into a **signed, chain-bound
+resilience certificate** that anyone can re-check against the chain, plus a
+0–100 **resilience score** per validator. Underneath is a full node-ops
+platform: real multi-node `portaldot_dev` networks, live monitoring, a gated
+Failure Lab with replayable scenarios, and run anchoring on the **Portaldot
+V3 test network** — from a web console and a CLI that share one engine.
+
+## Proof-of-Resilience: the trustless drill model
+
+The goal is a score that does not rest on the operator's word. Three
+pillars, each marked by what has actually been verified:
+
+| Pillar | What it means | Status |
+|---|---|---|
+| **1. A future block hash schedules the drill** | Drill timing and fault choice are derived from the hash of a block that did not exist when the drill was committed (commit-reveal), so a drill cannot be pre-staged or cherry-picked. | **Roadmap** — specified in [docs/RESILIENCE_SCORE.md §7.1](docs/RESILIENCE_SCORE.md); not built. Today drills are operator-triggered. |
+| **2. Recovery is proven from what the chain records** | Recovery = GRANDPA finality advancing past where it stalled, read from block hashes any verifier can re-fetch; BABE authorship by the validator's own keys before/after the fault is the next step. Operator-measured timings are weighted least. | **Partly implemented** — finalized/best heads (number + hash) are captured before, during and after the fault and re-checked against the chain by `kaizen verify-certificate`; recovery is only declared when finality advances. **Verified live** on x86_64 CI ([run 40042905143](https://github.com/Shaydez-Defi/kaizen/actions/runs/40042905143)): pause drill on a real two-node `portaldot_dev` network, 11 captured hashes re-fetched → `verified`; network stopped → `unverifiable: network offline` ([evidence](docs/evidence/resilience/)). BABE authorship and evidence-class weighting (self-reports weighted least): **roadmap** (§7.2–7.3) — the v1 score still gives the measured recovery time the largest weight. |
+| **3. A signed certificate under an open attestation spec** | SHA-256 fingerprint over canonical JSON of the run record + chain evidence, signed with the operator's sr25519 key; open score formula with worked examples. | **Implemented** — `kaizen certify` / `score` / `verify-certificate`, `/api/resilience/*`, spec in [docs/RESILIENCE_SCORE.md](docs/RESILIENCE_SCORE.md); unit-tested (engine 50, CLI 3, API 4) and exercised live in the same CI run (dev-key certificate). `KaizenResilienceRegistry` contract written and tested in an in-memory EVM — **not deployed** (deployer holds ≈3.15 tPOT; the last deploy cost ≈85 tPOT, RSK-30). |
+
+```
+drill (pause / terminate) ──► chain evidence (heads + hashes, before/during/after)
+        └──► certificate = sha256(canonical{run, runHash, evidence}) + sr25519 signature
+                 └──► verify: recompute + check signature + re-fetch block hashes
+                 └──► score: 0–100 per validator (docs/RESILIENCE_SCORE.md)
+```
+
+```bash
+KAIZEN_RESILIENCE_EVIDENCE=1 kaizen run execute <scenarioId> --network <net>   # capture
+kaizen certify <runId> --dev-key        # or KAIZEN_RESILIENCE_SIGNER_SURI / _FILE (key outside the repo)
+kaizen score <validator>                # 0–100 from certified runs
+kaizen verify-certificate <fingerprint> # verified | mismatch | unverifiable (network offline)
+```
+
+`--dev-key` uses the public `//Alice` key and is accepted only for local
+designated-test networks; such certificates are labelled "DEV KEY —
+integrity only, not identity".
 
 ```
 CREATE → MONITOR → BREAK → DIAGNOSE → RECOVER → DEPLOY
-                                 └──→ ANCHOR ON PORTALDOT V3
+                                 └──→ CERTIFY → SCORE → ANCHOR ON PORTALDOT V3
 ```
 
 Nothing in the UI is mocked: every number comes from real RPC, real process
@@ -30,6 +60,7 @@ shown disabled and labelled with their phase — never simulated.
 | CLI for scenarios/runs | **Verified** live (T-3.6A) |
 | **Portaldot V3 connectivity probe** (Substrate WS, EVM RPC, node console) | **Verified** live (T-8.1) |
 | **Portaldot V3 run anchoring** (KaizenRunRegistry contract + remark, verify) | **Verified** live on the V3 test network (T-8.2) |
+| **Proof-of-Resilience** (chain evidence, signed certificates, verify, score v1, registry contract) | See the pillar table above (Phase 9, T-9.1–T-9.5) |
 | Web console (new design): Overview, Networks, node drawer, Failure Lab, Scenarios, Incidents evidence, Deployments, Validators, V3, Settings | **Implemented** — 61 jsdom tests; rendered in headless Chromium over fixture API data (T-3.6C); not yet driven against a live network (RSK-23) |
 | `kaizen up` (setup if needed → preset network → health-gated start → endpoints) | **Implemented** — 5 unit tests with a fake engine; live run needs an x86_64 host (T-3.6C) |
 | `peer-disconnect` / `partition` faults | Blocked by the engine with typed reasons (R-22) — shown disabled |

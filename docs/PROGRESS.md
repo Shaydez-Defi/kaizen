@@ -1383,3 +1383,28 @@ K8s/Helm — untouched.
 **Status**: IMPLEMENTED, not VERIFIED — not yet driven against a live portaldot_dev network; `kaizen up` not run live (arm64 sandbox, RSK-31).
 
 **Next step**: live smoke in Codespaces (`npx kaizen up`, then API + web), then record the demo.
+
+---
+
+## 2026-10-24 — Phase 9: Proof-of-Resilience step 1 (T-9.1 – T-9.5)
+
+**Branch / PR**: `feat/proof-of-resilience`, draft PR #3. Decision DEC-029; spec `docs/RESILIENCE_SCORE.md`.
+
+**Work**:
+- T-9.1 chain-bound evidence (`packages/engine/src/resilience/evidence.ts`, `rpc.ts`, `verify.ts`): best/finalized heads (number + hash) from a non-target observer before/during/after the fault; pure recovery metrics; verify re-fetches every hash (offline → `unverifiable`, difference → `mismatch`).
+- T-9.2 certificates (`certificate.ts`, `signer.ts`): SHA-256 over canonical `{kaizenCertificate:1, runHash, run, chain}`, sr25519 signature over `kaizen:certificate:v1:<fp>`; signer from `KAIZEN_RESILIENCE_SIGNER_SURI` / `_FILE` (refused inside the working tree); public `//Alice` only with `--dev-key` on local designated-test networks, labelled.
+- T-9.3 score v1 (`score.ts`) + spec with worked examples; trust model v2 (future-block-hash-seeded drills, BABE authorship + GRANDPA finality, evidence-class weighting) recorded as PLANNED (§7).
+- T-9.4 `contracts/KaizenResilienceRegistry.sol` + reproducible build + committed artifact + codec; in-memory EVM test script.
+- T-9.5 `engine.resilience` (opt-in capture via `KAIZEN_RESILIENCE_EVIDENCE=1`), CLI `certify / certificates / score / verify-certificate`, read-only `/api/resilience/*`, migrations 23–25, live test `test/integration/resilience.int.test.ts`, workflow `.github/workflows/resilience-live.yml` (x86_64, RSK-31).
+- README headline: "Monitors tell you a validator is up. Kaizen proves it survives going down." with the three pillars marked by verification status.
+
+**Verification (actual results)**:
+- `npm run typecheck` ✓, `npm run lint` ✓, `npm run build` ✓ (arm64 sandbox).
+- Unit (chunked, 120 s cap): web 61/61, CLI 50/50 (47 + 3 new), API 41/41 (37 + 4 new) → 152; engine 220 + 34 + 41 = 295 (includes 50 new resilience tests; store schema 25).
+- `node contracts/test-resilience-registry.mjs` (optional `@ethereumjs/evm@10` + `solc@0.8.28`, `--no-save`): 6/6.
+- **LIVE on x86_64 GitHub Actions** — run [40042905143](https://github.com/Shaydez-Defi/kaizen/actions/runs/40042905143) (commit 05984e4): real two-node `portaldot_dev` 2.0.0, 15 s pause of `bob`; evidence 5 observations / 0 gaps (finalized stalled at #2 during the fault, advanced to #3 after); metrics recovered, ttr 2 020 ms, finality gap 3, blocks missed 2; dev-key certificate `0x517b2ffb…2e33`; verify online `verified` (11 hashes match), after stop `unverifiable: network offline`; score 35 (one run, confidence 0.39). Artifacts copied to `docs/evidence/resilience/`. First CI run (40042658799) failed honestly on scenario validation (missing `process-state` precondition) — fixed in the test.
+- V3 deployer `5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o`: **3.1519 tPOT** free at block #167144 (read-only query, 2026-10-24 ~00:58 WAT).
+
+**Not done / decisions**: `KaizenResilienceRegistry` NOT deployed (≈3.15 tPOT vs ≈85 tPOT for the last deploy, RSK-30). Pillar 1 (seeded drills) and BABE authorship / evidence-class weighting are roadmap (T-9.6, T-9.7). The v1 score still weights the operator-measured recovery time most.
+
+**Next step**: T-9.6 commit-reveal drill scheduling; fund the deployer before any registry deploy.

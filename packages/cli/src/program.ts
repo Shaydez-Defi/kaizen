@@ -1132,5 +1132,91 @@ export function buildProgram(deps: CliDependencies = {}): Command {
       });
     });
 
+  // ---------------------------------------------------------------------------
+  // Proof-of-Resilience (T-9.5): certificates + resilience scores
+
+  program
+    .command('certify <runId>')
+    .description(
+      'Sign a chain-bound resilience certificate for a finished run (KAIZEN_RESILIENCE_SIGNER_SURI / _FILE; --dev-key = public //Alice, local test networks only)',
+    )
+    .option('--dev-key', 'allow the public //Alice DEV key (labelled; integrity only, not identity)')
+    .action(async (runId: string, cmdOpts: { devKey?: boolean }) => {
+      await run(async (engine, opts) => {
+        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true });
+        if (opts.json) {
+          printJson({ ok: true, certificate: cert });
+          return;
+        }
+        const m = cert.chain.metrics;
+        console.log(`certificate ${cert.fingerprint}`);
+        console.log(`  run        : ${cert.runId} (run hash ${cert.runHash})`);
+        console.log(`  validator  : ${cert.validatorId} on ${cert.networkId}`);
+        console.log(`  signer     : ${cert.signature.address}${cert.signature.dev ? '  [DEV KEY — integrity only, not identity]' : ''}`);
+        console.log(
+          `  recovery   : ${m.recovered ? 'recovered' : 'NOT recovered'}  ttr=${m.timeToRecoverMs ?? '-'}ms  finality gap=${m.finalityGapBlocks ?? '-'}  missed=${m.blocksMissed ?? '-'}`,
+        );
+        console.log(`  evidence   : ${cert.chain.observations.length} observations, ${cert.chain.gaps.length} gaps`);
+      });
+    });
+
+  program
+    .command('certificates')
+    .description('List resilience certificates')
+    .option('--validator <id>', 'filter by validator')
+    .action(async (cmdOpts: { validator?: string }) => {
+      await run(async (engine, opts) => {
+        const certs = engine.resilience.listCertificates(
+          cmdOpts.validator !== undefined ? { validatorId: cmdOpts.validator } : {},
+        );
+        if (opts.json) {
+          printJson({ ok: true, certificates: certs });
+          return;
+        }
+        if (certs.length === 0) console.log('No certificates.');
+        for (const c of certs) {
+          console.log(
+            `  ${c.fingerprint}  ${c.validatorId.padEnd(12)} run=${c.runId}  ${c.chain.metrics.recovered ? 'recovered' : 'not-recovered'}  ${c.signedAt}${c.signature.dev ? '  [dev key]' : ''}`,
+          );
+        }
+      });
+    });
+
+  program
+    .command('verify-certificate <fingerprint>')
+    .description('Recompute the fingerprint, check the sr25519 signature, and re-fetch the block hashes from the network (offline → unverifiable)')
+    .action(async (fingerprint: string) => {
+      await run(async (engine, opts) => {
+        const v = await engine.resilience.verify(fingerprint);
+        if (opts.json) printJson({ ok: v.status === 'verified', verification: v });
+        else {
+          console.log(`certificate ${fingerprint} — ${v.status.toUpperCase()}`);
+          for (const r of v.reasons) console.log(`  ${r}`);
+        }
+        if (v.status !== 'verified') process.exitCode = 1;
+      });
+    });
+
+  program
+    .command('score [validator]')
+    .description('Resilience score v1 (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted')
+    .action(async (validator: string | undefined) => {
+      await run(async (engine, opts) => {
+        const ids = validator !== undefined ? [validator] : engine.resilience.listValidators();
+        const scores = [];
+        for (const id of ids) scores.push(await engine.resilience.score(id));
+        if (opts.json) {
+          printJson({ ok: true, scores });
+          return;
+        }
+        if (scores.length === 0) console.log('No certified validators.');
+        for (const s of scores) {
+          console.log(
+            `${s.validatorId.padEnd(14)} ${String(s.score).padStart(3)}/100  runs=${s.runs} survived=${s.faultsSurvived} quality=${s.quality.toFixed(3)} confidence=${s.confidence.toFixed(3)}${s.excluded.length ? `  excluded=${s.excluded.length} (integrity failed)` : ''}`,
+          );
+        }
+      });
+    });
+
   return program;
 }

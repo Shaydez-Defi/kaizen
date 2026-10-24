@@ -772,3 +772,43 @@ Format: context → decision → alternatives → consequences. Newest entries a
 - **Consequences**: UI never shows a number the API did not return
   ("—" for unobserved); browser-level verification is still pending
   (RSK-23).
+
+## DEC-029 — Proof-of-Resilience: chain-bound evidence, operator-signed certificates, open score; trustless drills are the stated goal
+
+- **Context**: monitoring proves a validator is up; Kaizen's differentiator is
+  proving it survives going down. A score anyone should rely on cannot rest
+  on the operator's word alone, but the full trustless model (seeded drills,
+  BABE authorship evidence) is more than one session of work.
+- **Decision**:
+  1. **Evidence is chain-bound.** Each run's evidence records best and
+     finalized heads (number + hash) from an observer node that is not the
+     fault target, before/during/after the fault. Recovery is declared only
+     when finality advances past its pre/during-fault maximum. Metrics are a
+     pure function of the observations (`computeRecoveryMetrics`).
+  2. **Certificate = SHA-256 over canonical JSON** of `{kaizenCertificate:1,
+     runHash, run, chain}` (same encoder as T-8.2), signed sr25519 over
+     `kaizen:certificate:v1:<fingerprint>`. Signer from
+     `KAIZEN_RESILIENCE_SIGNER_SURI` or `_FILE` (refused inside the working
+     tree); the public `//Alice` key only with explicit `--dev-key` on a
+     local designated-test network, labelled `dev: true` everywhere.
+  3. **Verification never upgrades.** Integrity (fingerprint + signature)
+     and chain binding (re-fetch every hash) are both required for
+     `verified`; offline is `unverifiable: network offline`, a missing block
+     is `unverifiable`, any difference is `mismatch`.
+  4. **Capture is opt-in** (`KAIZEN_RESILIENCE_EVIDENCE=1`), certification is
+     explicit and CLI-only (no HTTP signing route); the HTTP surface is
+     read-only.
+  5. **Score v1** is the documented pure function in docs/RESILIENCE_SCORE.md.
+     The contract stores the operator-computed score next to its inputs; it
+     does not compute it.
+  6. **Trust model v2 is the stated direction** (RESILIENCE_SCORE.md §7):
+     future-block-hash-seeded drills, BABE authorship + GRANDPA finality as
+     primary evidence, evidence-class weighting. v2 fields are optional
+     additions, so v1 fingerprints stay valid.
+- **Alternatives**: auto-certify on run completion (rejected: signing is an
+  explicit operator act); on-chain scoring (rejected: no floats/sr25519 in the
+  EVM, and deposits are costly, RSK-30); claiming trustlessness before v2
+  (rejected: README marks each pillar by what is verified).
+- **Consequences**: v1 certificates prove integrity and chain binding, not
+  that the drill was unpredictable; the README headline states this per
+  pillar. `KaizenResilienceRegistry` is not deployed (deployer ≈3.15 tPOT).

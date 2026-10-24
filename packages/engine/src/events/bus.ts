@@ -225,6 +225,15 @@ export interface KaizenEventMap {
     blockNumber: number;
     at: string;
   };
+  /** A resilience certificate was issued (T-9.5); public data only. */
+  'resilience.certified': {
+    fingerprint: string;
+    runId: string;
+    validatorId: string;
+    networkId: string;
+    dev: boolean;
+    at: string;
+  };
 }
 
 export type KaizenEventName = keyof KaizenEventMap;

@@ -1,0 +1,20 @@
+{
+  "status": "unverifiable",
+  "reasons": [
+    "chain: network offline: no RPC endpoint for this network",
+    "DEV KEY: signed with a public test key — proves integrity, not operator identity"
+  ],
+  "integrity": {
+    "fingerprintMatches": true,
+    "recomputedFingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+    "signatureValid": true,
+    "addressMatchesKey": true,
+    "dev": true
+  },
+  "chain": {
+    "status": "unverifiable",
+    "reason": "network offline: no RPC endpoint for this network",
+    "checks": []
+  },
+  "devKey": true
+}

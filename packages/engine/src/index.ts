@@ -291,3 +291,7 @@ export type {
   NodeMonitorSample,
   NetworkMonitorSnapshot,
 } from './types';
+
+// Proof-of-Resilience (Phase 9, T-9.x) — chain-bound evidence, signed run
+// certificates, and resilience scores (DEC-029).
+export * from './resilience/index';
