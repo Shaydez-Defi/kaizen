@@ -76,8 +76,14 @@ describe.runIf(LIVE)('Proof-of-Resilience (live, real network)', () => {
             id: 's1',
             operation: { type: 'pause', config: { node: victimLabel, durationMs: 15_000 } },
             timeoutMs: 90_000,
-            preconditions: [{ kind: 'rpc-reachable', node: victimLabel, expect: true }],
-            postconditions: [{ kind: 'recovery-verified', node: victimLabel }],
+            preconditions: [
+              { kind: 'rpc-reachable', node: victimLabel, expect: true },
+              { kind: 'process-state', node: victimLabel, expect: ['running'] },
+            ],
+            postconditions: [
+              { kind: 'recovery-verified', node: victimLabel },
+              { kind: 'rpc-reachable', node: victimLabel, expect: true },
+            ],
           },
         ],
       } as unknown as ScenarioInput,
