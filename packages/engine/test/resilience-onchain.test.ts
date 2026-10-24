@@ -238,3 +238,28 @@ describe('ResilienceRegistryService.read', () => {
     expect(chain.calls).toHaveLength(1);
   });
 });
+
+describe('committed V3 evidence (docs/evidence/v3-resilience-registry.json)', () => {
+  const evidence = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../../docs/evidence/v3-resilience-registry.json'), 'utf8'),
+  ) as {
+    network: { evmChainId: number };
+    deployment: { address: string; initCodeKeccak: string };
+    anchors: { fingerprint: string; validatorKey: string; score: number; evidenceFlags: number; certificateRecordedTopics: string[] }[];
+    readBack: { getScore: { score: number; count: number }; getLatest: { fingerprint: string; signer: string } };
+  };
+
+  it('matches the committed certificate, artifact and codec', async () => {
+    const { keccakAsHex } = await import('@polkadot/util-crypto');
+    expect(evidence.network.evmChainId).toBe(420420777);
+    expect(evidence.deployment.initCodeKeccak).toBe(keccakAsHex(KAIZEN_RESILIENCE_REGISTRY_ARTIFACT.bytecode, 256));
+    const a = evidence.anchors[0]!;
+    expect(a.fingerprint).toBe(cert.fingerprint);
+    expect(a.validatorKey).toBe(validatorKey(cert.validatorId));
+    expect(a.evidenceFlags).toBe(3);
+    expect(a.certificateRecordedTopics).toEqual([CERTIFICATE_RECORDED_TOPIC, a.validatorKey, cert.fingerprint, cert.signature.publicKey]);
+    expect(evidence.readBack.getScore).toMatchObject({ score: a.score, count: 1 });
+    expect(evidence.readBack.getLatest.fingerprint).toBe(cert.fingerprint);
+    expect(evidence.readBack.getLatest.signer).toBe(cert.signature.publicKey);
+  });
+});
