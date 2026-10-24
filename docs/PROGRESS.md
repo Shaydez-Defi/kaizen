@@ -1408,3 +1408,30 @@ K8s/Helm — untouched.
 **Not done / decisions**: `KaizenResilienceRegistry` NOT deployed (≈3.15 tPOT vs ≈85 tPOT for the last deploy, RSK-30). Pillar 1 (seeded drills) and BABE authorship / evidence-class weighting are roadmap (T-9.6, T-9.7). The v1 score still weights the operator-measured recovery time most.
 
 **Next step**: T-9.6 commit-reveal drill scheduling; fund the deployer before any registry deploy.
+
+---
+
+## 2026-10-24 — T-9.8: KaizenResilienceRegistry live on the V3 test network
+
+**Branch / PR**: `feat/v3-resilience-deploy` from `main` @ 35241cf (main frozen until the 2026-10-26 admin review; not merged).
+
+**Work**:
+- `packages/engine/src/resilience/onchain.ts` — `ResilienceRegistryService`: `deploy()` (committed artifact via `revive.instantiateWithCode`), `anchor(cert, score)` (offline sr25519 + address check, free `recorded(fingerprint)` pre-check, `record()` via `revive.call`, requires the `CertificateRecorded` log with validator + fingerprint topics), `read(validator)` (free `getScore` / `getLatest` / `recorded` dry runs). Persist-first journal hook (DEC-026): an entry is written BEFORE signing, then `included` or `failed`; balance before/after recorded; every error scrubbed of the signer secret. `encodeRecordedCall` added to the codec.
+- CLI: `kaizen v3 deploy-resilience-registry [--journal]`, `kaizen v3 anchor-certificate <file> --score <n> [--registry] [--journal]`, `kaizen v3 resilience-score <validator> [--registry] [--fingerprint]` (registry also from `KAIZEN_V3_RESILIENCE_REGISTRY_ADDRESS`).
+- Pre-deploy check: `contracts/compile-resilience-registry.mjs` (solc 0.8.28) reproduced `KaizenResilienceRegistry.artifact.json` and `registry-artifact.ts` byte-for-byte; `contracts/test-resilience-registry.mjs` 6/6. Interface already had `getScore(bytes32)`; no contract change.
+- Signer: same env-signed path as T-8.2 (`KAIZEN_V3_SIGNER_SURI`, testnet-only burner kept outside the repo). @polkadot/api runs natively on the arm64 sandbox; no qemu needed (qemu was only for the `portaldot_dev` binary, RSK-31).
+
+**Live results (PortaldotV3 Test, genesis 0xd4f9…83bd, EVM chain id 420420777)**:
+- Balance before: 383.1519 tPOT.
+- Deploy: contract `0x8ec2b52a5e407926309f983f6e7d019d66da764a`, tx `0x88bdae46743bbf059150a16d705ebe955dd3b91a8b8b34eb91d7ecb9cc0dd9e9`, block **167466** (`0x78c5ca87…c5b859`), finalized. Spent 261.7186 tPOT = 195.18 code-upload deposit + 66.204 storage deposit (both held) + 0.3346 fee. `eth_getCode` equals the artifact's deployedBytecode (3183 bytes).
+- Anchor: CI certificate `0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33` (run 40042905143, validator `res-it-bob` → key `0xbf1486bb…e0f0`, DEV key, evidenceFlags 3), score 35. tx `0x905f964cb7ca45c9d1ed630084595b7b8b934c0288216fdc5252436e0d86fee3`, block **167478** (`0xfbe64ed2…73f6`), finalized; `revive.ContractEmitted` topics = [CertificateRecorded, validator key, fingerprint, signer key]. Spent 30.7890 tPOT = 30.732 storage deposit + 0.0570 fee.
+- Read-back: `getScore` → `(35, 1792801920, 1)` (certifiedAt = block 167478 timestamp), via both the runtime API dry run and `eth_call` on the EVM RPC; `getLatest` returns the fingerprint, run hash, signer key, ttr 2020 ms, finality gap 3, missed 2; `recorded(fp)` = true.
+- Re-anchoring the same certificate → `V3_ALREADY_ANCHORED` from the free pre-check; nothing submitted.
+- Balance after: 90.6442 tPOT. Total 292.5076 tPOT, of which 0.3916 fees and 292.1160 held deposits.
+- Evidence: `docs/evidence/v3-resilience-registry.json` (includes the persist-first journal; no secrets).
+
+**Verification**: `npm run typecheck` ✓, `npm run lint` ✓, `npm run build` ✓, `npm test` 40 files / 462 tests ✓ (new: engine `resilience-onchain.test.ts` 11, CLI `v3-resilience-registry-commands.test.ts` 4).
+
+**Limits (claimed exactly)**: the anchored certificate comes from a CI drill on a local two-node `portaldot_dev` network, not a drill on V3; it is DEV-key signed (integrity, not identity); the score is operator-computed v1 and only stored on chain; test network, not mainnet. Seeded drills (T-9.6) and BABE authorship + score v2 (T-9.7) remain roadmap. Real costs are far above the run-registry estimates (≈261.7 vs ≈85 to deploy, ≈30.8 vs ≈4 per record, RSK-30): ~2 more records fit in the remaining balance.
+
+**Next step**: review/merge this PR after 2026-10-27; T-9.6 commit-reveal drills; consider a cheaper certificate layout (event-only storage) before recording many certificates.

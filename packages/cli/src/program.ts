@@ -46,6 +46,9 @@ import {
   type ScenarioValidationResult,
   type SerializedOperationDefinition,
   probeV3Connectivity,
+  ResilienceRegistryService,
+  type ResilienceCertificate,
+  type ResilienceChainJournalEntry,
   type V3AnchorMethod,
   type V3AnchorRecord,
   type V3ConnectivityReport,
@@ -59,6 +62,8 @@ interface GlobalOpts {
 export interface CliDependencies {
   /** Engine factory (DI seam for tests). Default: in-process createEngine. */
   engineFactory?: () => KaizenEngine;
+  /** On-chain resilience registry client (DI seam for tests). */
+  resilienceRegistryFactory?: () => ResilienceRegistryService;
 }
 
 /** Run outcomes that count as success for scripting. */
@@ -1042,6 +1047,107 @@ export function buildProgram(deps: CliDependencies = {}): Command {
         console.log(`  tx hash : ${contract.txHash}`);
         console.log(`  block   : ${contract.blockNumber} ${contract.blockHash}`);
         console.log(`  chain   : ${contract.chainName}`);
+      });
+    });
+
+  // Proof-of-Resilience on V3 (T-9.8): KaizenResilienceRegistry deploy /
+  // record / read. Writes spend tPOT from KAIZEN_V3_SIGNER_SURI; with
+  // --journal, a JSON line is appended BEFORE signing (persist-first, DEC-026)
+  // and again with the chain's answer.
+
+  const registryClient = (): ResilienceRegistryService =>
+    deps.resilienceRegistryFactory ? deps.resilienceRegistryFactory() : new ResilienceRegistryService();
+
+  function journalTo(file: string | undefined): ((e: ResilienceChainJournalEntry) => void) | undefined {
+    if (file === undefined) return undefined;
+    const target = path.resolve(file);
+    return (e) => fs.appendFileSync(target, `${JSON.stringify(e)}\n`);
+  }
+
+  async function runChain(fn: (opts: GlobalOpts) => Promise<void>): Promise<void> {
+    const opts = getOpts();
+    try {
+      await fn(opts);
+    } catch (e) {
+      const err = toErrorJson(e);
+      if (opts.json) printJson({ ok: false, error: err });
+      else console.error(`ERROR [${err.code}] ${err.message}`);
+      process.exitCode = 1;
+    }
+  }
+
+  v3Cmd
+    .command('deploy-resilience-registry')
+    .description('Deploy KaizenResilienceRegistry to the V3 TEST network (spends tPOT from KAIZEN_V3_SIGNER_SURI)')
+    .option('--journal <file>', 'append persist-first JSON lines (before signing, then the result)')
+    .action(async (cmdOpts: { journal?: string }) => {
+      await runChain(async (opts) => {
+        const d = await registryClient().deploy({ journal: journalTo(cmdOpts.journal) });
+        if (opts.json) {
+          printJson({ ok: true, deployment: d });
+          return;
+        }
+        console.log(`KaizenResilienceRegistry deployed at ${d.address}`);
+        console.log(`  tx hash : ${d.txHash}`);
+        console.log(`  block   : ${d.blockNumber} ${d.blockHash}${d.finalized ? ' (finalized)' : ''}`);
+        console.log(`  spent   : ${formatTokens(d.spent, d.tokenDecimals, d.tokenSymbol)}`);
+        console.log(`  balance : ${formatTokens(d.balanceAfter, d.tokenDecimals, d.tokenSymbol)}`);
+      });
+    });
+
+  v3Cmd
+    .command('anchor-certificate <certificateFile>')
+    .description('Record a signed resilience certificate + its v1 score in KaizenResilienceRegistry (spends tPOT)')
+    .requiredOption('--score <n>', 'v1 resilience score 0-100 to store with the certificate (docs/RESILIENCE_SCORE.md)')
+    .option('--registry <address>', 'registry H160 (default: $KAIZEN_V3_RESILIENCE_REGISTRY_ADDRESS)')
+    .option('--journal <file>', 'append persist-first JSON lines (before signing, then the result)')
+    .action(async (certificateFile: string, cmdOpts: { score: string; registry?: string; journal?: string }) => {
+      await runChain(async (opts) => {
+        const score = Number(cmdOpts.score);
+        if (!Number.isInteger(score) || score < 0 || score > 100) {
+          throw new KaizenError('INVALID_INPUT', '--score must be an integer 0..100');
+        }
+        let cert: ResilienceCertificate;
+        try {
+          cert = JSON.parse(fs.readFileSync(path.resolve(certificateFile), 'utf8')) as ResilienceCertificate;
+        } catch {
+          throw new KaizenError('INVALID_INPUT', `cannot read certificate JSON from ${certificateFile}`);
+        }
+        const a = await registryClient().anchor(cert, score, {
+          ...(cmdOpts.registry !== undefined ? { registry: cmdOpts.registry } : {}),
+          journal: journalTo(cmdOpts.journal),
+        });
+        if (opts.json) {
+          printJson({ ok: true, anchor: a });
+          return;
+        }
+        console.log(`certificate ${a.fingerprint} recorded in ${a.contract}`);
+        console.log(`  validator : ${a.validatorId} (key ${a.validatorKey})  score=${a.score}  flags=${a.evidenceFlags}`);
+        console.log(`  tx hash   : ${a.txHash}`);
+        console.log(`  block     : ${a.blockNumber} ${a.blockHash}${a.finalized ? ' (finalized)' : ''}`);
+        console.log(`  spent     : ${formatTokens(a.spent, a.tokenDecimals, a.tokenSymbol)}`);
+      });
+    });
+
+  v3Cmd
+    .command('resilience-score <validator>')
+    .description('Read a validator\'s on-chain resilience score from KaizenResilienceRegistry (free dry-run read)')
+    .option('--registry <address>', 'registry H160 (default: $KAIZEN_V3_RESILIENCE_REGISTRY_ADDRESS)')
+    .option('--fingerprint <hex>', 'also check recorded(fingerprint)')
+    .action(async (validator: string, cmdOpts: { registry?: string; fingerprint?: string }) => {
+      await runChain(async (opts) => {
+        const r = await registryClient().read(validator, {
+          ...(cmdOpts.registry !== undefined ? { registry: cmdOpts.registry } : {}),
+          ...(cmdOpts.fingerprint !== undefined ? { fingerprint: cmdOpts.fingerprint } : {}),
+        });
+        if (opts.json) {
+          printJson({ ok: true, read: r });
+          return;
+        }
+        console.log(`${r.validatorId} on ${r.contract} (best block ${r.bestNumber})`);
+        console.log(`  score       : ${r.score.score}/100  certificates=${r.score.count}  certifiedAt=${r.score.certifiedAt}`);
+        if (r.latest) console.log(`  latest      : ${r.latest.fingerprint}  flags=${r.latest.evidenceFlags}`);
+        if (r.recorded !== null) console.log(`  recorded    : ${r.recorded}`);
       });
     });
 
