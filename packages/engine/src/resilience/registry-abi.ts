@@ -117,6 +117,8 @@ export const encodeGetLatestCall = (validator: string): string =>
   sel(RESILIENCE_REGISTRY_SIGNATURES.getLatest) + b32(validator, 'validator');
 export const encodeGetScoreCall = (validator: string): string =>
   sel(RESILIENCE_REGISTRY_SIGNATURES.getScore) + b32(validator, 'validator');
+export const encodeRecordedCall = (fingerprint: string): string =>
+  sel(RESILIENCE_REGISTRY_SIGNATURES.recorded) + b32(fingerprint, 'fingerprint');
 
 function words(data: string, n: number): string[] {
   const raw = strip(data);

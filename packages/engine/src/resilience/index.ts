@@ -55,10 +55,24 @@ export {
   encodeGetLatestCall,
   encodeGetScoreCall,
   encodeRecordCall,
+  encodeRecordedCall,
   recordInputFromCertificate,
   validatorKey,
 } from './registry-abi';
 export type { OnChainCertificate, RecordCallInput } from './registry-abi';
 export { KAIZEN_RESILIENCE_REGISTRY_ARTIFACT } from './registry-artifact';
+export {
+  RESILIENCE_REGISTRY_ENV_KEY,
+  ResilienceRegistryService,
+  certificateSignatureHolds,
+} from './onchain';
+export type {
+  ResilienceAnchorReceipt,
+  ResilienceChainJournalEntry,
+  ResilienceChainReceipt,
+  ResilienceOnChainRead,
+  ResilienceRegistryDeployment,
+  ResilienceRegistryServiceOptions,
+} from './onchain';
 export { RESILIENCE_CAPTURE_ENV_KEY, ResilienceService } from './service';
 export type { ResilienceServiceOptions } from './service';
