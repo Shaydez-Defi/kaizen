@@ -27,10 +27,9 @@ import { Incidents } from './pages/Incidents';
 import { Deployments } from './pages/Deployments';
 import { V3 } from './pages/V3';
 import { Settings } from './pages/Settings';
-import { Live } from './pages/Live';
 
 /** Hosted deployment (Vercel): no engine behind it; drills run on GitHub Actions. */
-export const HOSTED = import.meta.env?.['VITE_KAIZEN_HOSTED'] === '1';
+export const HOSTED = import.meta.env?.['VITE_KAIZEN_PUBLIC'] === '1';
 
 interface NavItem {
   path: string;
