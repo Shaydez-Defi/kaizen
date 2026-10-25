@@ -1,0 +1,27 @@
+name: ink-registry
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['contracts/ink-registry/**', '.github/workflows/ink-registry.yml']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/ink-registry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - run: cargo install --locked cargo-contract --version 5.0.3
+      - run: cargo test
+      - run: cargo contract build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kaizen-ink-registry
+          path: |
+            contracts/ink-registry/target/ink/*.contract
+            contracts/ink-registry/target/ink/*.wasm
+            contracts/ink-registry/target/ink/*.json
