@@ -1461,3 +1461,9 @@ K8s/Helm — untouched.
 
 ## 2026-10-25 04:00 WAT
 - ink! registry twin (contracts/ink-registry, CI ink-registry.yml, PR #6). CI result and V3 instantiate pending.
+
+## 2026-10-25 10:50 WAT: ink! twin built, V3 deploy blocked on deposit (plan item 2)
+
+- CI run 40180350016 green (cargo test, clippy, `cargo contract build --release` on Rust 1.85.0, cached cargo-contract); artifact: 6,848-byte Wasm (7,708 before trimming).
+- V3 `contractsApi.uploadCode` dry run: `Contracts.StorageDepositNotEnoughFunds`. `depositPerByte` is 0.06 tPOT, so the upload needs about 411 tPOT held; the signer has 254.9. Logged as RSK-32. Needs about 180 more tPOT; nothing spent.
+- Deploy/anchor/read-back script is ready: `contracts/ink-registry/deploy.mjs` (dry-run with KAIZEN_DRY_RUN=1).
