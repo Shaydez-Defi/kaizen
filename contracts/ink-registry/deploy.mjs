@@ -81,6 +81,11 @@ if (!address) {
   );
   console.error('dry-run instantiate:', dry.result.isOk ? 'ok' : dry.result.toString(), 'gas', dry.gasRequired.toString(), 'deposit', dry.storageDeposit.toString());
   if (dry.result.isErr) throw new Error(`dry run failed: ${dry.result.toString()}`);
+  if (process.env.KAIZEN_DRY_RUN) {
+    console.log(JSON.stringify({ dryRun: true, gasRequired: dry.gasRequired.toHuman(), storageDeposit: dry.storageDeposit.toHuman(), balance: fmt(before) }, null, 2));
+    await api.disconnect();
+    process.exit(0);
+  }
   const tx = api.tx.contracts.instantiateWithCode(
     0,
     dry.gasRequired,

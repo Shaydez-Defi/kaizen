@@ -5,7 +5,6 @@
 /// latest (score, block, count). Everything else lives in the event.
 #[ink::contract]
 mod kaizen_ink_registry {
-    use ink::prelude::vec::Vec;
     use ink::storage::Mapping;
 
     #[ink(event)]
@@ -23,7 +22,7 @@ mod kaizen_ink_registry {
         finality_gap_blocks: u16,
         blocks_missed: u16,
         certified_at: u64,
-        signature: Vec<u8>,
+        signature: [u8; 64],
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -33,7 +32,6 @@ mod kaizen_ink_registry {
         ZeroFingerprint,
         ZeroSigner,
         ScoreOver100,
-        BadSignatureLength,
         AlreadyRecorded,
     }
 
@@ -64,7 +62,7 @@ mod kaizen_ink_registry {
             blocks_missed: u16,
             score: u8,
             evidence_flags: u8,
-            signature: Vec<u8>,
+            signature: [u8; 64],
         ) -> Result<(), Error> {
             if validator == [0u8; 32] {
                 return Err(Error::ZeroValidator);
@@ -77,9 +75,6 @@ mod kaizen_ink_registry {
             }
             if score > 100 {
                 return Err(Error::ScoreOver100);
-            }
-            if signature.len() != 64 {
-                return Err(Error::BadSignatureLength);
             }
             if self.cert.contains(fingerprint) {
                 return Err(Error::AlreadyRecorded);
@@ -122,7 +117,7 @@ mod kaizen_ink_registry {
         use super::*;
 
         fn rec(r: &mut KaizenRegistry, v: u8, f: u8, score: u8) -> Result<(), Error> {
-            r.record([v; 32], [f; 32], [9; 32], [7; 32], 100, 2, 0, score, 1, vec![1u8; 64])
+            r.record([v; 32], [f; 32], [9; 32], [7; 32], 100, 2, 0, score, 1, [1u8; 64])
         }
 
         #[ink::test]
@@ -143,10 +138,6 @@ mod kaizen_ink_registry {
             assert_eq!(rec(&mut r, 5, 1, 35), Err(Error::AlreadyRecorded));
             assert_eq!(rec(&mut r, 5, 3, 101), Err(Error::ScoreOver100));
             assert_eq!(rec(&mut r, 0, 4, 10), Err(Error::ZeroValidator));
-            assert_eq!(
-                r.record([5; 32], [6; 32], [9; 32], [7; 32], 0, 0, 0, 10, 0, vec![1u8; 10]),
-                Err(Error::BadSignatureLength)
-            );
         }
     }
 }
