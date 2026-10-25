@@ -76,3 +76,33 @@ export type {
 } from './onchain';
 export { RESILIENCE_CAPTURE_ENV_KEY, ResilienceService } from './service';
 export type { ResilienceServiceOptions } from './service';
+export {
+  DEFAULT_DRILL_CATALOGUE,
+  DEFAULT_DRILL_SEED_BOUNDS,
+  DRILL_SEED_DOMAIN,
+  deriveDrill,
+} from './drill-seed';
+export type { DeriveDrillInput, DerivedDrill, DrillSeedBounds } from './drill-seed';
+export { createDrillCommitment, verifyDrillReveal } from './drill-commit';
+export type { DrillCommitment, DrillReveal, DrillRevealResult } from './drill-commit';
+export {
+  DRILL_COMMIT_REMARK_PREFIX,
+  drillCommitPayload,
+  verifyDrillEvidence,
+} from "./drill-chain";
+export type {
+  DrillChainReader,
+  DrillCheck,
+  DrillCheckStatus,
+  DrillCommitProof,
+  DrillEvidence,
+} from "./drill-chain";
+export {
+  DEFAULT_DRILL_LEAD_BLOCKS,
+  commitDrill,
+  createV3DrillPort,
+  revealDrill,
+  v3DrillChainReader,
+} from "./drill-live";
+export type { DrillLivePort, PendingDrill, RevealOptions } from "./drill-live";
+export { commitDrillOnV3, revealDrillOnV3, withV3DrillReader } from "./drill-v3";

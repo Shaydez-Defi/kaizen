@@ -1435,3 +1435,24 @@ K8s/Helm — untouched.
 **Limits (claimed exactly)**: the anchored certificate comes from a CI drill on a local two-node `portaldot_dev` network, not a drill on V3; it is DEV-key signed (integrity, not identity); the score is operator-computed v1 and only stored on chain; test network, not mainnet. Seeded drills (T-9.6) and BABE authorship + score v2 (T-9.7) remain roadmap. Real costs are far above the run-registry estimates (≈261.7 vs ≈85 to deploy, ≈30.8 vs ≈4 per record, RSK-30): ~2 more records fit in the remaining balance.
 
 **Next step**: review/merge this PR after 2026-10-27; T-9.6 commit-reveal drills; consider a cheaper certificate layout (event-only storage) before recording many certificates.
+
+## 2026-10-24 03:00 WAT — T-9.6 step 1: seeded drill derivation (short session, daily usage cap)
+
+- Added `deriveDrill` (packages/engine/src/resilience/drill-seed.ts): blake2_256 over a
+  domain tag, length-prefixed validator id and a future block hash picks the fault
+  (default catalogue: real-node-verified `pause`, `terminate`), start offset and duration.
+- Tests: `resilience-drill-seed.test.ts` (4 pass); engine typecheck and lint clean.
+- Branch `feat/commit-reveal-drills` (off PR #4); main untouched (freeze until 2026-10-27).
+- Next: on-chain commit of target block N, reveal once N is finalized, certificate
+  `drill` field + verifier mismatch check, then T-9.7 BABE authorship.
+
+## 2026-10-25 evening: T-9.6 step 2
+Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at reveal, recomputed seeded drill. 4 unit tests pass. Not yet wired to chain commit or certificate `drill` field.
+
+## 2026-10-25 22:00 WAT: T-9.6 steps 3-4 (commit-reveal on a public beacon chain)
+- `chain.drill` (optional, part of the certificate fingerprint): commitment, seed block hash, seeded drill, commit proof (block hash + extrinsic index) and the beacon chain's genesis hash. `verifyDrillEvidence` re-checks from the chain: reveal arithmetic, hash(N) equals the revealed seed, the commit remark text in block C equals `kaizen:drill-commit:v1:<validator>:<N>`, the beacon genesis, and that the run executed the seeded fault type. Any difference is `mismatch`; an unreachable beacon is `unverifiable`, never `verified`.
+- Live: `kaizen v3 drill-commit <validator>` submits the commit remark on V3 (fee only), `kaizen v3 drill-reveal` waits for the target block to be finalized and derives the drill. Run for real: commit in V3 block 194104, seed block 194117, drill = terminate after 4 blocks for 39172 ms; independent re-verification against V3 returned `verified`. Evidence: `docs/evidence/v3-drill-reveal.json`.
+- `kaizen certify <runId> --drill-file <file>` attaches the revealed drill; `engine.resilience.verify` checks it against V3.
+- Design note: the beacon is the public V3 chain; the faulted network can be a local CI network. This stops an operator choosing the fault/timing after seeing the result; it does not prove who ran the fault (that is the signature).
+- Tests: `resilience-drill-chain.test.ts` (7), `resilience-drill-live.test.ts` (3); tsc engine and CLI clean, eslint clean.
+- Next: T-9.7 BABE/GRANDPA recovery evidence; then CI drill that consumes a seeded drill.

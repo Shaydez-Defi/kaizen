@@ -22,6 +22,8 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { formatUpSummary, kaizenUp, UP_DEFAULT_NAME, UP_DEFAULT_PRESET } from './up';
 import {
+  commitDrillOnV3,
+  revealDrillOnV3,
   createEngine,
   isKaizenError,
   KaizenError,
@@ -31,6 +33,8 @@ import {
   SCENARIO_RUN_STATES,
   toErrorJson,
   type CustomTopologyInput,
+  type DrillEvidence,
+  type PendingDrill,
   type KaizenEngine,
   type NetworkPreset,
   type NodeRole,
@@ -1077,6 +1081,44 @@ export function buildProgram(deps: CliDependencies = {}): Command {
   }
 
   v3Cmd
+    .command('drill-commit <validator>')
+    .description('Commit (on V3) to a future block whose hash will seed a drill for <validator>; costs a remark fee')
+    .option('--lead <blocks>', 'blocks ahead of the current best block to target', '12')
+    .option('--out <file>', 'write the pending commitment here (needed for drill-reveal)', 'drill-commit.json')
+    .action(async (validator: string, cmdOpts: { lead: string; out: string }) => {
+      await runChain(async (opts) => {
+        const pending = await commitDrillOnV3(validator, Number(cmdOpts.lead));
+        fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify(pending, null, 2)}\n`);
+        if (opts.json) printJson({ ok: true, pending });
+        else {
+          console.log(`committed drill for ${validator} in V3 block #${pending.commitment.committedAtBlock}`);
+          console.log(`  seed block : #${pending.commitment.targetBlock} (reveal once it is finalized)`);
+          console.log(`  saved to   : ${cmdOpts.out}`);
+        }
+      });
+    });
+
+  v3Cmd
+    .command('drill-reveal <commitFile>')
+    .description('Wait for the committed block to finalize on V3, then derive the seeded drill')
+    .option('--out <file>', 'write the revealed drill evidence here', 'drill-reveal.json')
+    .option('--timeout <seconds>', 'give up waiting for finality after this long', '300')
+    .action(async (commitFile: string, cmdOpts: { out: string; timeout: string }) => {
+      await runChain(async (opts) => {
+        const pending = JSON.parse(fs.readFileSync(path.resolve(commitFile), 'utf8')) as PendingDrill;
+        const ev = await revealDrillOnV3(pending, Number(cmdOpts.timeout) * 1000);
+        fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify(ev, null, 2)}\n`);
+        if (opts.json) printJson({ ok: true, drill: ev });
+        else {
+          const c = ev.claimed;
+          console.log(`seed block #${ev.commitment.targetBlock} ${ev.seedBlockHash}`);
+          console.log(`  drill : ${c.faultType} after ${c.startAfterBlocks} blocks for ${c.durationMs} ms`);
+          console.log(`  saved : ${cmdOpts.out}  (attach with: kaizen certify <runId> --drill-file ${cmdOpts.out})`);
+        }
+      });
+    });
+
+  v3Cmd
     .command('deploy-resilience-registry')
     .description('Deploy KaizenResilienceRegistry to the V3 TEST network (spends tPOT from KAIZEN_V3_SIGNER_SURI)')
     .option('--journal <file>', 'append persist-first JSON lines (before signing, then the result)')
@@ -1247,9 +1289,13 @@ export function buildProgram(deps: CliDependencies = {}): Command {
       'Sign a chain-bound resilience certificate for a finished run (KAIZEN_RESILIENCE_SIGNER_SURI / _FILE; --dev-key = public //Alice, local test networks only)',
     )
     .option('--dev-key', 'allow the public //Alice DEV key (labelled; integrity only, not identity)')
-    .action(async (runId: string, cmdOpts: { devKey?: boolean }) => {
+    .option('--drill-file <file>', 'attach a revealed commit-reveal drill (from `kaizen v3 drill-reveal`)')
+    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string }) => {
       await run(async (engine, opts) => {
-        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true });
+        const drill = cmdOpts.drillFile
+          ? (JSON.parse(fs.readFileSync(path.resolve(cmdOpts.drillFile), 'utf8')) as DrillEvidence)
+          : undefined;
+        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill });
         if (opts.json) {
           printJson({ ok: true, certificate: cert });
           return;

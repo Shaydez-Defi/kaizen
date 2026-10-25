@@ -18,6 +18,7 @@
  */
 
 import { KaizenError } from '../errors';
+import type { DrillEvidence } from './drill-chain';
 
 export const CHAIN_EVIDENCE_VERSION = 1 as const;
 
@@ -74,6 +75,8 @@ export interface ChainEvidence {
   observations: ChainObservation[];
   gaps: ChainEvidenceGap[];
   metrics: RecoveryMetrics;
+  /** Commit-reveal drill proof (T-9.6); absent for operator-chosen faults. */
+  drill?: DrillEvidence;
 }
 
 const HASH_RE = /^0x[0-9a-f]{64}$/;

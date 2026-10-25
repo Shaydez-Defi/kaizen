@@ -15,6 +15,7 @@
  */
 
 import type { EventBus, KaizenEventMap } from '../events/bus';
+import type { DrillEvidence } from './drill-chain';
 import { KaizenError } from '../errors';
 import { httpUrlForPort } from '../process/args';
 import type { StateStore } from '../state/store';
@@ -24,6 +25,7 @@ import { ChainEvidenceRecorder, type ChainEvidence } from './evidence';
 import { createHttpChainReader, type ChainReader } from './rpc';
 import { computeResilienceScore, type ResilienceScore } from './score';
 import { loadResilienceSigner } from './signer';
+import { withV3DrillReader } from './drill-v3';
 import { verifyCertificate, type CertificateVerification } from './verify';
 
 export const RESILIENCE_CAPTURE_ENV_KEY = 'KAIZEN_RESILIENCE_EVIDENCE';
@@ -191,9 +193,13 @@ export class ResilienceService {
     return this.store.getResilienceEvidence(runId);
   }
 
-  async certifyRun(runId: string, options: { allowDevKey?: boolean } = {}): Promise<ResilienceCertificate> {
+  async certifyRun(
+    runId: string,
+    options: { allowDevKey?: boolean; drill?: DrillEvidence } = {},
+  ): Promise<ResilienceCertificate> {
     const run = this.store.getScenarioRun(runId);
-    const evidence = this.store.getResilienceEvidence(runId);
+    const stored = this.store.getResilienceEvidence(runId);
+    const evidence = stored && options.drill ? { ...stored, drill: options.drill } : stored;
     if (!evidence) {
       throw new KaizenError(
         'RESILIENCE_NOT_CERTIFIABLE',
@@ -284,6 +290,13 @@ export class ResilienceService {
   async verify(fingerprint: string): Promise<CertificateVerification> {
     const cert = this.getCertificate(fingerprint);
     const run = this.store.getScenarioRun(cert.runId);
-    return verifyCertificate(cert, run, this.readerForNetwork(cert.networkId));
+    const net = this.readerForNetwork(cert.networkId);
+    if (!cert.chain.drill) return verifyCertificate(cert, run, net);
+    // The drill's beacon is the public V3 chain, not the network under test.
+    try {
+      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader));
+    } catch {
+      return verifyCertificate(cert, run, net, null); // V3 unreachable → drill unverifiable
+    }
   }
 }
