@@ -1472,3 +1472,6 @@ K8s/Helm — untouched.
 - `explorer/` (plain HTML + ES module, no build): V3 head and genesis check, registry list (EVM lite live, ink! built/not deployed), leaderboard from live `getScore`, per-certificate "Verify" via live `certOf` eth_call compared with the committed index (`explorer/data/index.json`). Run against V3 from Node: certOf returns score 35 / block 181495, getScore count 1, unknown fingerprint returns not recorded.
 - `.github/workflows/pages.yml` publishes `explorer/` on push to main (not run yet; freeze until Oct 27).
 - Limits: browser check compares registry state, not the sr25519 signature or the source run (run record not committed). ink! rows appear once RSK-32 clears.
+
+## 2026-10-25 16:00 WAT: item 5
+- scripts/demo.mjs + `npm run demo` verifies indexed certificates against live V3 (no node, no deps); README 30-second verify; .github/workflows/demo.yml fresh-checkout job. Verified locally. Next: items 6-8.
