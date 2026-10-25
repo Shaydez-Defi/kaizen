@@ -1474,3 +1474,8 @@ Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at
 - `computeResilienceScoreV2`: per-run weight = 30-day recency decay times evidence class (chain-observed 1.0 = seeded drill and authorship both re-verified and GRANDPA prediction not contradicted; chain-bound 0.5; self-reported 0.1). Recovery time is slots between the last fault-window block and the target's first authored block after it, times slot duration, when authorship is present; otherwise the v1 wall-clock metric.
 - `ResilienceService.scoreV2` re-verifies only certificates that carry drill/authorship/GRANDPA records; unreachable chain keeps them chain-bound. CLI: `kaizen score [validator] --v2`. v1 is untouched and still the default.
 - Tests: `resilience-score-v2.test.ts` (8), service and CLI tests (+2). Not yet in the on-chain registry; signed attestations are the remaining T-9.7/9.8 piece.
+
+## 2026-10-25 22:00 WAT: signed attestations
+- `createAttestation` / `checkAttestation` (`attestation.ts`): an attester re-verifies a stored certificate against the chain (`engine.resilience.verify`) and signs `kaizen:attestation:v1:<fingerprint>:<verdict>:<drill>:<authorship>:<grandpa>` with sr25519. Refuses a certificate whose fingerprint does not match its run; offline re-verification yields the verdict `unverifiable`, never `verified`. `independent` is true only when the attester key differs from the certificate signer's.
+- CLI: `kaizen attest <fingerprint> [--out file]`, `kaizen verify-attestation <file>` (signature, key/address, and that it names a stored certificate). Tests: engine 2, CLI +1.
+- Not done: attestations do not yet change the score or go to the registry. Tier 1 item 8 is code-complete except that wiring.

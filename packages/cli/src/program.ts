@@ -41,6 +41,7 @@ import {
   toErrorJson,
   type CustomTopologyInput,
   type DrillEvidence,
+  type ResilienceAttestation,
   type PendingDrill,
   type KaizenEngine,
   type NetworkPreset,
@@ -1400,6 +1401,43 @@ export function buildProgram(deps: CliDependencies = {}): Command {
           for (const r of v.reasons) console.log(`  ${r}`);
         }
         if (v.status !== 'verified') process.exitCode = 1;
+      });
+    });
+
+  program
+    .command('attest <fingerprint>')
+    .description('Re-verify a certificate against the chain and sign the result as an attestation (KAIZEN_RESILIENCE_SIGNER_SURI / _FILE; use a different key than the issuer for it to count as independent)')
+    .option('--dev-key', 'allow the public //Alice DEV key (local test networks only)')
+    .option('--out <file>', 'write the attestation JSON here')
+    .action(async (fingerprint: string, cmdOpts: { devKey?: boolean; out?: string }) => {
+      await run(async (engine, opts) => {
+        const att = await engine.resilience.attest(fingerprint, { allowDevKey: cmdOpts.devKey === true });
+        const check = await engine.resilience.checkAttestation(att);
+        if (cmdOpts.out) fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify(att, null, 2)}\n`);
+        if (opts.json) {
+          printJson({ ok: true, attestation: att, check });
+          return;
+        }
+        console.log(`attestation of ${att.fingerprint}`);
+        console.log(`  verdict    : ${att.verdict}  (drill=${att.checks.drill} authorship=${att.checks.authorship} grandpa=${att.checks.grandpa})`);
+        console.log(`  attester   : ${att.attester.address}${att.attester.dev ? '  [DEV KEY]' : ''}  independent of issuer: ${check.independent ? 'yes' : 'NO (same key)'}`);
+        if (cmdOpts.out) console.log(`  saved to   : ${cmdOpts.out}`);
+      });
+    });
+
+  program
+    .command('verify-attestation <file>')
+    .description('Check an attestation file: signature, address/key, and that it names a stored certificate')
+    .action(async (file: string) => {
+      await run(async (engine, opts) => {
+        const att = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) as ResilienceAttestation;
+        const check = await engine.resilience.checkAttestation(att);
+        const ok = check.signatureValid && check.addressMatchesKey && check.matchesCertificate;
+        if (opts.json) printJson({ ok, check });
+        else {
+          console.log(`attestation ${ok ? 'VALID' : 'INVALID'}: signature=${check.signatureValid} key=${check.addressMatchesKey} certificate=${check.matchesCertificate} independent=${check.independent}`);
+        }
+        if (!ok) process.exitCode = 1;
       });
     });
 

@@ -170,4 +170,24 @@ describe('kaizen certify / score', () => {
     expect(r.stdout).toContain('UNVERIFIABLE');
     expect(r.stdout).toContain('network offline');
   });
+
+  it('attests with a different key (independent) and re-checks the file', async () => {
+    const saved = { ...process.env };
+    const file = path.join(dir, 'attestation.json');
+    process.env['KAIZEN_RESILIENCE_SIGNER_SURI'] = '//Charlie';
+    try {
+      const r = json<{ attestation: { verdict: string }; check: { independent: boolean; signatureValid: boolean } }>(
+        await runCli(['--json', 'attest', fingerprint, '--out', file]),
+      );
+      expect(r.attestation.verdict).toBe('unverifiable'); // no node running: offline is never "verified"
+      expect(r.check).toMatchObject({ independent: true, signatureValid: true });
+      const v = await runCli(['verify-attestation', file]);
+      expect(v.code).toBe(0);
+      expect(v.stdout).toContain('VALID');
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('"unverifiable"', '"verified"'));
+      expect((await runCli(['verify-attestation', file])).code).toBe(1);
+    } finally {
+      process.env = saved;
+    }
+  });
 });

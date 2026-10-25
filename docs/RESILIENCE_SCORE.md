@@ -119,7 +119,7 @@ Status (2026-10-25, branches `feat/commit-reveal-drills`, `feat/recovery-evidenc
 | 7.2 BABE authorship (`chain.authorship`) | implemented, verified against headers; the authority index is operator-supplied |
 | 7.2 GRANDPA finality (`chain.grandpa`) | implemented as quorum prediction vs observed finality, not as justification signature checking |
 | 7.3 score v2 (`kaizen score --v2`) | implemented, slot-derived recovery and evidence-class weights; not yet written to the registry |
-| 7.4 signed attestations | not built |
+| signed attestations (`kaizen attest`, `verify-attestation`) | implemented: an independent key re-verifies a certificate against the chain and signs the verdict and sub-checks; not yet counted in the score or written to the registry |
 
 The text below is the original design; where it differs from the table, the table is what exists.
 

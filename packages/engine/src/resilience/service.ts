@@ -15,6 +15,12 @@
  */
 
 import type { EventBus, KaizenEventMap } from '../events/bus';
+import {
+  checkAttestation,
+  createAttestation,
+  type AttestationCheck,
+  type ResilienceAttestation,
+} from './attestation';
 import { buildGrandpaQuorum, createHttpStateSource, type StateSource } from './grandpa';
 import { buildAuthorshipEvidence, createHttpHeaderSource, type HeaderSource } from './authorship';
 import type { DrillEvidence } from './drill-chain';
@@ -387,6 +393,27 @@ export class ResilienceService {
     } catch {
       return null;
     }
+  }
+
+  /** Re-verify a certificate against the chain and sign what was found (a different key than the issuer's is what makes it independent). */
+  async attest(fingerprint: string, options: { allowDevKey?: boolean } = {}): Promise<ResilienceAttestation> {
+    const certificate = this.getCertificate(fingerprint);
+    let localTestNetwork = false;
+    try {
+      localTestNetwork = this.store.getNetwork(certificate.networkId).designatedTest;
+    } catch {
+      localTestNetwork = false;
+    }
+    const signer = await loadResilienceSigner({
+      env: this.opts.env,
+      allowDevKey: options.allowDevKey,
+      localTestNetwork,
+    });
+    return createAttestation({ certificate, verification: await this.verify(fingerprint), signer });
+  }
+
+  async checkAttestation(attestation: ResilienceAttestation): Promise<AttestationCheck> {
+    return checkAttestation(attestation, this.getCertificate(attestation.fingerprint));
   }
 
   async verify(fingerprint: string): Promise<CertificateVerification> {

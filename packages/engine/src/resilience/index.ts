@@ -159,3 +159,10 @@ export type {
   ScoredRunInputV2,
   ScoredRunV2,
 } from "./score-v2";
+export {
+  KAIZEN_ATTESTATION_VERSION,
+  attestationMessage,
+  checkAttestation,
+  createAttestation,
+} from "./attestation";
+export type { AttestationCheck, ResilienceAttestation } from "./attestation";
