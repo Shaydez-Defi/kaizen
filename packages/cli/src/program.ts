@@ -1145,8 +1145,8 @@ export function buildProgram(deps: CliDependencies = {}): Command {
           return;
         }
         console.log(`${r.validatorId} on ${r.contract} (best block ${r.bestNumber})`);
-        console.log(`  score       : ${r.score.score}/100  certificates=${r.score.count}  certifiedAt=${r.score.certifiedAt}`);
-        if (r.latest) console.log(`  latest      : ${r.latest.fingerprint}  flags=${r.latest.evidenceFlags}`);
+        console.log(`  score       : ${r.score.score}/100  certificates=${r.score.count}  block=${r.score.block}`);
+        if (r.cert) console.log(`  certOf      : score=${r.cert.score} block=${r.cert.block}`);
         if (r.recorded !== null) console.log(`  recorded    : ${r.recorded}`);
       });
     });

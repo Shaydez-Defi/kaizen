@@ -60,11 +60,11 @@ const revertReason = (res) => {
 const hex = (res) => bytesToHex(res.returnValue).slice(2);
 
 console.log('KaizenResilienceRegistry (in-memory EVM)');
-await it('getScore is (0,0,0) and getLatest reverts before any certificate', async () => {
+await it('getScore is (0,0,0) and recorded is false before any certificate', async () => {
   assert.equal(hex(await call(sel('getScore(bytes32)') + b32('01'))), word(0) + word(0) + word(0));
-  assert.equal(revertReason(await call(sel('getLatest(bytes32)') + b32('01'))), 'no certificates');
+  assert.equal(hex(await call(sel('recorded(bytes32)') + b32('02'))), word(0));
 });
-await it('record stores the certificate and emits CertificateRecorded', async () => {
+await it('record emits CertificateRecorded with the full detail', async () => {
   const res = await call(recordData(), 1_700_000_123n);
   assert.equal(res.exceptionError, undefined, revertReason(res) ?? 'reverted');
   assert.equal(res.logs.length, 1);
@@ -75,15 +75,9 @@ await it('record stores the certificate and emits CertificateRecorded', async ()
   assert.equal(bytesToHex(topics[2]).slice(2), b32('02'));
   assert.equal(bytesToHex(topics[3]).slice(2), b32('04'));
 });
-await it('getScore / getLatest / certificateCount / recorded reflect it', async () => {
-  assert.equal(hex(await call(sel('getScore(bytes32)') + b32('01'))), word(67) + word(1_700_000_123) + word(1));
-  const latest = hex(await call(sel('getLatest(bytes32)') + b32('01')));
-  assert.equal(latest.slice(0, 64), b32('02'));
-  assert.equal(latest.slice(64 * 3, 64 * 4), word(12000));
-  assert.equal(latest.slice(64 * 6, 64 * 7), word(67));
-  assert.equal(latest.slice(64 * 8, 64 * 9), word(1_700_000_123));
-  assert.equal(latest.slice(64 * 9 + 24), '11'.repeat(20));
-  assert.equal(hex(await call(sel('certificateCount(bytes32)') + b32('01'))), word(1));
+await it('getScore / certOf / recorded reflect it (score, block, count)', async () => {
+  assert.equal(hex(await call(sel('getScore(bytes32)') + b32('01'))), word(67) + word(1) + word(1));
+  assert.equal(hex(await call(sel('certOf(bytes32)') + b32('02'))), word(67) + word(1));
   assert.equal(hex(await call(sel('recorded(bytes32)') + b32('02'))), word(1));
 });
 await it('a fingerprint is recorded only once (idempotent anchoring)', async () => {
@@ -91,8 +85,7 @@ await it('a fingerprint is recorded only once (idempotent anchoring)', async () 
 });
 await it('latest wins: a second certificate updates getScore', async () => {
   assert.equal((await call(recordData({ fp: b32('05'), score: 80 }), 1_700_000_200n)).exceptionError, undefined);
-  assert.equal(hex(await call(sel('getScore(bytes32)') + b32('01'))), word(80) + word(1_700_000_200) + word(2));
-  assert.equal(hex(await call(sel('totalCertificates()'))), word(2));
+  assert.equal(hex(await call(sel('getScore(bytes32)') + b32('01'))), word(80) + word(1) + word(2));
 });
 await it('rejects invalid input', async () => {
   assert.equal(revertReason(await call(recordData({ fp: b32('06'), score: 101 }))), 'score > 100');

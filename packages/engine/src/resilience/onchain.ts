@@ -16,7 +16,7 @@
  *    fingerprint is already recorded, so nothing is paid for a write the
  *    contract would refuse; an inclusion without the expected
  *    CertificateRecorded log is reported as a failure, never as anchored
- *  - `read` is a free runtime-API dry run (getScore / getLatest / recorded)
+ *  - `read` is a free runtime-API dry run (getScore / certOf / recorded)
  *
  * The EVM cannot verify sr25519, so the registry stores the signer key and
  * emits the signature; anyone re-verifies off chain (`verify-certificate`).
@@ -31,9 +31,9 @@ import { loadV3Signer, type V3Signer } from '../v3/anchor/signer';
 import { certificateMessage, type ResilienceCertificate } from './certificate';
 import {
   CERTIFICATE_RECORDED_TOPIC,
-  decodeLatest,
+  decodeCertOf,
   decodeScore,
-  encodeGetLatestCall,
+  encodeCertOfCall,
   encodeGetScoreCall,
   encodeRecordCall,
   encodeRecordedCall,
@@ -105,8 +105,9 @@ export interface ResilienceOnChainRead {
   contract: string;
   validatorId: string;
   validatorKey: string;
-  score: { score: number; certifiedAt: number; count: number };
-  latest: OnChainCertificate | null;
+  score: { score: number; block: number; count: number };
+  /** certOf(fingerprint) (score, block), when a recorded fingerprint was asked about. */
+  cert: OnChainCertificate | null;
   /** recorded(fingerprint), when a fingerprint was asked about. */
   recorded: boolean | null;
   bestNumber: number;
@@ -373,7 +374,7 @@ export class ResilienceRegistryService {
     );
   }
 
-  /** Free read: getScore + getLatest (+ recorded(fingerprint)). */
+  /** Free read: getScore (+ recorded and certOf for a fingerprint). */
   async read(validatorId: string, options: { registry?: string; fingerprint?: string; origin?: string } = {}): Promise<ResilienceOnChainRead> {
     const contract = this.resolveRegistry(options.registry);
     const key = validatorKey(validatorId);
@@ -384,12 +385,15 @@ export class ResilienceRegistryService {
       const origin = options.origin ?? (await loadV3Signer(this.env).then((s) => s.address).catch(() => null));
       if (!origin) throw new KaizenError('INVALID_INPUT', 'read needs an origin address (configure the V3 signer or pass one)');
       const score = decodeScore(await session.readContract(origin, contract, encodeGetScoreCall(key)));
-      const latest = score.count > 0 ? decodeLatest(await session.readContract(origin, contract, encodeGetLatestCall(key))) : null;
       const recorded =
         options.fingerprint !== undefined
           ? isTrueWord(await session.readContract(origin, contract, encodeRecordedCall(options.fingerprint)))
           : null;
-      return { contract, validatorId, validatorKey: key, score, latest, recorded, bestNumber: info.bestNumber };
+      const cert =
+        recorded === true && options.fingerprint !== undefined
+          ? decodeCertOf(await session.readContract(origin, contract, encodeCertOfCall(options.fingerprint)))
+          : null;
+      return { contract, validatorId, validatorKey: key, score, cert, recorded, bestNumber: info.bestNumber };
     } catch (e) {
       throw this.safeError(e);
     } finally {
