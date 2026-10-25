@@ -1405,20 +1405,25 @@ export function buildProgram(deps: CliDependencies = {}): Command {
 
   program
     .command('score [validator]')
-    .description('Resilience score v1 (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted')
-    .action(async (validator: string | undefined) => {
+    .description('Resilience score (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted')
+    .option('--v2', 'resilience-under-failure score v2: runs weighted by evidence class (drill + authorship re-verified against the chain)')
+    .action(async (validator: string | undefined, cmdOpts: { v2?: boolean }) => {
       await run(async (engine, opts) => {
         const ids = validator !== undefined ? [validator] : engine.resilience.listValidators();
         const scores = [];
-        for (const id of ids) scores.push(await engine.resilience.score(id));
+        for (const id of ids) scores.push(cmdOpts.v2 ? await engine.resilience.scoreV2(id) : await engine.resilience.score(id));
         if (opts.json) {
           printJson({ ok: true, scores });
           return;
         }
         if (scores.length === 0) console.log('No certified validators.');
         for (const s of scores) {
+          const classes =
+            'byClass' in s
+              ? `  observed=${s.byClass['chain-observed']} bound=${s.byClass['chain-bound']} self=${s.byClass['self-reported']}`
+              : '';
           console.log(
-            `${s.validatorId.padEnd(14)} ${String(s.score).padStart(3)}/100  runs=${s.runs} survived=${s.faultsSurvived} quality=${s.quality.toFixed(3)} confidence=${s.confidence.toFixed(3)}${s.excluded.length ? `  excluded=${s.excluded.length} (integrity failed)` : ''}`,
+            `${s.validatorId.padEnd(14)} ${String(s.score).padStart(3)}/100  v${s.version} runs=${s.runs} survived=${s.faultsSurvived} quality=${s.quality.toFixed(3)} confidence=${s.confidence.toFixed(3)}${classes}${s.excluded.length ? `  excluded=${s.excluded.length} (integrity failed)` : ''}`,
           );
         }
       });

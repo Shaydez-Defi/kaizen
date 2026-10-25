@@ -158,6 +158,10 @@ describe('kaizen certify / score', () => {
     expect(s.scores[0]!.score).toBeGreaterThan(0);
     const all = await runCli(['score']);
     expect(all.stdout).toMatch(/bob\s+\d+\/100/);
+    const v2 = json<{ scores: { version: number; byClass: Record<string, number> }[] }>(
+      await runCli(['--json', 'score', 'bob', '--v2']),
+    );
+    expect(v2.scores[0]).toMatchObject({ version: 2, byClass: { 'chain-bound': 1 } });
   });
 
   it('verify-certificate reports unverifiable (network offline) and exits 1', async () => {

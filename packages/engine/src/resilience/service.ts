@@ -26,6 +26,13 @@ import { issueCertificate, checkCertificateSignature, type ResilienceCertificate
 import { ChainEvidenceRecorder, type ChainEvidence } from './evidence';
 import { createHttpChainReader, type ChainReader } from './rpc';
 import { computeResilienceScore, type ResilienceScore } from './score';
+import {
+  computeResilienceScoreV2,
+  toScoredRunInputV2,
+  type EvidenceChecks,
+  type ResilienceScoreV2,
+  type ScoredRunInputV2,
+} from './score-v2';
 import { loadResilienceSigner } from './signer';
 import { withV3DrillReader } from './drill-v3';
 import { verifyCertificate, type CertificateVerification } from './verify';
@@ -297,6 +304,61 @@ export class ResilienceService {
       });
     }
     return { ...computeResilienceScore(validatorId, inputs, asOf), excluded };
+  }
+
+  /**
+   * Score v2 (resilience-under-failure): certificates whose integrity check
+   * passes, weighted by evidence class. A certificate with a seeded drill or
+   * authorship is re-verified against the chain; only a `verified` result
+   * lifts it to chain-observed. Offline or unverifiable evidence stays
+   * chain-bound; a certificate with no chain observations is self-reported.
+   */
+  async scoreV2(validatorId: string, asOf: Date = new Date()): Promise<ResilienceScoreV2 & { excluded: string[] }> {
+    const inputs: ScoredRunInputV2[] = [];
+    const excluded: string[] = [];
+    for (const cert of this.store.listResilienceCertificates({ validatorId })) {
+      let run;
+      try {
+        run = this.store.getScenarioRun(cert.runId);
+      } catch {
+        excluded.push(cert.fingerprint);
+        continue;
+      }
+      const check = await checkCertificateSignature(cert, run);
+      if (!check.fingerprintMatches || !check.signatureValid || !check.addressMatchesKey) {
+        excluded.push(cert.fingerprint);
+        continue;
+      }
+      let drill: EvidenceChecks['drill'] = null;
+      let authorship: EvidenceChecks['authorship'] = null;
+      let grandpaConsistent: boolean | null = null;
+      if (cert.chain.drill || cert.chain.authorship || cert.chain.grandpa) {
+        try {
+          const v = await this.verify(cert.fingerprint);
+          drill = v.drill?.status ?? null;
+          authorship = v.authorship?.status ?? null;
+          grandpaConsistent = v.grandpa?.consistent ?? null;
+        } catch {
+          // unreachable chain: stays chain-bound
+        }
+      }
+      inputs.push(
+        toScoredRunInputV2(
+          {
+            runId: cert.runId,
+            runState: run.state,
+            recovered: cert.chain.metrics.recovered,
+            timeToRecoverMs: cert.chain.metrics.timeToRecoverMs,
+            finalityGapBlocks: cert.chain.metrics.finalityGapBlocks,
+            blocksMissed: cert.chain.metrics.blocksMissed,
+            certifiedAt: cert.signedAt,
+          },
+          cert.chain,
+          { drill, authorship, grandpaConsistent, chainBound: cert.chain.observations.length > 0 },
+        ),
+      );
+    }
+    return { ...computeResilienceScoreV2(validatorId, inputs, asOf), excluded };
   }
 
   /** Reader for a network's chain, or null when no node is running (offline). */

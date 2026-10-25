@@ -1469,3 +1469,8 @@ Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at
 - Live V3: `kaizen v3 finality` reads set 54, 2 authorities, total weight 2, threshold 2, so pausing either validator is predicted to stall finality (V3 keeps old state: reads at blocks 100000, 150000, 194000 succeeded). Evidence: `docs/evidence/v3-grandpa-quorum.json`.
 - `kaizen certify <runId> --grandpa-index N` attaches it. Local `portaldot_dev` nodes prune state after about 256 blocks, so older local certificates verify as `unverifiable` on this check.
 - Tests: `resilience-grandpa.test.ts` (6, uses the real V3 authority bytes).
+
+## 2026-10-25 22:00 WAT: score v2 (resilience-under-failure)
+- `computeResilienceScoreV2`: per-run weight = 30-day recency decay times evidence class (chain-observed 1.0 = seeded drill and authorship both re-verified and GRANDPA prediction not contradicted; chain-bound 0.5; self-reported 0.1). Recovery time is slots between the last fault-window block and the target's first authored block after it, times slot duration, when authorship is present; otherwise the v1 wall-clock metric.
+- `ResilienceService.scoreV2` re-verifies only certificates that carry drill/authorship/GRANDPA records; unreachable chain keeps them chain-bound. CLI: `kaizen score [validator] --v2`. v1 is untouched and still the default.
+- Tests: `resilience-score-v2.test.ts` (8), service and CLI tests (+2). Not yet in the on-chain registry; signed attestations are the remaining T-9.7/9.8 piece.

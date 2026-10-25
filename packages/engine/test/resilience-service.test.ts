@@ -233,4 +233,17 @@ describe('ResilienceService certify / score / verify', () => {
     expect(off.chain.reason).toMatch(/network offline/);
     expect(() => svc.getCertificate('0xnope')).toThrow();
   });
+
+  it('scoreV2 classes a plain certificate chain-bound and weighs it below v1', async () => {
+    const { svc } = await captured();
+    const cert = await svc.certifyRun('run-1', { allowDevKey: true });
+    const asOf = new Date(cert.signedAt);
+    const v1 = await svc.score('bob', asOf);
+    const v2 = await svc.scoreV2('bob', asOf);
+    expect(v2.version).toBe(2);
+    expect(v2.byClass).toEqual({ 'chain-observed': 0, 'chain-bound': 1, 'self-reported': 0 });
+    expect(v2.excluded).toEqual([]);
+    expect(v2.score).toBeLessThan(v1.score);
+    expect(v2.score).toBeGreaterThan(0);
+  });
 });
