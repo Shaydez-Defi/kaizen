@@ -1458,3 +1458,6 @@ K8s/Helm — untouched.
 - Anchored the CI-drill certificate `0x517b2ffb81ec...2e33` (block 181495, tx 0x7f49e28c...6117), 7.74 tPOT per anchor (v1: ~30.8). Read back via `kaizen v3 resilience-score`: score 35, block 181495, count 1, cert recorded.
 - Evidence: `docs/evidence/v3-resilience-registry-lite.json`. Signer balance after anchor about 262 tPOT minus 7.7.
 - Next: ink! twin (item 2), then monitoring (item 3).
+
+## 2026-10-25 04:00 WAT
+- ink! registry twin (contracts/ink-registry, CI ink-registry.yml, PR #6). CI result and V3 instantiate pending.
