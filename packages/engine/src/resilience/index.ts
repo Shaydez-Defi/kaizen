@@ -83,3 +83,22 @@ export {
   deriveDrill,
 } from './drill-seed';
 export type { DeriveDrillInput, DerivedDrill, DrillSeedBounds } from './drill-seed';
+export {
+  MONITOR_FINALITY_LAG_DEGRADED_BLOCKS,
+  NETWORK_MONITOR_VERSION,
+  createHttpMonitorRpc,
+  runNetworkMonitor,
+  sampleNetwork,
+  samplesToObservations,
+  summarizeSamples,
+  verifyMonitorReport,
+} from './network-monitor';
+export type {
+  HttpMonitorRpcOptions,
+  MonitorReport,
+  MonitorRpc,
+  MonitorSummary,
+  MonitorVerification,
+  NetworkSample,
+  RunMonitorOptions,
+} from './network-monitor';

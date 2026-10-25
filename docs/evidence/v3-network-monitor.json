@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "network": "PortaldotV3 Test",
+  "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+  "endpoint": "https://test-node-v3.portaldot.dev",
+  "samples": [
+    {
+      "at": "2026-10-25T09:05:56.742Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 854,
+      "best": {
+        "number": 186905,
+        "hash": "0x30a8489b0b880858e85acef216381ef32811948baba065f9be0236f2b90f03d1"
+      },
+      "finalized": {
+        "number": 186903,
+        "hash": "0x90f0cc6ac0c20b37b376ab4274bf793cb892f666673dbc793793ec1de80c3899"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:03.598Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 497,
+      "best": {
+        "number": 186906,
+        "hash": "0x1da4a7a007032f4a266c6f9d989a833efc570474c9d362cb5b417e371c2c5a54"
+      },
+      "finalized": {
+        "number": 186904,
+        "hash": "0x392ccf5c9159d8b36ecbe6aec7c184b1be297e2eebc6d644f1eedf8df8174385"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:10.097Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 559,
+      "best": {
+        "number": 186907,
+        "hash": "0x837b2253f64a499b451d38e5b7876cf48134f828129e4d62d0f7d8558c599bde"
+      },
+      "finalized": {
+        "number": 186905,
+        "hash": "0x30a8489b0b880858e85acef216381ef32811948baba065f9be0236f2b90f03d1"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:16.657Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 402,
+      "best": {
+        "number": 186908,
+        "hash": "0x6c584eac6b4fd66efa3249aac5c4a247086aff7650eac827c6d025182d7f331f"
+      },
+      "finalized": {
+        "number": 186906,
+        "hash": "0x1da4a7a007032f4a266c6f9d989a833efc570474c9d362cb5b417e371c2c5a54"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:23.060Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 402,
+      "best": {
+        "number": 186909,
+        "hash": "0x282b82504f8e327384c6d20e600d86f7dbf78a4136c96debe031473dec004ba5"
+      },
+      "finalized": {
+        "number": 186907,
+        "hash": "0x837b2253f64a499b451d38e5b7876cf48134f828129e4d62d0f7d8558c599bde"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:29.464Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 555,
+      "best": {
+        "number": 186910,
+        "hash": "0x5fd01b52303e907719e2641671b1bf8f9690f91cfc8b40d4697558b06eabf3ad"
+      },
+      "finalized": {
+        "number": 186908,
+        "hash": "0x6c584eac6b4fd66efa3249aac5c4a247086aff7650eac827c6d025182d7f331f"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:36.021Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 394,
+      "best": {
+        "number": 186911,
+        "hash": "0x112c9592a7b8d4d272c483e9a4f6c302bdbb4edf6a8d5ffce1563088b32faeff"
+      },
+      "finalized": {
+        "number": 186909,
+        "hash": "0x282b82504f8e327384c6d20e600d86f7dbf78a4136c96debe031473dec004ba5"
+      },
+      "finalityLag": 2
+    },
+    {
+      "at": "2026-10-25T09:06:42.416Z",
+      "peers": 1,
+      "isSyncing": false,
+      "ok": true,
+      "latencyMs": 405,
+      "best": {
+        "number": 186913,
+        "hash": "0xac42dcf97458379b29a2920f07787a8e6fe50d76840107aa3b5478cb1262c358"
+      },
+      "finalized": {
+        "number": 186910,
+        "hash": "0x5fd01b52303e907719e2641671b1bf8f9690f91cfc8b40d4697558b06eabf3ad"
+      },
+      "finalityLag": 3
+    }
+  ],
+  "summary": {
+    "version": 1,
+    "samples": 8,
+    "okSamples": 8,
+    "availability": 1,
+    "windowStart": "2026-10-25T09:05:56.742Z",
+    "windowEnd": "2026-10-25T09:06:42.416Z",
+    "windowMs": 45674,
+    "blocksProduced": 8,
+    "observedBlockTimeMs": 5709.25,
+    "expectedBlockTimeMs": 6000,
+    "productionStalls": 0,
+    "longestProductionStallMs": 0,
+    "finalizedAdvance": 7,
+    "finalityLagMin": 2,
+    "finalityLagMean": 2.125,
+    "finalityLagMax": 3,
+    "peersMin": 1,
+    "peersMax": 1,
+    "syncing": false,
+    "verdict": "healthy",
+    "reasons": []
+  },
+  "verification": {
+    "checked": 8,
+    "matched": 8,
+    "mismatched": 0,
+    "unverifiable": 0,
+    "status": "verified"
+  }
+}
