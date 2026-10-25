@@ -1463,3 +1463,9 @@ Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at
 - `summarizeAuthorship` answers the recovery question: did the target authority author during the fault window (expected 0 for a pause) and at which block did it resume.
 - CLI: `kaizen v3 authorship --last N` (read-only), `kaizen certify <runId> --authority-index N`. Live: 60 V3 blocks #194096..#194155 decoded, 2 authorities (32 and 28 blocks), saved to `docs/evidence/v3-authorship-sample.json`.
 - Limits: the authority index is supplied by the operator and recorded; mapping an index to a validator account is not claimed yet. GRANDPA set id and score v2 weighting are next.
+
+## 2026-10-25 22:00 WAT: T-9.7 step 2, GRANDPA finality-quorum evidence
+- `chain.grandpa` (in the fingerprint): at the last pre-fault finalized block, the GRANDPA authority set (`GrandpaApi_grandpa_authorities`) and `Grandpa.CurrentSetId`, the threshold (total - floor((total-1)/3)), the weight left with the target down, and `predictedStall`. `verifyGrandpaQuorum` re-reads that state at the recorded block hash, recomputes the arithmetic, and reports whether the prediction agrees with the finality actually observed (`consistent`). A mismatch of chain state is `mismatch`; pruned or unreachable state is `unverifiable`; a prediction/observation disagreement is reported in the reasons, never hidden.
+- Live V3: `kaizen v3 finality` reads set 54, 2 authorities, total weight 2, threshold 2, so pausing either validator is predicted to stall finality (V3 keeps old state: reads at blocks 100000, 150000, 194000 succeeded). Evidence: `docs/evidence/v3-grandpa-quorum.json`.
+- `kaizen certify <runId> --grandpa-index N` attaches it. Local `portaldot_dev` nodes prune state after about 256 blocks, so older local certificates verify as `unverifiable` on this check.
+- Tests: `resilience-grandpa.test.ts` (6, uses the real V3 authority bytes).

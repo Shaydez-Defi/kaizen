@@ -22,6 +22,8 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { formatUpSummary, kaizenUp, UP_DEFAULT_NAME, UP_DEFAULT_PRESET } from './up';
 import {
+  createHttpStateSource,
+  readGrandpaQuorum,
   createHttpChainReader,
   createHttpHeaderSource,
   readAuthorship,
@@ -1108,6 +1110,28 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     });
 
   v3Cmd
+    .command('finality')
+    .description('Read-only: V3 GRANDPA set id, authorities, finality threshold and what one paused authority would do')
+    .option('--out <file>', 'also write the quorum evidence as JSON')
+    .action(async (cmdOpts: { out?: string }) => {
+      await runChain(async (opts) => {
+        const url = resolveV3Config().substrateWsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+        const heads = await createHttpChainReader(url).readHeads();
+        const state = createHttpStateSource(url);
+        const quorums = [] as Awaited<ReturnType<typeof readGrandpaQuorum>>[];
+        const first = await readGrandpaQuorum(state, heads.finalized, 0);
+        for (let i = 0; i < first.authorities.length; i++) quorums.push(i === 0 ? first : await readGrandpaQuorum(state, heads.finalized, i));
+        if (cmdOpts.out) fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify({ finalized: heads.finalized, quorums }, null, 2)}\n`);
+        if (opts.json) printJson({ ok: true, finalized: heads.finalized, quorums });
+        else {
+          console.log(`V3 GRANDPA set ${first.setId} at finalized #${heads.finalized.number}`);
+          console.log(`  authorities : ${first.authorities.length} (total weight ${first.totalWeight}, finality threshold ${first.thresholdWeight})`);
+          console.log(`  one authority down: finality ${first.predictedStall ? 'WILL STALL (quorum lost)' : 'survives'}`);
+        }
+      });
+    });
+
+  v3Cmd
     .command('drill-commit <validator>')
     .description('Commit (on V3) to a future block whose hash will seed a drill for <validator>; costs a remark fee')
     .option('--lead <blocks>', 'blocks ahead of the current best block to target', '12')
@@ -1318,13 +1342,14 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     .option('--dev-key', 'allow the public //Alice DEV key (labelled; integrity only, not identity)')
     .option('--drill-file <file>', 'attach a revealed commit-reveal drill (from `kaizen v3 drill-reveal`)')
     .option('--authority-index <n>', 'attach BABE authorship evidence for this validator authority index (needs a running node)')
-    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string; authorityIndex?: string }) => {
+    .option('--grandpa-index <n>', 'attach GRANDPA quorum evidence (predicted vs observed finality) for this GRANDPA authority index')
+    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string; authorityIndex?: string; grandpaIndex?: string }) => {
       await run(async (engine, opts) => {
         const drill = cmdOpts.drillFile
           ? (JSON.parse(fs.readFileSync(path.resolve(cmdOpts.drillFile), 'utf8')) as DrillEvidence)
           : undefined;
         const authorityIndex = cmdOpts.authorityIndex !== undefined ? Number(cmdOpts.authorityIndex) : undefined;
-        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill, authorityIndex });
+        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill, authorityIndex, grandpaIndex: cmdOpts.grandpaIndex !== undefined ? Number(cmdOpts.grandpaIndex) : undefined });
         if (opts.json) {
           printJson({ ok: true, certificate: cert });
           return;
