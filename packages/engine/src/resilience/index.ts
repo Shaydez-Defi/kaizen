@@ -85,3 +85,15 @@ export {
 export type { DeriveDrillInput, DerivedDrill, DrillSeedBounds } from './drill-seed';
 export { createDrillCommitment, verifyDrillReveal } from './drill-commit';
 export type { DrillCommitment, DrillReveal, DrillRevealResult } from './drill-commit';
+export {
+  DRILL_COMMIT_REMARK_PREFIX,
+  drillCommitPayload,
+  verifyDrillEvidence,
+} from "./drill-chain";
+export type {
+  DrillChainReader,
+  DrillCheck,
+  DrillCheckStatus,
+  DrillCommitProof,
+  DrillEvidence,
+} from "./drill-chain";

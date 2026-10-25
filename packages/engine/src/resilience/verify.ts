@@ -18,6 +18,7 @@
 import type { ScenarioRunRecord } from '../scenario/run-types';
 import { checkCertificateSignature, type ResilienceCertificate, type SignatureCheck } from './certificate';
 import type { ChainEvidence } from './evidence';
+import { verifyDrillEvidence, type DrillCheck, type DrillChainReader } from './drill-chain';
 import { ChainUnreachableError, type ChainReader } from './rpc';
 
 export type ChainCheckStatus = 'verified' | 'mismatch' | 'unverifiable';
@@ -43,6 +44,8 @@ export interface CertificateVerification {
   integrity: SignatureCheck;
   chain: ChainCheck;
   devKey: boolean;
+  /** Commit-reveal drill check; null when the certificate has no drill. */
+  drill: DrillCheck | null;
 }
 
 export async function verifyChainEvidence(evidence: ChainEvidence, reader: ChainReader | null): Promise<ChainCheck> {
@@ -92,16 +95,23 @@ export async function verifyCertificate(
   cert: ResilienceCertificate,
   run: ScenarioRunRecord,
   reader: ChainReader | null,
+  drillReader: DrillChainReader | null = null,
 ): Promise<CertificateVerification> {
   const integrity = await checkCertificateSignature(cert, run);
   const chain = await verifyChainEvidence(cert.chain, reader);
+  const drill = cert.chain.drill ? await verifyDrillEvidence(cert.chain.drill, drillReader, run) : null;
   const reasons: string[] = [];
   if (!integrity.fingerprintMatches) reasons.push('fingerprint does not match the stored run + evidence');
   if (!integrity.signatureValid) reasons.push('sr25519 signature is invalid');
   if (!integrity.addressMatchesKey) reasons.push('signer address does not match the public key');
   const integrityOk = integrity.fingerprintMatches && integrity.signatureValid && integrity.addressMatchesKey;
   reasons.push(`chain: ${chain.reason}`);
+  if (drill) for (const r of drill.reasons) reasons.push(`drill (${drill.status}): ${r}`);
   if (cert.signature.dev) reasons.push('DEV KEY: signed with a public test key — proves integrity, not operator identity');
-  const status: ChainCheckStatus = !integrityOk || chain.status === 'mismatch' ? 'mismatch' : chain.status;
-  return { status, reasons, integrity, chain, devKey: cert.signature.dev };
+  const drillStatus: ChainCheckStatus = drill ? drill.status : 'verified';
+  let status: ChainCheckStatus;
+  if (!integrityOk || chain.status === 'mismatch' || drillStatus === 'mismatch') status = 'mismatch';
+  else if (chain.status === 'unverifiable' || drillStatus === 'unverifiable') status = 'unverifiable';
+  else status = 'verified';
+  return { status, reasons, integrity, chain, devKey: cert.signature.dev, drill };
 }
