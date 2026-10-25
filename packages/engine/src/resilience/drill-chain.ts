@@ -32,6 +32,11 @@ export interface DrillCommitProof {
 
 export interface DrillEvidence extends DrillReveal {
   commit: DrillCommitProof;
+  /**
+   * Genesis hash of the public chain whose blocks seed the drill (the
+   * beacon, e.g. V3). It need not be the network under test.
+   */
+  beaconGenesisHash?: string;
 }
 
 /** Canonical remark text an operator submits to commit to block N. */
@@ -79,6 +84,14 @@ export async function verifyDrillEvidence(
 
   const c = drill.commitment;
   try {
+    if (drill.beaconGenesisHash) {
+      const g = await reader.blockHashAt(0);
+      if (
+        g !== null &&
+        g.toLowerCase() !== drill.beaconGenesisHash.toLowerCase()
+      )
+        mismatches.push("beacon chain genesis differs from the recorded one");
+    }
     const seed = await reader.blockHashAt(c.targetBlock);
     if (seed === null)
       return finish(

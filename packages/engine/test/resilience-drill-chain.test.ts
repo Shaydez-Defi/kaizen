@@ -157,3 +157,29 @@ describe("certificate with drill", () => {
     expect(res.status).toBe("mismatch");
   });
 });
+
+describe("beacon genesis binding", () => {
+  it("flags a drill proven against a different chain's genesis", async () => {
+    const d = { ...makeDrill(), beaconGenesisHash: hashOf(0) };
+    const ok = await verifyDrillEvidence(d, {
+      ...chain(d),
+      blockHashAt: async (n) =>
+        n === 0
+          ? hashOf(0)
+          : n === d.commitment.targetBlock
+            ? SEED
+            : COMMIT_HASH,
+    });
+    expect(ok.status).toBe("verified");
+    const bad = await verifyDrillEvidence(d, {
+      ...chain(d),
+      blockHashAt: async (n) =>
+        n === 0
+          ? hashOf(0, 1)
+          : n === d.commitment.targetBlock
+            ? SEED
+            : COMMIT_HASH,
+    });
+    expect(bad.status).toBe("mismatch");
+  });
+});

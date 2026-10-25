@@ -1,0 +1,20 @@
+{
+  "beaconGenesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+  "commitment": {
+    "validatorId": "validator-alice",
+    "committedAtBlock": 194104,
+    "targetBlock": 194117
+  },
+  "seedBlockHash": "0xe4e499290079885872a78bd0afbd3251743447574b0164dc8d6909e982512986",
+  "finalizedAtReveal": 194117,
+  "claimed": {
+    "seed": "0xc2ebb075909b54c022c8ef217b96ae6d4cca0d26984cb10c332c7909b7a8e0c9",
+    "faultType": "terminate",
+    "startAfterBlocks": 4,
+    "durationMs": 39172
+  },
+  "commit": {
+    "blockHash": "0x516f2c8d34159d5106267258ec72e11da7e3ee106cb43ed90cf511b1be009274",
+    "extrinsicIndex": 1
+  }
+}

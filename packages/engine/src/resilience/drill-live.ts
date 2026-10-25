@@ -27,9 +27,7 @@ export interface DrillLivePort {
   heads(): Promise<{ best: number; finalized: number }>;
   blockHashAt(number: number): Promise<string | null>;
   /** Submit the commit remark; resolves once it is in a block. */
-  submitCommit(
-    payload: string,
-  ): Promise<{
+  submitCommit(payload: string): Promise<{
     blockNumber: number;
     blockHash: string;
     extrinsicIndex: number;
@@ -105,7 +103,9 @@ export async function revealDrill(
       "DRILL_REVEAL_TIMEOUT",
       `no hash for finalized block #${target}`,
     );
+  const beaconGenesisHash = await port.blockHashAt(0);
   return {
+    ...(beaconGenesisHash ? { beaconGenesisHash } : {}),
     commitment: pending.commitment,
     seedBlockHash,
     finalizedAtReveal: finalized,

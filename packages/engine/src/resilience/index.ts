@@ -105,3 +105,4 @@ export {
   v3DrillChainReader,
 } from "./drill-live";
 export type { DrillLivePort, PendingDrill, RevealOptions } from "./drill-live";
+export { commitDrillOnV3, revealDrillOnV3, withV3DrillReader } from "./drill-v3";
