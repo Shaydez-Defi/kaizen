@@ -15,6 +15,7 @@
  */
 
 import type { EventBus, KaizenEventMap } from '../events/bus';
+import { buildAuthorshipEvidence, createHttpHeaderSource, type HeaderSource } from './authorship';
 import type { DrillEvidence } from './drill-chain';
 import { KaizenError } from '../errors';
 import { httpUrlForPort } from '../process/args';
@@ -195,11 +196,21 @@ export class ResilienceService {
 
   async certifyRun(
     runId: string,
-    options: { allowDevKey?: boolean; drill?: DrillEvidence } = {},
+    options: { allowDevKey?: boolean; drill?: DrillEvidence; authorityIndex?: number; headers?: HeaderSource } = {},
   ): Promise<ResilienceCertificate> {
     const run = this.store.getScenarioRun(runId);
     const stored = this.store.getResilienceEvidence(runId);
-    const evidence = stored && options.drill ? { ...stored, drill: options.drill } : stored;
+    let evidence = stored && options.drill ? { ...stored, drill: options.drill } : stored;
+    if (evidence && options.authorityIndex !== undefined) {
+      const headers = options.headers ?? this.headerSourceForNetwork(run.networkId);
+      if (!headers) {
+        throw new KaizenError(
+          'RESILIENCE_NOT_CERTIFIABLE',
+          'authorship needs a running node of the network (or an RPC header source)',
+        );
+      }
+      evidence = { ...evidence, authorship: await buildAuthorshipEvidence(headers, evidence, options.authorityIndex) };
+    }
     if (!evidence) {
       throw new KaizenError(
         'RESILIENCE_NOT_CERTIFIABLE',
@@ -287,16 +298,26 @@ export class ResilienceService {
     }
   }
 
+  headerSourceForNetwork(networkId: string): HeaderSource | null {
+    try {
+      const node = this.store.listNodes(networkId).find((n) => n.status === 'running');
+      return node ? createHttpHeaderSource(httpUrlForPort(node.ports.rpc)) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async verify(fingerprint: string): Promise<CertificateVerification> {
     const cert = this.getCertificate(fingerprint);
     const run = this.store.getScenarioRun(cert.runId);
     const net = this.readerForNetwork(cert.networkId);
-    if (!cert.chain.drill) return verifyCertificate(cert, run, net);
+    const headers = cert.chain.authorship ? this.headerSourceForNetwork(cert.networkId) : null;
+    if (!cert.chain.drill) return verifyCertificate(cert, run, net, null, headers);
     // The drill's beacon is the public V3 chain, not the network under test.
     try {
-      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader));
+      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader, headers));
     } catch {
-      return verifyCertificate(cert, run, net, null); // V3 unreachable → drill unverifiable
+      return verifyCertificate(cert, run, net, null, headers); // V3 unreachable: drill unverifiable
     }
   }
 }

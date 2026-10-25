@@ -19,6 +19,7 @@ import type { ScenarioRunRecord } from '../scenario/run-types';
 import { checkCertificateSignature, type ResilienceCertificate, type SignatureCheck } from './certificate';
 import type { ChainEvidence } from './evidence';
 import { verifyDrillEvidence, type DrillCheck, type DrillChainReader } from './drill-chain';
+import { verifyAuthorshipEvidence, type AuthorshipCheck, type HeaderSource } from './authorship';
 import { ChainUnreachableError, type ChainReader } from './rpc';
 
 export type ChainCheckStatus = 'verified' | 'mismatch' | 'unverifiable';
@@ -46,6 +47,8 @@ export interface CertificateVerification {
   devKey: boolean;
   /** Commit-reveal drill check; null when the certificate has no drill. */
   drill: DrillCheck | null;
+  /** BABE authorship check; null when the certificate has none. */
+  authorship: AuthorshipCheck | null;
 }
 
 export async function verifyChainEvidence(evidence: ChainEvidence, reader: ChainReader | null): Promise<ChainCheck> {
@@ -96,10 +99,14 @@ export async function verifyCertificate(
   run: ScenarioRunRecord,
   reader: ChainReader | null,
   drillReader: DrillChainReader | null = null,
+  headerSource: HeaderSource | null = null,
 ): Promise<CertificateVerification> {
   const integrity = await checkCertificateSignature(cert, run);
   const chain = await verifyChainEvidence(cert.chain, reader);
   const drill = cert.chain.drill ? await verifyDrillEvidence(cert.chain.drill, drillReader, run) : null;
+  const authorship = cert.chain.authorship
+    ? await verifyAuthorshipEvidence(cert.chain.authorship, cert.chain, headerSource)
+    : null;
   const reasons: string[] = [];
   if (!integrity.fingerprintMatches) reasons.push('fingerprint does not match the stored run + evidence');
   if (!integrity.signatureValid) reasons.push('sr25519 signature is invalid');
@@ -107,11 +114,12 @@ export async function verifyCertificate(
   const integrityOk = integrity.fingerprintMatches && integrity.signatureValid && integrity.addressMatchesKey;
   reasons.push(`chain: ${chain.reason}`);
   if (drill) for (const r of drill.reasons) reasons.push(`drill (${drill.status}): ${r}`);
+  if (authorship) for (const r of authorship.reasons) reasons.push(`authorship (${authorship.status}): ${r}`);
   if (cert.signature.dev) reasons.push('DEV KEY: signed with a public test key — proves integrity, not operator identity');
-  const drillStatus: ChainCheckStatus = drill ? drill.status : 'verified';
+  const extra: ChainCheckStatus[] = [drill?.status ?? 'verified', authorship?.status ?? 'verified'];
   let status: ChainCheckStatus;
-  if (!integrityOk || chain.status === 'mismatch' || drillStatus === 'mismatch') status = 'mismatch';
-  else if (chain.status === 'unverifiable' || drillStatus === 'unverifiable') status = 'unverifiable';
+  if (!integrityOk || chain.status === 'mismatch' || extra.includes('mismatch')) status = 'mismatch';
+  else if (chain.status === 'unverifiable' || extra.includes('unverifiable')) status = 'unverifiable';
   else status = 'verified';
-  return { status, reasons, integrity, chain, devKey: cert.signature.dev, drill };
+  return { status, reasons, integrity, chain, devKey: cert.signature.dev, drill, authorship };
 }

@@ -106,3 +106,21 @@ export {
 } from "./drill-live";
 export type { DrillLivePort, PendingDrill, RevealOptions } from "./drill-live";
 export { commitDrillOnV3, revealDrillOnV3, withV3DrillReader } from "./drill-v3";
+export {
+  createHttpHeaderSource,
+  decodeBabePreDigest,
+  authorshipWindow,
+  buildAuthorshipEvidence,
+  readAuthorship,
+  summarizeAuthorship,
+  verifyAuthorship,
+  verifyAuthorshipEvidence,
+} from "./authorship";
+export type {
+  AuthoredBlock,
+  AuthorshipCheck,
+  AuthorshipEvidence,
+  AuthorshipSummary,
+  BabeDigest,
+  HeaderSource,
+} from "./authorship";
