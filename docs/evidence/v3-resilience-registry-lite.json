@@ -1,0 +1,90 @@
+{
+  "what": "Lite KaizenResilienceRegistry (v2, two storage slots per anchor) deployed on Portaldot V3 TEST, one certificate anchored and read back (T-9.8)",
+  "deployment": {
+    "chainName": "PortaldotV3 Test",
+    "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+    "signerAddress": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+    "txHash": "0xa8a0a990363ce176575da550e497d9e38634ff9c6e2fdaa87fe6592bc3ca5e86",
+    "blockHash": "0xc715998896751f54270f9b1028fa93599742c3969ca9c3381a7a6a0416d0d881",
+    "blockNumber": 181490,
+    "extrinsicIndex": 1,
+    "finalized": true,
+    "events": [
+      "balances.Withdraw",
+      "system.NewAccount",
+      "balances.Endowed",
+      "balances.Minted",
+      "balances.TransferAndHold",
+      "revive.Instantiated",
+      "balances.TransferAndHold",
+      "balances.Deposit",
+      "balances.Deposit",
+      "transactionPayment.TransactionFeePaid",
+      "system.ExtrinsicSuccess"
+    ],
+    "tokenSymbol": "tPOT",
+    "tokenDecimals": 14,
+    "balanceBefore": "39964422828924069",
+    "balanceAfter": "26265131799872436",
+    "spent": "13699291029051633",
+    "name": "KaizenResilienceRegistry",
+    "address": "0xb743ea9d9176e6a010b23887000b2a5d14574d8f",
+    "codeHash": "0x38ff26f8ae19f50190f74587e2eb1a2e42d53290e977429660ae1d16426cd6cd"
+  },
+  "anchor": {
+    "chainName": "PortaldotV3 Test",
+    "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+    "signerAddress": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+    "txHash": "0x7f49e28cb06ffda700e531ecff90da1bf9c246feec54fb6dfd096b635a526117",
+    "blockHash": "0xf5ad225b08a6966d3ca98313e2f82b308c4b206fa1b69d2f147a65e5815620b5",
+    "blockNumber": 181495,
+    "extrinsicIndex": 1,
+    "finalized": true,
+    "events": [
+      "balances.Withdraw",
+      "revive.ContractEmitted",
+      "balances.TransferAndHold",
+      "balances.Deposit",
+      "balances.Deposit",
+      "transactionPayment.TransactionFeePaid",
+      "system.ExtrinsicSuccess"
+    ],
+    "tokenSymbol": "tPOT",
+    "tokenDecimals": 14,
+    "balanceBefore": "26265131799872436",
+    "balanceAfter": "25491130748884431",
+    "spent": "774001050988005",
+    "contract": "0xb743ea9d9176e6a010b23887000b2a5d14574d8f",
+    "fingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+    "validatorId": "res-it-bob",
+    "validatorKey": "0xbf1486bb968700d321203e2480beb39c5a9e5a24bc3692c449fffa48a2b3e0f0",
+    "score": 35,
+    "evidenceFlags": 3
+  },
+  "readBack": {
+    "contract": "0xb743ea9d9176e6a010b23887000b2a5d14574d8f",
+    "validatorId": "res-it-bob",
+    "validatorKey": "0xbf1486bb968700d321203e2480beb39c5a9e5a24bc3692c449fffa48a2b3e0f0",
+    "score": {
+      "score": 35,
+      "block": 181495,
+      "count": 1
+    },
+    "cert": {
+      "score": 35,
+      "block": 181495
+    },
+    "recorded": true,
+    "bestNumber": 181499
+  },
+  "costComparison": {
+    "v1": {
+      "deploy": "~261 tPOT (195 code deposit + 66 instantiate)",
+      "anchorPerCertificate": "~30.8 tPOT"
+    },
+    "lite": {
+      "deploy": "136.99 tPOT",
+      "anchorPerCertificate": "7.74 tPOT"
+    }
+  }
+}
