@@ -46,6 +46,12 @@ import {
   type ScenarioValidationResult,
   type SerializedOperationDefinition,
   probeV3Connectivity,
+  resolveV3Config,
+  createHttpChainReader,
+  createHttpMonitorRpc,
+  runNetworkMonitor,
+  verifyMonitorReport,
+  type MonitorReport,
   ResilienceRegistryService,
   type ResilienceCertificate,
   type ResilienceChainJournalEntry,
@@ -1148,6 +1154,65 @@ export function buildProgram(deps: CliDependencies = {}): Command {
         console.log(`  score       : ${r.score.score}/100  certificates=${r.score.count}  block=${r.score.block}`);
         if (r.cert) console.log(`  certOf      : score=${r.cert.score} block=${r.cert.block}`);
         if (r.recorded !== null) console.log(`  recorded    : ${r.recorded}`);
+      });
+    });
+
+  v3Cmd
+    .command('monitor')
+    .description(
+      'Read-only monitoring of a public V3 node: block production, finality lag, peers (JSON-RPC reads only, no fault injection)',
+    )
+    .option('--samples <n>', 'number of samples (1-600)', '6')
+    .option('--interval <seconds>', 'seconds between samples', '6')
+    .option('--rpc <url>', 'node RPC URL (default: the configured V3 Substrate endpoint, over HTTPS)')
+    .option('--out <file>', 'also write the full JSON report to this file')
+    .option('--verify', 're-fetch every finalized block hash from the node afterwards', false)
+    .action(async (cmdOpts: { samples: string; interval: string; rpc?: string; out?: string; verify: boolean }) => {
+      await runChain(async (opts) => {
+        const cfg = resolveV3Config();
+        const url = cmdOpts.rpc ?? cfg.substrateWsUrl;
+        const rpc = createHttpMonitorRpc(url);
+        const reader = createHttpChainReader(url.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:'));
+        let network: string | null = null;
+        try {
+          const chain = await rpc.call('system_chain');
+          network = typeof chain === 'string' ? chain : null;
+        } catch {
+          network = null;
+        }
+        const genesisHash = await reader.genesisHash().catch(() => null);
+        const report: MonitorReport = await runNetworkMonitor({
+          rpc,
+          endpoint: new URL(url.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')).origin,
+          samples: Number(cmdOpts.samples),
+          intervalMs: Number(cmdOpts.interval) * 1000,
+          network,
+          genesisHash,
+          onSample: (s) => {
+            if (!opts.json) {
+              console.log(
+                s.ok
+                  ? `  ${s.at}  best=${s.best?.number} finalized=${s.finalized?.number} lag=${s.finalityLag} peers=${s.peers ?? '?'} ${s.latencyMs}ms`
+                  : `  ${s.at}  FAILED ${s.error ?? ''}`,
+              );
+            }
+          },
+        });
+        const verification = cmdOpts.verify ? await verifyMonitorReport(report, reader) : null;
+        if (cmdOpts.out !== undefined) {
+          fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify({ ...report, verification }, null, 2)}\n`);
+        }
+        if (opts.json) {
+          printJson({ ok: true, report, verification });
+          return;
+        }
+        const m = report.summary;
+        console.log(`${report.network ?? 'unknown network'} — ${m.verdict.toUpperCase()} (${m.okSamples}/${m.samples} samples)`);
+        console.log(`  blocks produced : ${m.blocksProduced} in ${Math.round(m.windowMs / 1000)}s (~${m.observedBlockTimeMs === null ? '?' : Math.round(m.observedBlockTimeMs)} ms/block, expected ${m.expectedBlockTimeMs})`);
+        console.log(`  finality lag    : min ${m.finalityLagMin ?? '?'} / mean ${m.finalityLagMean?.toFixed(1) ?? '?'} / max ${m.finalityLagMax ?? '?'} blocks; finalized +${m.finalizedAdvance}`);
+        console.log(`  peers           : ${m.peersMin ?? '?'}-${m.peersMax ?? '?'}`);
+        for (const r of m.reasons) console.log(`  note            : ${r}`);
+        if (verification) console.log(`  verification    : ${verification.status} (${verification.matched}/${verification.checked} finalized hashes match)`);
       });
     });
 

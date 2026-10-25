@@ -1458,3 +1458,11 @@ K8s/Helm — untouched.
 - Anchored the CI-drill certificate `0x517b2ffb81ec...2e33` (block 181495, tx 0x7f49e28c...6117), 7.74 tPOT per anchor (v1: ~30.8). Read back via `kaizen v3 resilience-score`: score 35, block 181495, count 1, cert recorded.
 - Evidence: `docs/evidence/v3-resilience-registry-lite.json`. Signer balance after anchor about 262 tPOT minus 7.7.
 - Next: ink! twin (item 2), then monitoring (item 3).
+
+## 2026-10-25 10:00 WAT session: read-only V3 monitoring (plan item 3)
+
+- `kaizen v3 monitor [--samples N --interval S --verify --out file]`: samples best/finalized heads (read by hash), `system_health` peers over HTTPS JSON-RPC and prints block production, finality lag, peers and a verdict (healthy / degraded / stalled / unreachable). Engine: `resilience/network-monitor.ts` (`sampleNetwork`, `summarizeSamples`, `runNetworkMonitor`, `verifyMonitorReport`, `samplesToObservations`).
+- Live run against the public V3 node: 8/8 samples, 8 blocks in 46 s (~5.7 s/block), finality lag 2 to 3 blocks, 1 peer visible, all 8 finalized hashes re-fetched and matched. Evidence: `docs/evidence/v3-network-monitor.json`.
+- Limits: this watches a live network, injects no faults, and is not a resilience score. The node exposes one peer (its own view), so `peers` is that node's peer count, not a network total.
+- Tests: engine 12, CLI 3; tsc and eslint clean. Branch `feat/network-monitor` (off feat/lite-registry).
+- ink CI: run 40167589160 failed because stable Rust is too new for cargo-contract's build-std; pinned Rust 1.85.0 (new run in progress).
