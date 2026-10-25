@@ -1456,3 +1456,10 @@ Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at
 - Design note: the beacon is the public V3 chain; the faulted network can be a local CI network. This stops an operator choosing the fault/timing after seeing the result; it does not prove who ran the fault (that is the signature).
 - Tests: `resilience-drill-chain.test.ts` (7), `resilience-drill-live.test.ts` (3); tsc engine and CLI clean, eslint clean.
 - Next: T-9.7 BABE/GRANDPA recovery evidence; then CI drill that consumes a seeded drill.
+
+## 2026-10-25 22:00 WAT: T-9.7 step 1, BABE authorship recovery evidence
+- `decodeBabePreDigest` reads the BABE pre-runtime digest (primary / secondary-plain / secondary-VRF: authority index + slot) from a header's digest logs; checked against a real V3 header.
+- `buildAuthorshipEvidence` derives a contiguous block window from the certificate's own observations (pre-fault best head to post-recovery best head; fault window = after the last pre-fault head up to the last during-fault head) and stores every block's hash, author index and slot in `chain.authorship` (part of the fingerprint). `verifyAuthorshipEvidence` rejects a window that does not match the observations, a missing or cherry-picked block, and any hash/author/slot that differs from the chain; offline is `unverifiable`.
+- `summarizeAuthorship` answers the recovery question: did the target authority author during the fault window (expected 0 for a pause) and at which block did it resume.
+- CLI: `kaizen v3 authorship --last N` (read-only), `kaizen certify <runId> --authority-index N`. Live: 60 V3 blocks #194096..#194155 decoded, 2 authorities (32 and 28 blocks), saved to `docs/evidence/v3-authorship-sample.json`.
+- Limits: the authority index is supplied by the operator and recorded; mapping an index to a validator account is not claimed yet. GRANDPA set id and score v2 weighting are next.

@@ -22,6 +22,11 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { formatUpSummary, kaizenUp, UP_DEFAULT_NAME, UP_DEFAULT_PRESET } from './up';
 import {
+  createHttpChainReader,
+  createHttpHeaderSource,
+  readAuthorship,
+  resolveV3Config,
+  summarizeAuthorship,
   commitDrillOnV3,
   revealDrillOnV3,
   createEngine,
@@ -1081,6 +1086,28 @@ export function buildProgram(deps: CliDependencies = {}): Command {
   }
 
   v3Cmd
+    .command('authorship')
+    .description('Read-only: who authored the last N V3 blocks (BABE pre-runtime digests from the headers)')
+    .option('--last <n>', 'number of most recent blocks to read', '30')
+    .option('--out <file>', 'also write the decoded blocks as JSON')
+    .action(async (cmdOpts: { last: string; out?: string }) => {
+      await runChain(async (opts) => {
+        const url = resolveV3Config().substrateWsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+        const reader = createHttpChainReader(url);
+        const head = (await reader.readHeads()).best.number;
+        const n = Math.max(1, Math.min(500, Number(cmdOpts.last)));
+        const blocks = await readAuthorship(createHttpHeaderSource(url), head - n + 1, head);
+        const counts = summarizeAuthorship(blocks, -1, head, head).byAuthority;
+        if (cmdOpts.out) fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify({ head, blocks }, null, 2)}\n`);
+        if (opts.json) printJson({ ok: true, head, byAuthority: counts, blocks });
+        else {
+          console.log(`V3 authorship, blocks #${head - n + 1}..#${head} (${blocks.length} with a BABE digest)`);
+          for (const [idx, c] of Object.entries(counts)) console.log(`  authority ${idx.padStart(2)} : ${c} blocks`);
+        }
+      });
+    });
+
+  v3Cmd
     .command('drill-commit <validator>')
     .description('Commit (on V3) to a future block whose hash will seed a drill for <validator>; costs a remark fee')
     .option('--lead <blocks>', 'blocks ahead of the current best block to target', '12')
@@ -1290,12 +1317,14 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     )
     .option('--dev-key', 'allow the public //Alice DEV key (labelled; integrity only, not identity)')
     .option('--drill-file <file>', 'attach a revealed commit-reveal drill (from `kaizen v3 drill-reveal`)')
-    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string }) => {
+    .option('--authority-index <n>', 'attach BABE authorship evidence for this validator authority index (needs a running node)')
+    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string; authorityIndex?: string }) => {
       await run(async (engine, opts) => {
         const drill = cmdOpts.drillFile
           ? (JSON.parse(fs.readFileSync(path.resolve(cmdOpts.drillFile), 'utf8')) as DrillEvidence)
           : undefined;
-        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill });
+        const authorityIndex = cmdOpts.authorityIndex !== undefined ? Number(cmdOpts.authorityIndex) : undefined;
+        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill, authorityIndex });
         if (opts.json) {
           printJson({ ok: true, certificate: cert });
           return;
