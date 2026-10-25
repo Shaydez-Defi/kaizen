@@ -11,7 +11,7 @@ jobs:
         working-directory: contracts/ink-registry
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: wasm32-unknown-unknown
           components: rust-src
