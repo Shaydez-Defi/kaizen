@@ -106,3 +106,63 @@ export {
 } from "./drill-live";
 export type { DrillLivePort, PendingDrill, RevealOptions } from "./drill-live";
 export { commitDrillOnV3, revealDrillOnV3, withV3DrillReader } from "./drill-v3";
+export {
+  createHttpHeaderSource,
+  decodeBabePreDigest,
+  authorshipWindow,
+  buildAuthorshipEvidence,
+  readAuthorship,
+  summarizeAuthorship,
+  verifyAuthorship,
+  verifyAuthorshipEvidence,
+} from "./authorship";
+export type {
+  AuthoredBlock,
+  AuthorshipCheck,
+  AuthorshipEvidence,
+  AuthorshipSummary,
+  BabeDigest,
+  HeaderSource,
+} from "./authorship";
+export {
+  GRANDPA_AUTHORITIES_CALL,
+  GRANDPA_SET_ID_KEY,
+  buildGrandpaQuorum,
+  createHttpStateSource,
+  decodeGrandpaAuthorities,
+  decodeSetId,
+  grandpaThreshold,
+  observedFinalityStall,
+  quorumBlock,
+  quorumFrom,
+  readGrandpaQuorum,
+  verifyGrandpaQuorum,
+} from "./grandpa";
+export type {
+  GrandpaAuthority,
+  GrandpaCheck,
+  GrandpaQuorumEvidence,
+  StateSource,
+} from "./grandpa";
+export {
+  EVIDENCE_CLASS_WEIGHT,
+  RESILIENCE_SCORE_V2_VERSION,
+  classifyEvidence,
+  computeResilienceScoreV2,
+  recoverySlots,
+  toScoredRunInputV2,
+} from "./score-v2";
+export type {
+  EvidenceChecks,
+  EvidenceClass,
+  ResilienceScoreV2,
+  ScoredRunInputV2,
+  ScoredRunV2,
+} from "./score-v2";
+export {
+  KAIZEN_ATTESTATION_VERSION,
+  attestationMessage,
+  checkAttestation,
+  createAttestation,
+} from "./attestation";
+export type { AttestationCheck, ResilienceAttestation } from "./attestation";

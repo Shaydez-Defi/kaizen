@@ -15,6 +15,14 @@
  */
 
 import type { EventBus, KaizenEventMap } from '../events/bus';
+import {
+  checkAttestation,
+  createAttestation,
+  type AttestationCheck,
+  type ResilienceAttestation,
+} from './attestation';
+import { buildGrandpaQuorum, createHttpStateSource, type StateSource } from './grandpa';
+import { buildAuthorshipEvidence, createHttpHeaderSource, type HeaderSource } from './authorship';
 import type { DrillEvidence } from './drill-chain';
 import { KaizenError } from '../errors';
 import { httpUrlForPort } from '../process/args';
@@ -24,6 +32,13 @@ import { issueCertificate, checkCertificateSignature, type ResilienceCertificate
 import { ChainEvidenceRecorder, type ChainEvidence } from './evidence';
 import { createHttpChainReader, type ChainReader } from './rpc';
 import { computeResilienceScore, type ResilienceScore } from './score';
+import {
+  computeResilienceScoreV2,
+  toScoredRunInputV2,
+  type EvidenceChecks,
+  type ResilienceScoreV2,
+  type ScoredRunInputV2,
+} from './score-v2';
 import { loadResilienceSigner } from './signer';
 import { withV3DrillReader } from './drill-v3';
 import { verifyCertificate, type CertificateVerification } from './verify';
@@ -195,11 +210,31 @@ export class ResilienceService {
 
   async certifyRun(
     runId: string,
-    options: { allowDevKey?: boolean; drill?: DrillEvidence } = {},
+    options: { allowDevKey?: boolean; drill?: DrillEvidence; authorityIndex?: number; headers?: HeaderSource; grandpaIndex?: number; state?: StateSource } = {},
   ): Promise<ResilienceCertificate> {
     const run = this.store.getScenarioRun(runId);
     const stored = this.store.getResilienceEvidence(runId);
-    const evidence = stored && options.drill ? { ...stored, drill: options.drill } : stored;
+    let evidence = stored && options.drill ? { ...stored, drill: options.drill } : stored;
+    if (evidence && options.authorityIndex !== undefined) {
+      const headers = options.headers ?? this.headerSourceForNetwork(run.networkId);
+      if (!headers) {
+        throw new KaizenError(
+          'RESILIENCE_NOT_CERTIFIABLE',
+          'authorship needs a running node of the network (or an RPC header source)',
+        );
+      }
+      evidence = { ...evidence, authorship: await buildAuthorshipEvidence(headers, evidence, options.authorityIndex) };
+    }
+    if (evidence && options.grandpaIndex !== undefined) {
+      const state = options.state ?? this.stateSourceForNetwork(run.networkId);
+      if (!state) {
+        throw new KaizenError(
+          'RESILIENCE_NOT_CERTIFIABLE',
+          'GRANDPA evidence needs a running node of the network (or an RPC state source)',
+        );
+      }
+      evidence = { ...evidence, grandpa: await buildGrandpaQuorum(state, evidence, options.grandpaIndex) };
+    }
     if (!evidence) {
       throw new KaizenError(
         'RESILIENCE_NOT_CERTIFIABLE',
@@ -277,6 +312,61 @@ export class ResilienceService {
     return { ...computeResilienceScore(validatorId, inputs, asOf), excluded };
   }
 
+  /**
+   * Score v2 (resilience-under-failure): certificates whose integrity check
+   * passes, weighted by evidence class. A certificate with a seeded drill or
+   * authorship is re-verified against the chain; only a `verified` result
+   * lifts it to chain-observed. Offline or unverifiable evidence stays
+   * chain-bound; a certificate with no chain observations is self-reported.
+   */
+  async scoreV2(validatorId: string, asOf: Date = new Date()): Promise<ResilienceScoreV2 & { excluded: string[] }> {
+    const inputs: ScoredRunInputV2[] = [];
+    const excluded: string[] = [];
+    for (const cert of this.store.listResilienceCertificates({ validatorId })) {
+      let run;
+      try {
+        run = this.store.getScenarioRun(cert.runId);
+      } catch {
+        excluded.push(cert.fingerprint);
+        continue;
+      }
+      const check = await checkCertificateSignature(cert, run);
+      if (!check.fingerprintMatches || !check.signatureValid || !check.addressMatchesKey) {
+        excluded.push(cert.fingerprint);
+        continue;
+      }
+      let drill: EvidenceChecks['drill'] = null;
+      let authorship: EvidenceChecks['authorship'] = null;
+      let grandpaConsistent: boolean | null = null;
+      if (cert.chain.drill || cert.chain.authorship || cert.chain.grandpa) {
+        try {
+          const v = await this.verify(cert.fingerprint);
+          drill = v.drill?.status ?? null;
+          authorship = v.authorship?.status ?? null;
+          grandpaConsistent = v.grandpa?.consistent ?? null;
+        } catch {
+          // unreachable chain: stays chain-bound
+        }
+      }
+      inputs.push(
+        toScoredRunInputV2(
+          {
+            runId: cert.runId,
+            runState: run.state,
+            recovered: cert.chain.metrics.recovered,
+            timeToRecoverMs: cert.chain.metrics.timeToRecoverMs,
+            finalityGapBlocks: cert.chain.metrics.finalityGapBlocks,
+            blocksMissed: cert.chain.metrics.blocksMissed,
+            certifiedAt: cert.signedAt,
+          },
+          cert.chain,
+          { drill, authorship, grandpaConsistent, chainBound: cert.chain.observations.length > 0 },
+        ),
+      );
+    }
+    return { ...computeResilienceScoreV2(validatorId, inputs, asOf), excluded };
+  }
+
   /** Reader for a network's chain, or null when no node is running (offline). */
   readerForNetwork(networkId: string): ChainReader | null {
     try {
@@ -287,16 +377,57 @@ export class ResilienceService {
     }
   }
 
+  headerSourceForNetwork(networkId: string): HeaderSource | null {
+    try {
+      const node = this.store.listNodes(networkId).find((n) => n.status === 'running');
+      return node ? createHttpHeaderSource(httpUrlForPort(node.ports.rpc)) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  stateSourceForNetwork(networkId: string): StateSource | null {
+    try {
+      const node = this.store.listNodes(networkId).find((n) => n.status === 'running');
+      return node ? createHttpStateSource(httpUrlForPort(node.ports.rpc)) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Re-verify a certificate against the chain and sign what was found (a different key than the issuer's is what makes it independent). */
+  async attest(fingerprint: string, options: { allowDevKey?: boolean } = {}): Promise<ResilienceAttestation> {
+    const certificate = this.getCertificate(fingerprint);
+    let localTestNetwork = false;
+    try {
+      localTestNetwork = this.store.getNetwork(certificate.networkId).designatedTest;
+    } catch {
+      localTestNetwork = false;
+    }
+    const signer = await loadResilienceSigner({
+      env: this.opts.env,
+      allowDevKey: options.allowDevKey,
+      localTestNetwork,
+    });
+    return createAttestation({ certificate, verification: await this.verify(fingerprint), signer });
+  }
+
+  async checkAttestation(attestation: ResilienceAttestation): Promise<AttestationCheck> {
+    return checkAttestation(attestation, this.getCertificate(attestation.fingerprint));
+  }
+
   async verify(fingerprint: string): Promise<CertificateVerification> {
     const cert = this.getCertificate(fingerprint);
     const run = this.store.getScenarioRun(cert.runId);
     const net = this.readerForNetwork(cert.networkId);
-    if (!cert.chain.drill) return verifyCertificate(cert, run, net);
+    const headers = cert.chain.authorship ? this.headerSourceForNetwork(cert.networkId) : null;
+    const state = cert.chain.grandpa ? this.stateSourceForNetwork(cert.networkId) : null;
+    if (!cert.chain.drill) return verifyCertificate(cert, run, net, null, headers, state);
     // The drill's beacon is the public V3 chain, not the network under test.
     try {
-      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader));
+      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader, headers, state));
     } catch {
-      return verifyCertificate(cert, run, net, null); // V3 unreachable → drill unverifiable
+      return verifyCertificate(cert, run, net, null, headers, state); // V3 unreachable: drill unverifiable
     }
   }
 }

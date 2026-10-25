@@ -109,7 +109,19 @@ off-chain by `kaizen score --verify` / the API.
   under Kaizen's fault catalogue (pause, terminate); they are not a claim
   about mainnet behaviour.
 
-## 7. Trust model — PLANNED (v2; not implemented)
+## 7. Trust model v2 — partly implemented (see status)
+
+Status (2026-10-25, branches `feat/commit-reveal-drills`, `feat/recovery-evidence`, not yet on main):
+
+| Part | Status |
+| --- | --- |
+| 7.1 seeded drill derivation, commit remark, reveal, `chain.drill` verified against the chain | implemented; live V3 evidence in `docs/evidence/v3-drill-reveal.json` |
+| 7.2 BABE authorship (`chain.authorship`) | implemented, verified against headers; the authority index is operator-supplied |
+| 7.2 GRANDPA finality (`chain.grandpa`) | implemented as quorum prediction vs observed finality, not as justification signature checking |
+| 7.3 score v2 (`kaizen score --v2`) | implemented, slot-derived recovery and evidence-class weights; not yet written to the registry |
+| signed attestations (`kaizen attest`, `verify-attestation`) | implemented: an independent key re-verifies a certificate against the chain and signs the verdict and sub-checks; not yet counted in the score or written to the registry |
+
+The text below is the original design; where it differs from the table, the table is what exists.
 
 v1 certificates are honest about what they are: chain-bound (every
 observed block hash is re-checkable by anyone with RPC access) and signed,

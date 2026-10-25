@@ -22,6 +22,13 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { formatUpSummary, kaizenUp, UP_DEFAULT_NAME, UP_DEFAULT_PRESET } from './up';
 import {
+  createHttpStateSource,
+  readGrandpaQuorum,
+  createHttpChainReader,
+  createHttpHeaderSource,
+  readAuthorship,
+  resolveV3Config,
+  summarizeAuthorship,
   commitDrillOnV3,
   revealDrillOnV3,
   createEngine,
@@ -34,6 +41,7 @@ import {
   toErrorJson,
   type CustomTopologyInput,
   type DrillEvidence,
+  type ResilienceAttestation,
   type PendingDrill,
   type KaizenEngine,
   type NetworkPreset,
@@ -1081,6 +1089,50 @@ export function buildProgram(deps: CliDependencies = {}): Command {
   }
 
   v3Cmd
+    .command('authorship')
+    .description('Read-only: who authored the last N V3 blocks (BABE pre-runtime digests from the headers)')
+    .option('--last <n>', 'number of most recent blocks to read', '30')
+    .option('--out <file>', 'also write the decoded blocks as JSON')
+    .action(async (cmdOpts: { last: string; out?: string }) => {
+      await runChain(async (opts) => {
+        const url = resolveV3Config().substrateWsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+        const reader = createHttpChainReader(url);
+        const head = (await reader.readHeads()).best.number;
+        const n = Math.max(1, Math.min(500, Number(cmdOpts.last)));
+        const blocks = await readAuthorship(createHttpHeaderSource(url), head - n + 1, head);
+        const counts = summarizeAuthorship(blocks, -1, head, head).byAuthority;
+        if (cmdOpts.out) fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify({ head, blocks }, null, 2)}\n`);
+        if (opts.json) printJson({ ok: true, head, byAuthority: counts, blocks });
+        else {
+          console.log(`V3 authorship, blocks #${head - n + 1}..#${head} (${blocks.length} with a BABE digest)`);
+          for (const [idx, c] of Object.entries(counts)) console.log(`  authority ${idx.padStart(2)} : ${c} blocks`);
+        }
+      });
+    });
+
+  v3Cmd
+    .command('finality')
+    .description('Read-only: V3 GRANDPA set id, authorities, finality threshold and what one paused authority would do')
+    .option('--out <file>', 'also write the quorum evidence as JSON')
+    .action(async (cmdOpts: { out?: string }) => {
+      await runChain(async (opts) => {
+        const url = resolveV3Config().substrateWsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+        const heads = await createHttpChainReader(url).readHeads();
+        const state = createHttpStateSource(url);
+        const quorums = [] as Awaited<ReturnType<typeof readGrandpaQuorum>>[];
+        const first = await readGrandpaQuorum(state, heads.finalized, 0);
+        for (let i = 0; i < first.authorities.length; i++) quorums.push(i === 0 ? first : await readGrandpaQuorum(state, heads.finalized, i));
+        if (cmdOpts.out) fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify({ finalized: heads.finalized, quorums }, null, 2)}\n`);
+        if (opts.json) printJson({ ok: true, finalized: heads.finalized, quorums });
+        else {
+          console.log(`V3 GRANDPA set ${first.setId} at finalized #${heads.finalized.number}`);
+          console.log(`  authorities : ${first.authorities.length} (total weight ${first.totalWeight}, finality threshold ${first.thresholdWeight})`);
+          console.log(`  one authority down: finality ${first.predictedStall ? 'WILL STALL (quorum lost)' : 'survives'}`);
+        }
+      });
+    });
+
+  v3Cmd
     .command('drill-commit <validator>')
     .description('Commit (on V3) to a future block whose hash will seed a drill for <validator>; costs a remark fee')
     .option('--lead <blocks>', 'blocks ahead of the current best block to target', '12')
@@ -1290,12 +1342,15 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     )
     .option('--dev-key', 'allow the public //Alice DEV key (labelled; integrity only, not identity)')
     .option('--drill-file <file>', 'attach a revealed commit-reveal drill (from `kaizen v3 drill-reveal`)')
-    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string }) => {
+    .option('--authority-index <n>', 'attach BABE authorship evidence for this validator authority index (needs a running node)')
+    .option('--grandpa-index <n>', 'attach GRANDPA quorum evidence (predicted vs observed finality) for this GRANDPA authority index')
+    .action(async (runId: string, cmdOpts: { devKey?: boolean; drillFile?: string; authorityIndex?: string; grandpaIndex?: string }) => {
       await run(async (engine, opts) => {
         const drill = cmdOpts.drillFile
           ? (JSON.parse(fs.readFileSync(path.resolve(cmdOpts.drillFile), 'utf8')) as DrillEvidence)
           : undefined;
-        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill });
+        const authorityIndex = cmdOpts.authorityIndex !== undefined ? Number(cmdOpts.authorityIndex) : undefined;
+        const cert = await engine.resilience.certifyRun(runId, { allowDevKey: cmdOpts.devKey === true, drill, authorityIndex, grandpaIndex: cmdOpts.grandpaIndex !== undefined ? Number(cmdOpts.grandpaIndex) : undefined });
         if (opts.json) {
           printJson({ ok: true, certificate: cert });
           return;
@@ -1350,21 +1405,63 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     });
 
   program
+    .command('attest <fingerprint>')
+    .description('Re-verify a certificate against the chain and sign the result as an attestation (KAIZEN_RESILIENCE_SIGNER_SURI / _FILE; use a different key than the issuer for it to count as independent)')
+    .option('--dev-key', 'allow the public //Alice DEV key (local test networks only)')
+    .option('--out <file>', 'write the attestation JSON here')
+    .action(async (fingerprint: string, cmdOpts: { devKey?: boolean; out?: string }) => {
+      await run(async (engine, opts) => {
+        const att = await engine.resilience.attest(fingerprint, { allowDevKey: cmdOpts.devKey === true });
+        const check = await engine.resilience.checkAttestation(att);
+        if (cmdOpts.out) fs.writeFileSync(path.resolve(cmdOpts.out), `${JSON.stringify(att, null, 2)}\n`);
+        if (opts.json) {
+          printJson({ ok: true, attestation: att, check });
+          return;
+        }
+        console.log(`attestation of ${att.fingerprint}`);
+        console.log(`  verdict    : ${att.verdict}  (drill=${att.checks.drill} authorship=${att.checks.authorship} grandpa=${att.checks.grandpa})`);
+        console.log(`  attester   : ${att.attester.address}${att.attester.dev ? '  [DEV KEY]' : ''}  independent of issuer: ${check.independent ? 'yes' : 'NO (same key)'}`);
+        if (cmdOpts.out) console.log(`  saved to   : ${cmdOpts.out}`);
+      });
+    });
+
+  program
+    .command('verify-attestation <file>')
+    .description('Check an attestation file: signature, address/key, and that it names a stored certificate')
+    .action(async (file: string) => {
+      await run(async (engine, opts) => {
+        const att = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) as ResilienceAttestation;
+        const check = await engine.resilience.checkAttestation(att);
+        const ok = check.signatureValid && check.addressMatchesKey && check.matchesCertificate;
+        if (opts.json) printJson({ ok, check });
+        else {
+          console.log(`attestation ${ok ? 'VALID' : 'INVALID'}: signature=${check.signatureValid} key=${check.addressMatchesKey} certificate=${check.matchesCertificate} independent=${check.independent}`);
+        }
+        if (!ok) process.exitCode = 1;
+      });
+    });
+
+  program
     .command('score [validator]')
-    .description('Resilience score v1 (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted')
-    .action(async (validator: string | undefined) => {
+    .description('Resilience score (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted')
+    .option('--v2', 'resilience-under-failure score v2: runs weighted by evidence class (drill + authorship re-verified against the chain)')
+    .action(async (validator: string | undefined, cmdOpts: { v2?: boolean }) => {
       await run(async (engine, opts) => {
         const ids = validator !== undefined ? [validator] : engine.resilience.listValidators();
         const scores = [];
-        for (const id of ids) scores.push(await engine.resilience.score(id));
+        for (const id of ids) scores.push(cmdOpts.v2 ? await engine.resilience.scoreV2(id) : await engine.resilience.score(id));
         if (opts.json) {
           printJson({ ok: true, scores });
           return;
         }
         if (scores.length === 0) console.log('No certified validators.');
         for (const s of scores) {
+          const classes =
+            'byClass' in s
+              ? `  observed=${s.byClass['chain-observed']} bound=${s.byClass['chain-bound']} self=${s.byClass['self-reported']}`
+              : '';
           console.log(
-            `${s.validatorId.padEnd(14)} ${String(s.score).padStart(3)}/100  runs=${s.runs} survived=${s.faultsSurvived} quality=${s.quality.toFixed(3)} confidence=${s.confidence.toFixed(3)}${s.excluded.length ? `  excluded=${s.excluded.length} (integrity failed)` : ''}`,
+            `${s.validatorId.padEnd(14)} ${String(s.score).padStart(3)}/100  v${s.version} runs=${s.runs} survived=${s.faultsSurvived} quality=${s.quality.toFixed(3)} confidence=${s.confidence.toFixed(3)}${classes}${s.excluded.length ? `  excluded=${s.excluded.length} (integrity failed)` : ''}`,
           );
         }
       });

@@ -1456,3 +1456,26 @@ Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at
 - Design note: the beacon is the public V3 chain; the faulted network can be a local CI network. This stops an operator choosing the fault/timing after seeing the result; it does not prove who ran the fault (that is the signature).
 - Tests: `resilience-drill-chain.test.ts` (7), `resilience-drill-live.test.ts` (3); tsc engine and CLI clean, eslint clean.
 - Next: T-9.7 BABE/GRANDPA recovery evidence; then CI drill that consumes a seeded drill.
+
+## 2026-10-25 22:00 WAT: T-9.7 step 1, BABE authorship recovery evidence
+- `decodeBabePreDigest` reads the BABE pre-runtime digest (primary / secondary-plain / secondary-VRF: authority index + slot) from a header's digest logs; checked against a real V3 header.
+- `buildAuthorshipEvidence` derives a contiguous block window from the certificate's own observations (pre-fault best head to post-recovery best head; fault window = after the last pre-fault head up to the last during-fault head) and stores every block's hash, author index and slot in `chain.authorship` (part of the fingerprint). `verifyAuthorshipEvidence` rejects a window that does not match the observations, a missing or cherry-picked block, and any hash/author/slot that differs from the chain; offline is `unverifiable`.
+- `summarizeAuthorship` answers the recovery question: did the target authority author during the fault window (expected 0 for a pause) and at which block did it resume.
+- CLI: `kaizen v3 authorship --last N` (read-only), `kaizen certify <runId> --authority-index N`. Live: 60 V3 blocks #194096..#194155 decoded, 2 authorities (32 and 28 blocks), saved to `docs/evidence/v3-authorship-sample.json`.
+- Limits: the authority index is supplied by the operator and recorded; mapping an index to a validator account is not claimed yet. GRANDPA set id and score v2 weighting are next.
+
+## 2026-10-25 22:00 WAT: T-9.7 step 2, GRANDPA finality-quorum evidence
+- `chain.grandpa` (in the fingerprint): at the last pre-fault finalized block, the GRANDPA authority set (`GrandpaApi_grandpa_authorities`) and `Grandpa.CurrentSetId`, the threshold (total - floor((total-1)/3)), the weight left with the target down, and `predictedStall`. `verifyGrandpaQuorum` re-reads that state at the recorded block hash, recomputes the arithmetic, and reports whether the prediction agrees with the finality actually observed (`consistent`). A mismatch of chain state is `mismatch`; pruned or unreachable state is `unverifiable`; a prediction/observation disagreement is reported in the reasons, never hidden.
+- Live V3: `kaizen v3 finality` reads set 54, 2 authorities, total weight 2, threshold 2, so pausing either validator is predicted to stall finality (V3 keeps old state: reads at blocks 100000, 150000, 194000 succeeded). Evidence: `docs/evidence/v3-grandpa-quorum.json`.
+- `kaizen certify <runId> --grandpa-index N` attaches it. Local `portaldot_dev` nodes prune state after about 256 blocks, so older local certificates verify as `unverifiable` on this check.
+- Tests: `resilience-grandpa.test.ts` (6, uses the real V3 authority bytes).
+
+## 2026-10-25 22:00 WAT: score v2 (resilience-under-failure)
+- `computeResilienceScoreV2`: per-run weight = 30-day recency decay times evidence class (chain-observed 1.0 = seeded drill and authorship both re-verified and GRANDPA prediction not contradicted; chain-bound 0.5; self-reported 0.1). Recovery time is slots between the last fault-window block and the target's first authored block after it, times slot duration, when authorship is present; otherwise the v1 wall-clock metric.
+- `ResilienceService.scoreV2` re-verifies only certificates that carry drill/authorship/GRANDPA records; unreachable chain keeps them chain-bound. CLI: `kaizen score [validator] --v2`. v1 is untouched and still the default.
+- Tests: `resilience-score-v2.test.ts` (8), service and CLI tests (+2). Not yet in the on-chain registry; signed attestations are the remaining T-9.7/9.8 piece.
+
+## 2026-10-25 22:00 WAT: signed attestations
+- `createAttestation` / `checkAttestation` (`attestation.ts`): an attester re-verifies a stored certificate against the chain (`engine.resilience.verify`) and signs `kaizen:attestation:v1:<fingerprint>:<verdict>:<drill>:<authorship>:<grandpa>` with sr25519. Refuses a certificate whose fingerprint does not match its run; offline re-verification yields the verdict `unverifiable`, never `verified`. `independent` is true only when the attester key differs from the certificate signer's.
+- CLI: `kaizen attest <fingerprint> [--out file]`, `kaizen verify-attestation <file>` (signature, key/address, and that it names a stored certificate). Tests: engine 2, CLI +1.
+- Not done: attestations do not yet change the score or go to the registry. Tier 1 item 8 is code-complete except that wiring.

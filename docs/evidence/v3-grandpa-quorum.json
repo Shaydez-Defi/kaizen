@@ -1,0 +1,52 @@
+{
+  "finalized": {
+    "number": 194185,
+    "hash": "0x70da499601f75e9f12704d2c357ca314d93257f938605c1b9cc7605e769c6e48"
+  },
+  "quorums": [
+    {
+      "at": {
+        "number": 194185,
+        "hash": "0x70da499601f75e9f12704d2c357ca314d93257f938605c1b9cc7605e769c6e48"
+      },
+      "setId": 54,
+      "authorities": [
+        {
+          "id": "0xe64cb64dacf59392463823df2978ab3ee21f72362d57c7fe3b85d435ea72d090",
+          "weight": 1
+        },
+        {
+          "id": "0x71fe90e5ae0c71f83e66da6c13b95c8627e62b3a584bb24ad18dfb56973a91f0",
+          "weight": 1
+        }
+      ],
+      "totalWeight": 2,
+      "thresholdWeight": 2,
+      "targetIndex": 0,
+      "remainingWeight": 1,
+      "predictedStall": true
+    },
+    {
+      "at": {
+        "number": 194185,
+        "hash": "0x70da499601f75e9f12704d2c357ca314d93257f938605c1b9cc7605e769c6e48"
+      },
+      "setId": 54,
+      "authorities": [
+        {
+          "id": "0xe64cb64dacf59392463823df2978ab3ee21f72362d57c7fe3b85d435ea72d090",
+          "weight": 1
+        },
+        {
+          "id": "0x71fe90e5ae0c71f83e66da6c13b95c8627e62b3a584bb24ad18dfb56973a91f0",
+          "weight": 1
+        }
+      ],
+      "totalWeight": 2,
+      "thresholdWeight": 2,
+      "targetIndex": 1,
+      "remainingWeight": 1,
+      "predictedStall": true
+    }
+  ]
+}
