@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kaizen Explorer: Proof-of-Resilience on Portaldot V3</title>
+<style>
+body{font:15px/1.5 system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1b1b1f}
+h1{margin-bottom:0}.sub{color:#555;margin-top:.2rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border-bottom:1px solid #ddd;padding:.45rem;text-align:left;vertical-align:top}
+code{font-size:12px;word-break:break-all}.ok{color:#0a7a3d;font-weight:600}.bad{color:#b3261e;font-weight:600}.mute{color:#666}
+button{padding:.35rem .7rem;cursor:pointer}.note{background:#f6f4ee;padding:.7rem 1rem;border-radius:6px;font-size:13px}
+</style></head><body>
+<h1>Kaizen Explorer</h1>
+<p class="sub">Proof-of-Resilience certificates anchored on Portaldot V3 (test network). Every number below is read live from the chain when you press verify.</p>
+<div id="net" class="mute">Checking V3…</div>
+<h2>Registries</h2><div id="surfaces"></div>
+<h2>Leaderboard</h2><div id="board"></div>
+<h2>Certificates</h2><div id="certs"></div>
+<p class="note">Scores are a resilience-under-failure score computed by the operator (Kaizen score v1) and stored on chain; the certificate shown comes from a CI drill on a local two-node network and is signed with a public dev key (integrity, not identity). Test network, not mainnet.</p>
+<script type="module" src="app.js"></script>
+</body></html>

@@ -1466,3 +1466,9 @@ K8s/Helm — untouched.
 - Limits: this watches a live network, injects no faults, and is not a resilience score. The node exposes one peer (its own view), so `peers` is that node's peer count, not a network total.
 - Tests: engine 12, CLI 3; tsc and eslint clean. Branch `feat/network-monitor` (off feat/lite-registry).
 - ink CI: run 40167589160 failed because stable Rust is too new for cargo-contract's build-std; pinned Rust 1.85.0 (new run in progress).
+
+## 2026-10-25 13:00 WAT: static explorer (plan item 4, on feat/explorer)
+
+- `explorer/` (plain HTML + ES module, no build): V3 head and genesis check, registry list (EVM lite live, ink! built/not deployed), leaderboard from live `getScore`, per-certificate "Verify" via live `certOf` eth_call compared with the committed index (`explorer/data/index.json`). Run against V3 from Node: certOf returns score 35 / block 181495, getScore count 1, unknown fingerprint returns not recorded.
+- `.github/workflows/pages.yml` publishes `explorer/` on push to main (not run yet; freeze until Oct 27).
+- Limits: browser check compares registry state, not the sr25519 signature or the source run (run record not committed). ink! rows appear once RSK-32 clears.
