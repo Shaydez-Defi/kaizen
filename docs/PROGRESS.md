@@ -1445,3 +1445,6 @@ K8s/Helm — untouched.
 - Branch `feat/commit-reveal-drills` (off PR #4); main untouched (freeze until 2026-10-27).
 - Next: on-chain commit of target block N, reveal once N is finalized, certificate
   `drill` field + verifier mismatch check, then T-9.7 BABE authorship.
+
+## 2026-10-25 evening: T-9.6 step 2
+Pure commit-reveal check (`drill-commit.ts`): future-block ordering, finality at reveal, recomputed seeded drill. 4 unit tests pass. Not yet wired to chain commit or certificate `drill` field.

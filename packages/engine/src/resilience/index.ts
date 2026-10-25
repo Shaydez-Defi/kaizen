@@ -83,3 +83,5 @@ export {
   deriveDrill,
 } from './drill-seed';
 export type { DeriveDrillInput, DerivedDrill, DrillSeedBounds } from './drill-seed';
+export { createDrillCommitment, verifyDrillReveal } from './drill-commit';
+export type { DrillCommitment, DrillReveal, DrillRevealResult } from './drill-commit';
