@@ -200,6 +200,15 @@ deploy the resilience registry (195.2 code deposit + 66.2 storage deposit +
 0.33 fee) and ≈30.8 tPOT per certificate `record()` (30.73 storage deposit +
 0.06 fee). Deposits are held, not burned (RSK-30).
 
+## 30-second verify (no install, no node)
+
+```bash
+git clone https://github.com/Shaydez-Defi/kaizen && cd kaizen
+npm run demo   # Node >= 18, zero dependencies
+```
+
+Reads the certificates in `explorer/data/index.json` and checks each against the live Portaldot V3 registry (`certOf`, `getScore`) with read-only calls.
+
 ## Quickstart
 
 Prerequisites: Node.js 24+, npm 11+, Linux x86_64 or macOS (upstream ships no
