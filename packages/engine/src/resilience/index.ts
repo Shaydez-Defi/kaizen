@@ -124,3 +124,23 @@ export type {
   BabeDigest,
   HeaderSource,
 } from "./authorship";
+export {
+  GRANDPA_AUTHORITIES_CALL,
+  GRANDPA_SET_ID_KEY,
+  buildGrandpaQuorum,
+  createHttpStateSource,
+  decodeGrandpaAuthorities,
+  decodeSetId,
+  grandpaThreshold,
+  observedFinalityStall,
+  quorumBlock,
+  quorumFrom,
+  readGrandpaQuorum,
+  verifyGrandpaQuorum,
+} from "./grandpa";
+export type {
+  GrandpaAuthority,
+  GrandpaCheck,
+  GrandpaQuorumEvidence,
+  StateSource,
+} from "./grandpa";

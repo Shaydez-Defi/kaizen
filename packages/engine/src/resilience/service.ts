@@ -15,6 +15,7 @@
  */
 
 import type { EventBus, KaizenEventMap } from '../events/bus';
+import { buildGrandpaQuorum, createHttpStateSource, type StateSource } from './grandpa';
 import { buildAuthorshipEvidence, createHttpHeaderSource, type HeaderSource } from './authorship';
 import type { DrillEvidence } from './drill-chain';
 import { KaizenError } from '../errors';
@@ -196,7 +197,7 @@ export class ResilienceService {
 
   async certifyRun(
     runId: string,
-    options: { allowDevKey?: boolean; drill?: DrillEvidence; authorityIndex?: number; headers?: HeaderSource } = {},
+    options: { allowDevKey?: boolean; drill?: DrillEvidence; authorityIndex?: number; headers?: HeaderSource; grandpaIndex?: number; state?: StateSource } = {},
   ): Promise<ResilienceCertificate> {
     const run = this.store.getScenarioRun(runId);
     const stored = this.store.getResilienceEvidence(runId);
@@ -210,6 +211,16 @@ export class ResilienceService {
         );
       }
       evidence = { ...evidence, authorship: await buildAuthorshipEvidence(headers, evidence, options.authorityIndex) };
+    }
+    if (evidence && options.grandpaIndex !== undefined) {
+      const state = options.state ?? this.stateSourceForNetwork(run.networkId);
+      if (!state) {
+        throw new KaizenError(
+          'RESILIENCE_NOT_CERTIFIABLE',
+          'GRANDPA evidence needs a running node of the network (or an RPC state source)',
+        );
+      }
+      evidence = { ...evidence, grandpa: await buildGrandpaQuorum(state, evidence, options.grandpaIndex) };
     }
     if (!evidence) {
       throw new KaizenError(
@@ -307,17 +318,27 @@ export class ResilienceService {
     }
   }
 
+  stateSourceForNetwork(networkId: string): StateSource | null {
+    try {
+      const node = this.store.listNodes(networkId).find((n) => n.status === 'running');
+      return node ? createHttpStateSource(httpUrlForPort(node.ports.rpc)) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async verify(fingerprint: string): Promise<CertificateVerification> {
     const cert = this.getCertificate(fingerprint);
     const run = this.store.getScenarioRun(cert.runId);
     const net = this.readerForNetwork(cert.networkId);
     const headers = cert.chain.authorship ? this.headerSourceForNetwork(cert.networkId) : null;
-    if (!cert.chain.drill) return verifyCertificate(cert, run, net, null, headers);
+    const state = cert.chain.grandpa ? this.stateSourceForNetwork(cert.networkId) : null;
+    if (!cert.chain.drill) return verifyCertificate(cert, run, net, null, headers, state);
     // The drill's beacon is the public V3 chain, not the network under test.
     try {
-      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader, headers));
+      return await withV3DrillReader((drillReader) => verifyCertificate(cert, run, net, drillReader, headers, state));
     } catch {
-      return verifyCertificate(cert, run, net, null, headers); // V3 unreachable: drill unverifiable
+      return verifyCertificate(cert, run, net, null, headers, state); // V3 unreachable: drill unverifiable
     }
   }
 }

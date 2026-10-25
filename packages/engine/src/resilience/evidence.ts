@@ -19,6 +19,7 @@
 
 import { KaizenError } from '../errors';
 import type { AuthorshipEvidence } from './authorship';
+import type { GrandpaQuorumEvidence } from './grandpa';
 import type { DrillEvidence } from './drill-chain';
 
 export const CHAIN_EVIDENCE_VERSION = 1 as const;
@@ -80,6 +81,8 @@ export interface ChainEvidence {
   drill?: DrillEvidence;
   /** BABE authorship around the fault (T-9.7); absent when not captured. */
   authorship?: AuthorshipEvidence;
+  /** GRANDPA quorum prediction vs observed finality (T-9.7); absent when not captured. */
+  grandpa?: GrandpaQuorumEvidence;
 }
 
 const HASH_RE = /^0x[0-9a-f]{64}$/;
