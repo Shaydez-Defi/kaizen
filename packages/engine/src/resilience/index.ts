@@ -97,3 +97,11 @@ export type {
   DrillCommitProof,
   DrillEvidence,
 } from "./drill-chain";
+export {
+  DEFAULT_DRILL_LEAD_BLOCKS,
+  commitDrill,
+  createV3DrillPort,
+  revealDrill,
+  v3DrillChainReader,
+} from "./drill-live";
+export type { DrillLivePort, PendingDrill, RevealOptions } from "./drill-live";
