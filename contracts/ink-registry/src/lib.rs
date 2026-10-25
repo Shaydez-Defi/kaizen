@@ -87,7 +87,7 @@ mod kaizen_ink_registry {
             let blk = self.env().block_number();
             self.cert.insert(fingerprint, &(score, blk));
             let count = self.latest.get(validator).map(|l| l.2).unwrap_or(0);
-            self.latest.insert(validator, &(score, blk, count + 1));
+            self.latest.insert(validator, &(score, blk, count.saturating_add(1)));
             self.env().emit_event(CertificateRecorded {
                 validator,
                 fingerprint,
