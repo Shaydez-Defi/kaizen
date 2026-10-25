@@ -144,3 +144,18 @@ export type {
   GrandpaQuorumEvidence,
   StateSource,
 } from "./grandpa";
+export {
+  EVIDENCE_CLASS_WEIGHT,
+  RESILIENCE_SCORE_V2_VERSION,
+  classifyEvidence,
+  computeResilienceScoreV2,
+  recoverySlots,
+  toScoredRunInputV2,
+} from "./score-v2";
+export type {
+  EvidenceChecks,
+  EvidenceClass,
+  ResilienceScoreV2,
+  ScoredRunInputV2,
+  ScoredRunV2,
+} from "./score-v2";
