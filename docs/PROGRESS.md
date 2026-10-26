@@ -1470,3 +1470,7 @@ K8s/Helm — untouched.
 
 ## 2026-10-26 (evening)
 - A5: added `scripts/v3-balance.mjs` (working V3 balance check). Signer 5HSwNU… holds 465.8364 tPOT; ink! deploy still ~100 tPOT short (RSK-32), deploy-pending.
+
+## 2026-10-26 20:30 WAT: ink! twin live on V3 (A5 done)
+- Deployed the 6,848-byte ink! registry at `5DZ2aWJK6gupeHNj9FhAuHWZjtTMirFes75uXeZEWa2ipkiw` (block 207418). Outlay 547.71 tPOT (includes refundable deposits). Anchored certificate 0x517b2ffb81ec... (block 207421, tx 0x512d4803...95d3), 1.416 tPOT per anchor vs 7.74 on the EVM lite registry. Read back (35, 207421, 1). Evidence `docs/evidence/v3-ink-registry.json`.
+- Next: A1 combined-evidence CI drill.

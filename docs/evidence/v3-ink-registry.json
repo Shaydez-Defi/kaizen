@@ -1,0 +1,68 @@
+{
+  "chain": {
+    "name": "PortaldotV3 Test",
+    "genesis": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd"
+  },
+  "deploy": {
+    "address": "5DZ2aWJK6gupeHNj9FhAuHWZjtTMirFes75uXeZEWa2ipkiw",
+    "codeHash": "0x29194f2345bf27cafb51ffb903181e9ec9118ef34db20024fc6b27f798c27472",
+    "txHash": "0x0481783338d70d8af5c1beac7c368349d22cad61d7305e0d16c7a3e2a2cfe75b",
+    "blockHash": "0x1d42d1289f43b0e539feca2e6b9f54c34696761918aebc7821be9ddc578fcb13",
+    "blockNumber": 207418,
+    "events": [
+      "balances.Withdraw",
+      "balances.Held",
+      "contracts.CodeStored",
+      "system.NewAccount",
+      "balances.Endowed",
+      "balances.Transfer",
+      "contracts.Instantiated",
+      "balances.TransferAndHold",
+      "contracts.StorageDepositTransferredAndHeld",
+      "balances.TransferAndHold",
+      "contracts.StorageDepositTransferredAndHeld",
+      "balances.Deposit",
+      "balances.Deposit",
+      "transactionPayment.TransactionFeePaid",
+      "system.ExtrinsicSuccess"
+    ],
+    "spentPlanck": "54770958143337145",
+    "spent": "547.7095814333715 tPOT"
+  },
+  "record": {
+    "txHash": "0x512d480396a2cd1bc560e28b38159d08ac8c6396191149bd78d90c75dcc95d3f",
+    "blockHash": "0x637da5dbf36353a75b51ea5a369e91bd51e0bdb127024e575f9492e77d341ac0",
+    "blockNumber": 207421,
+    "events": [
+      "balances.Withdraw",
+      "contracts.ContractEmitted",
+      "contracts.Called",
+      "balances.TransferAndHold",
+      "contracts.StorageDepositTransferredAndHeld",
+      "balances.Deposit",
+      "balances.Deposit",
+      "transactionPayment.TransactionFeePaid",
+      "system.ExtrinsicSuccess"
+    ],
+    "contractEmittedEvents": 1,
+    "spentPlanck": "141611531144243",
+    "spent": "1.41611531144243 tPOT"
+  },
+  "read": {
+    "contract": "5DZ2aWJK6gupeHNj9FhAuHWZjtTMirFes75uXeZEWa2ipkiw",
+    "getScore": {
+      "ok": [
+        35,
+        207421,
+        1
+      ]
+    },
+    "certOf": {
+      "ok": [
+        35,
+        207421
+      ]
+    },
+    "bestBlock": 207423
+  }
+}
