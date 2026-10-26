@@ -55,3 +55,5 @@ Updated at every phase gate. Each risk names an owner action (task ID).
 |----|------|-----|--------|------------|
 | RSK-19 | Ecosystem prior art (pdk) conflicts/licenses | L | MITIGATED | No code reused; learnings only (R-16); MIT vs our MIT compatible anyway |
 | RSK-20 | Helm v4 (installed) vs commonly-documented Helm v3 chart syntax | M | OPEN | T-6.3 validates lint/install on the actual client version; pin chart apiVersion accordingly |
+
+> RSK-32 update 2026-10-26 00:10 WAT: with the signer at 465.84 tPOT (V3 block 195861) the `contractsApi.instantiate` dry run for the 6,848-byte Wasm still fails: `Contracts.StorageDepositLimitExhausted` (limit null) and, with the limit set to the full balance minus 0.1 tPOT, a second Contracts error (index 24). The code-upload charge alone is 414.84 tPOT, so code plus instance deposits exceed the balance. Needs roughly 100 more tPOT or a smaller Wasm.
