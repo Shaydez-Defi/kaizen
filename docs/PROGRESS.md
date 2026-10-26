@@ -1467,3 +1467,6 @@ K8s/Helm — untouched.
 - CI run 40180350016 green (cargo test, clippy, `cargo contract build --release` on Rust 1.85.0, cached cargo-contract); artifact: 6,848-byte Wasm (7,708 before trimming).
 - V3 `contractsApi.uploadCode` dry run: `Contracts.StorageDepositNotEnoughFunds`. `depositPerByte` is 0.06 tPOT, so the upload needs about 411 tPOT held; the signer has 254.9. Logged as RSK-32. Needs about 180 more tPOT; nothing spent.
 - Deploy/anchor/read-back script is ready: `contracts/ink-registry/deploy.mjs` (dry-run with KAIZEN_DRY_RUN=1).
+
+## 2026-10-26 (evening)
+- A5: added `scripts/v3-balance.mjs` (working V3 balance check). Signer 5HSwNU… holds 465.8364 tPOT; ink! deploy still ~100 tPOT short (RSK-32), deploy-pending.
