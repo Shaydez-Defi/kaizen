@@ -1,0 +1,454 @@
+{
+  "kaizenDemoBundle": 1,
+  "id": "2026-10-27T15-22-25-713Z-e26a7de7",
+  "publishedAt": "2026-10-27T15:22:25.713Z",
+  "certificate": {
+    "version": 1,
+    "fingerprint": "0xe26a7de71ad2aed981245b4e97efa7e3f2741841288b4914e08f30a1c378d837",
+    "runId": "run-mvqu38ri-1f32fc88",
+    "runHash": "0x087bcaa12051186367eda454722db209ae37e95694a1cb48ec3720a889e5cf57",
+    "validatorId": "res-it-bob",
+    "networkId": "net_a06de279",
+    "chain": {
+      "version": 1,
+      "networkId": "net_a06de279",
+      "validatorId": "res-it-bob",
+      "observerNodeId": "net_a06de279-a",
+      "genesisHash": "0x4a5946e4511032ae7262379f88711368af31b0cc79c8fbec6cab41bfd4f48a5c",
+      "faultStartedAt": "2026-10-27T15:22:04.294Z",
+      "faultEndedAt": "2026-10-27T15:22:22.457Z",
+      "recoveredAt": "2026-10-27T15:22:24.515Z",
+      "observations": [
+        {
+          "phase": "before-fault",
+          "at": "2026-10-27T15:22:03.612Z",
+          "best": {
+            "number": 4,
+            "hash": "0xd09a0483b6644336bd09c84599d2c3678b1cfa33edbf77cae0a1e53bf8c395be"
+          },
+          "finalized": {
+            "number": 2,
+            "hash": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53"
+          }
+        },
+        {
+          "phase": "during-fault",
+          "at": "2026-10-27T15:22:04.453Z",
+          "best": {
+            "number": 4,
+            "hash": "0xd09a0483b6644336bd09c84599d2c3678b1cfa33edbf77cae0a1e53bf8c395be"
+          },
+          "finalized": {
+            "number": 2,
+            "hash": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53"
+          }
+        },
+        {
+          "phase": "during-fault",
+          "at": "2026-10-27T15:22:22.457Z",
+          "best": {
+            "number": 5,
+            "hash": "0x1e2a07a86fc9d28eacd00420ce78597c6c80a6cd0548f89e7c7f841a00e5e61b"
+          },
+          "finalized": {
+            "number": 2,
+            "hash": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53"
+          }
+        },
+        {
+          "phase": "after-recovery",
+          "at": "2026-10-27T15:22:22.512Z",
+          "best": {
+            "number": 5,
+            "hash": "0x1e2a07a86fc9d28eacd00420ce78597c6c80a6cd0548f89e7c7f841a00e5e61b"
+          },
+          "finalized": {
+            "number": 2,
+            "hash": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53"
+          }
+        },
+        {
+          "phase": "after-recovery",
+          "at": "2026-10-27T15:22:24.515Z",
+          "best": {
+            "number": 6,
+            "hash": "0x3f46e61661375113287012537e825309818dd2ef43c35a4e086e2ffb44d536ac"
+          },
+          "finalized": {
+            "number": 3,
+            "hash": "0xf881842f8659634c39265d37c2a0c0e15c4e510b88ae0db4d76525a69cc6811c"
+          }
+        }
+      ],
+      "gaps": [],
+      "metrics": {
+        "recovered": true,
+        "timeToRecoverMs": 2058,
+        "finalityGapBlocks": 3,
+        "blocksMissed": 2,
+        "expectedBlockTimeMs": 6000
+      }
+    },
+    "signature": {
+      "address": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+      "publicKey": "0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d",
+      "scheme": "sr25519",
+      "source": "dev",
+      "dev": true,
+      "signature": "0x5e3619ffa88fc2097decb3eb863668e95ab0bdecef237f6e035125980e12e1154440125db34bf69a0b57567588c04e0945d9dd4f7fd5fa45915fbac7e527108b"
+    },
+    "signedAt": "2026-10-27T15:22:24.573Z"
+  },
+  "run": {
+    "id": "run-mvqu38ri-1f32fc88",
+    "scenarioId": "scn-mvqu386u-1cd4761d",
+    "scenarioName": "resilience pause drill",
+    "scenarioSchemaVersion": 1,
+    "snapshot": {
+      "id": "scn-mvqu386u-1cd4761d",
+      "name": "resilience pause drill",
+      "description": "live proof-of-resilience test",
+      "schemaVersion": 1,
+      "tags": [],
+      "requires": {
+        "designatedTest": true,
+        "preset": "two-node"
+      },
+      "steps": [
+        {
+          "id": "s1",
+          "order": 0,
+          "operation": {
+            "type": "pause",
+            "config": {
+              "node": "bob",
+              "durationMs": 15000
+            }
+          },
+          "delayBeforeMs": 0,
+          "delayAfterMs": 0,
+          "timeoutMs": 90000,
+          "preconditions": [
+            {
+              "kind": "rpc-reachable",
+              "expect": true,
+              "node": "bob"
+            },
+            {
+              "kind": "process-state",
+              "expect": [
+                "running"
+              ],
+              "node": "bob"
+            }
+          ],
+          "postconditions": [
+            {
+              "kind": "recovery-verified",
+              "node": "bob"
+            },
+            {
+              "kind": "rpc-reachable",
+              "expect": true,
+              "node": "bob"
+            }
+          ]
+        }
+      ],
+      "execution": {
+        "onPreconditionFailed": "abort-run",
+        "onStepFailed": "abort-run",
+        "onVerificationInconclusive": "fail-step",
+        "onStepTimeout": "fail-step",
+        "onCleanupFailed": "cancel-run",
+        "cancellation": "cleanup-then-stop"
+      },
+      "validation": {
+        "valid": true,
+        "schemaVersion": 1,
+        "issues": [],
+        "errorCount": 0,
+        "warningCount": 0,
+        "worstCaseDurationMs": 90000,
+        "stepCount": 1
+      },
+      "validationStatus": "valid",
+      "createdBy": "it",
+      "updatedBy": "it",
+      "createdAt": "2026-10-27T15:22:02.166Z",
+      "updatedAt": "2026-10-27T15:22:02.166Z"
+    },
+    "networkId": "net_a06de279",
+    "networkName": "res-it",
+    "state": "completed",
+    "currentStepId": "s1",
+    "targetNodes": [
+      {
+        "label": "bob",
+        "nodeId": "net_a06de279-b",
+        "nodeName": "res-it-bob"
+      }
+    ],
+    "requestedBy": "it",
+    "replayOfRunId": null,
+    "executorPid": 2143,
+    "steps": [
+      {
+        "stepId": "s1",
+        "order": 0,
+        "operationType": "pause",
+        "faultType": "pause",
+        "nodeLabel": "bob",
+        "nodeId": "net_a06de279-b",
+        "nodeName": "res-it-bob",
+        "state": "completed",
+        "startedAt": "2026-10-27T15:22:03.346Z",
+        "finishedAt": "2026-10-27T15:22:22.503Z",
+        "preconditions": [
+          {
+            "kind": "rpc-reachable",
+            "node": "bob",
+            "nodeId": "net_a06de279-b",
+            "verdict": "satisfied",
+            "detail": "rpc-reachable=true (expect true): rpc reachable (peers=1), head=#4",
+            "attempts": 1,
+            "waitedMs": 4,
+            "at": "2026-10-27T15:22:03.407Z"
+          },
+          {
+            "kind": "process-state",
+            "node": "bob",
+            "nodeId": "net_a06de279-b",
+            "verdict": "satisfied",
+            "detail": "process status=running pid=2229 alive=true; expect [running]",
+            "attempts": 1,
+            "waitedMs": 1,
+            "at": "2026-10-27T15:22:03.408Z"
+          }
+        ],
+        "postconditions": [
+          {
+            "kind": "recovery-verified",
+            "node": "bob",
+            "nodeId": "net_a06de279-b",
+            "verdict": "satisfied",
+            "detail": "latest fault flt-mvqu39b1-8d3aa657 (pause, state=completed) recoveryVerified=true",
+            "attempts": 1,
+            "waitedMs": 1,
+            "at": "2026-10-27T15:22:22.496Z"
+          },
+          {
+            "kind": "rpc-reachable",
+            "node": "bob",
+            "nodeId": "net_a06de279-b",
+            "verdict": "satisfied",
+            "detail": "rpc-reachable=true (expect true): rpc reachable (peers=1), head=#5",
+            "attempts": 1,
+            "waitedMs": 6,
+            "at": "2026-10-27T15:22:22.502Z"
+          }
+        ],
+        "verification": "satisfied",
+        "faultId": "flt-mvqu39b1-8d3aa657",
+        "outcome": "verified",
+        "claims": {
+          "applied": true,
+          "effectObserved": true,
+          "faultRemoved": true,
+          "recovered": true,
+          "recoveryVerified": true
+        },
+        "durationMs": 18761,
+        "policyApplied": null,
+        "warnings": [],
+        "error": null
+      }
+    ],
+    "validation": {
+      "valid": true,
+      "schemaVersion": 1,
+      "issues": [],
+      "errorCount": 0,
+      "warningCount": 0,
+      "worstCaseDurationMs": 90000,
+      "stepCount": 1
+    },
+    "warnings": [],
+    "error": null,
+    "cleanup": {
+      "checkedAt": "2026-10-27T15:22:22.506Z",
+      "activeFaultsFound": 0,
+      "actions": [],
+      "quarantined": false,
+      "verified": true,
+      "detail": "active faults at finish: 0; nothing to roll back; no quarantine"
+    },
+    "cancellation": null,
+    "createdAt": "2026-10-27T15:22:02.910Z",
+    "startedAt": "2026-10-27T15:22:03.288Z",
+    "updatedAt": "2026-10-27T15:22:22.506Z",
+    "finishedAt": "2026-10-27T15:22:22.506Z",
+    "currentStepOrder": 0
+  },
+  "verificationOnline": {
+    "status": "verified",
+    "reasons": [
+      "chain: 11 block hash(es) match the network",
+      "DEV KEY: signed with a public test key — proves integrity, not operator identity"
+    ],
+    "integrity": {
+      "fingerprintMatches": true,
+      "recomputedFingerprint": "0xe26a7de71ad2aed981245b4e97efa7e3f2741841288b4914e08f30a1c378d837",
+      "signatureValid": true,
+      "addressMatchesKey": true,
+      "dev": true
+    },
+    "chain": {
+      "status": "verified",
+      "reason": "11 block hash(es) match the network",
+      "checks": [
+        {
+          "phase": "genesis",
+          "kind": "genesis",
+          "number": 0,
+          "expected": "0x4a5946e4511032ae7262379f88711368af31b0cc79c8fbec6cab41bfd4f48a5c",
+          "actual": "0x4a5946e4511032ae7262379f88711368af31b0cc79c8fbec6cab41bfd4f48a5c",
+          "ok": true
+        },
+        {
+          "phase": "before-fault",
+          "kind": "best",
+          "number": 4,
+          "expected": "0xd09a0483b6644336bd09c84599d2c3678b1cfa33edbf77cae0a1e53bf8c395be",
+          "actual": "0xd09a0483b6644336bd09c84599d2c3678b1cfa33edbf77cae0a1e53bf8c395be",
+          "ok": true
+        },
+        {
+          "phase": "before-fault",
+          "kind": "finalized",
+          "number": 2,
+          "expected": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "actual": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "ok": true
+        },
+        {
+          "phase": "during-fault",
+          "kind": "best",
+          "number": 4,
+          "expected": "0xd09a0483b6644336bd09c84599d2c3678b1cfa33edbf77cae0a1e53bf8c395be",
+          "actual": "0xd09a0483b6644336bd09c84599d2c3678b1cfa33edbf77cae0a1e53bf8c395be",
+          "ok": true
+        },
+        {
+          "phase": "during-fault",
+          "kind": "finalized",
+          "number": 2,
+          "expected": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "actual": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "ok": true
+        },
+        {
+          "phase": "during-fault",
+          "kind": "best",
+          "number": 5,
+          "expected": "0x1e2a07a86fc9d28eacd00420ce78597c6c80a6cd0548f89e7c7f841a00e5e61b",
+          "actual": "0x1e2a07a86fc9d28eacd00420ce78597c6c80a6cd0548f89e7c7f841a00e5e61b",
+          "ok": true
+        },
+        {
+          "phase": "during-fault",
+          "kind": "finalized",
+          "number": 2,
+          "expected": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "actual": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "ok": true
+        },
+        {
+          "phase": "after-recovery",
+          "kind": "best",
+          "number": 5,
+          "expected": "0x1e2a07a86fc9d28eacd00420ce78597c6c80a6cd0548f89e7c7f841a00e5e61b",
+          "actual": "0x1e2a07a86fc9d28eacd00420ce78597c6c80a6cd0548f89e7c7f841a00e5e61b",
+          "ok": true
+        },
+        {
+          "phase": "after-recovery",
+          "kind": "finalized",
+          "number": 2,
+          "expected": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "actual": "0xba58db00212810daf361c6c309c50b5757496c842701b64aaf3457527c8e4c53",
+          "ok": true
+        },
+        {
+          "phase": "after-recovery",
+          "kind": "best",
+          "number": 6,
+          "expected": "0x3f46e61661375113287012537e825309818dd2ef43c35a4e086e2ffb44d536ac",
+          "actual": "0x3f46e61661375113287012537e825309818dd2ef43c35a4e086e2ffb44d536ac",
+          "ok": true
+        },
+        {
+          "phase": "after-recovery",
+          "kind": "finalized",
+          "number": 3,
+          "expected": "0xf881842f8659634c39265d37c2a0c0e15c4e510b88ae0db4d76525a69cc6811c",
+          "actual": "0xf881842f8659634c39265d37c2a0c0e15c4e510b88ae0db4d76525a69cc6811c",
+          "ok": true
+        }
+      ]
+    },
+    "devKey": true
+  },
+  "verificationOffline": {
+    "status": "unverifiable",
+    "reasons": [
+      "chain: network offline: no RPC endpoint for this network",
+      "DEV KEY: signed with a public test key — proves integrity, not operator identity"
+    ],
+    "integrity": {
+      "fingerprintMatches": true,
+      "recomputedFingerprint": "0xe26a7de71ad2aed981245b4e97efa7e3f2741841288b4914e08f30a1c378d837",
+      "signatureValid": true,
+      "addressMatchesKey": true,
+      "dev": true
+    },
+    "chain": {
+      "status": "unverifiable",
+      "reason": "network offline: no RPC endpoint for this network",
+      "checks": []
+    },
+    "devKey": true
+  },
+  "score": {
+    "version": 1,
+    "validatorId": "res-it-bob",
+    "score": 35,
+    "quality": 0.8808546347461557,
+    "confidence": 0.393469339638578,
+    "effectiveRuns": 0.9999999978606569,
+    "runs": 1,
+    "faultsSurvived": 1,
+    "latestCertifiedAt": "2026-10-27T15:22:24.573Z",
+    "asOf": "2026-10-27T15:22:24.581Z",
+    "perRun": [
+      {
+        "runId": "run-mvqu38ri-1f32fc88",
+        "survived": true,
+        "quality": 0.8808546347461557,
+        "weight": 0.9999999978606569,
+        "ageDays": 9.259259259259259e-8
+      }
+    ],
+    "excluded": []
+  },
+  "anchor": {
+    "status": "skipped",
+    "reason": "no V3 signer configured for this run"
+  },
+  "workflow": {
+    "runId": "40530099960",
+    "url": "https://github.com/Shaydez-Defi/kaizen/actions/runs/40530099960",
+    "event": "schedule",
+    "sha": "9b3c940308e28f139236ae1f6e76793779affeb7"
+  }
+}
