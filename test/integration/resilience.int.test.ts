@@ -16,7 +16,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildDrillRecord, createEngine, type KaizenEngine, type ScenarioInput } from '@kaizen/engine';
+import {
+  buildDrillRecord,
+  createEngine,
+  parseCertificateBundle,
+  verifyCertificateBundle,
+  type KaizenEngine,
+  type ScenarioInput,
+} from '@kaizen/engine';
 import { LIVE, SHARED_BIN_CACHE, ensureSharedBinary, httpRpc, testRoot, waitFor } from './testkit';
 
 interface Health {
@@ -130,6 +137,15 @@ describe.runIf(LIVE)('Proof-of-Resilience (live, real network)', () => {
       fs.writeFileSync(path.join(out, 'score.json'), JSON.stringify(score, null, 2));
     }
     expect(online.status, online.reasons.join('; ')).toBe('verified');
+    // The same certificate as a portable bundle, verified from the file contents alone
+    // (no state store) against the live node: drill + BABE author + GRANDPA evidence in one document.
+    const bundle = engine.resilience.exportBundle(cert.fingerprint);
+    const fromBundle = await verifyCertificateBundle(
+      parseCertificateBundle(JSON.stringify(bundle)),
+      engine.resilience.readerForNetwork(networkId),
+    );
+    expect(fromBundle.status, fromBundle.reasons.join('; ')).toBe('verified');
+    if (out) fs.writeFileSync(path.join(out, 'certificate.bundle.json'), JSON.stringify(bundle, null, 2));
     expect(score.runs).toBe(1);
 
     await engine.networks.stop(networkId);
