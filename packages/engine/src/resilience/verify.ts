@@ -17,6 +17,7 @@
 
 import type { ScenarioRunRecord } from '../scenario/run-types';
 import { checkCertificateSignature, type ResilienceCertificate, type SignatureCheck } from './certificate';
+import { checkDrillRecord } from './drill-record';
 import type { ChainEvidence } from './evidence';
 import { ChainUnreachableError, type ChainReader } from './rpc';
 
@@ -99,7 +100,13 @@ export async function verifyCertificate(
   if (!integrity.fingerprintMatches) reasons.push('fingerprint does not match the stored run + evidence');
   if (!integrity.signatureValid) reasons.push('sr25519 signature is invalid');
   if (!integrity.addressMatchesKey) reasons.push('signer address does not match the public key');
-  const integrityOk = integrity.fingerprintMatches && integrity.signatureValid && integrity.addressMatchesKey;
+  let drillOk = true;
+  if (cert.drill) {
+    drillOk = checkDrillRecord(cert.drill).ok && cert.drill.validatorId === cert.validatorId;
+    if (!drillOk) reasons.push('drill record is inconsistent (ordering, seed derivation or validator)');
+  }
+  const integrityOk =
+    integrity.fingerprintMatches && integrity.signatureValid && integrity.addressMatchesKey && drillOk;
   reasons.push(`chain: ${chain.reason}`);
   if (cert.signature.dev) reasons.push('DEV KEY: signed with a public test key — proves integrity, not operator identity');
   const status: ChainCheckStatus = !integrityOk || chain.status === 'mismatch' ? 'mismatch' : chain.status;

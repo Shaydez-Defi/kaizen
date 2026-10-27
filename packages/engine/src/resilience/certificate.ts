@@ -24,6 +24,7 @@ import { KaizenError } from '../errors';
 import type { ScenarioRunRecord } from '../scenario/run-types';
 import { isTerminalScenarioRunState } from '../scenario/run-types';
 import { canonicalJson, computeRunHash, sha256Hex } from '../v3/anchor/canonical';
+import type { DrillRecord } from './drill-record';
 import type { ChainEvidence } from './evidence';
 import type { ResilienceSigner, ResilienceSignerSource } from './signer';
 
@@ -54,22 +55,25 @@ export interface ResilienceCertificate {
   validatorId: string;
   networkId: string;
   chain: ChainEvidence;
+  /** Optional commit-reveal drill record; when present it is part of the fingerprint. */
+  drill?: DrillRecord;
   signature: CertificateSignature;
   /** When the certificate was signed (not part of the fingerprint). */
   signedAt: string;
 }
 
-export function certificateDocument(run: ScenarioRunRecord, chain: ChainEvidence): string {
+export function certificateDocument(run: ScenarioRunRecord, chain: ChainEvidence, drill?: DrillRecord): string {
   return canonicalJson({
     kaizenCertificate: KAIZEN_CERTIFICATE_VERSION,
     runHash: computeRunHash(run),
     run,
     chain,
+    ...(drill ? { drill } : {}),
   });
 }
 
-export function computeCertificateFingerprint(run: ScenarioRunRecord, chain: ChainEvidence): string {
-  return sha256Hex(certificateDocument(run, chain));
+export function computeCertificateFingerprint(run: ScenarioRunRecord, chain: ChainEvidence, drill?: DrillRecord): string {
+  return sha256Hex(certificateDocument(run, chain, drill));
 }
 
 export function certificateMessage(fingerprint: string): string {
@@ -80,10 +84,11 @@ export function certificateMessage(fingerprint: string): string {
 export async function issueCertificate(input: {
   run: ScenarioRunRecord;
   chain: ChainEvidence;
+  drill?: DrillRecord;
   signer: ResilienceSigner;
   now?: () => Date;
 }): Promise<ResilienceCertificate> {
-  const { run, chain, signer } = input;
+  const { run, chain, signer, drill } = input;
   if (!isTerminalScenarioRunState(run.state) || run.state === 'rejected') {
     throw new KaizenError(
       'RESILIENCE_NOT_CERTIFIABLE',
@@ -94,7 +99,7 @@ export async function issueCertificate(input: {
     throw new KaizenError('RESILIENCE_NOT_CERTIFIABLE', 'chain evidence belongs to a different network than the run');
   }
   await cryptoWaitReady();
-  const fingerprint = computeCertificateFingerprint(run, chain);
+  const fingerprint = computeCertificateFingerprint(run, chain, drill);
   const signature = u8aToHex(signer.pair.sign(certificateMessage(fingerprint)));
   return {
     version: KAIZEN_CERTIFICATE_VERSION,
@@ -104,6 +109,7 @@ export async function issueCertificate(input: {
     validatorId: chain.validatorId,
     networkId: chain.networkId,
     chain,
+    ...(drill ? { drill } : {}),
     signature: {
       address: signer.address,
       publicKey: u8aToHex(signer.pair.publicKey),
@@ -135,7 +141,7 @@ export async function checkCertificateSignature(
   run: ScenarioRunRecord,
 ): Promise<SignatureCheck> {
   await cryptoWaitReady();
-  const recomputed = computeCertificateFingerprint(run, cert.chain);
+  const recomputed = computeCertificateFingerprint(run, cert.chain, cert.drill);
   let signatureValid = false;
   try {
     signatureValid = signatureVerify(
