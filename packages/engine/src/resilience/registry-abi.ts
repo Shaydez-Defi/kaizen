@@ -25,8 +25,8 @@ export const UNKNOWN_U16 = 0xffff;
 export const EVIDENCE_FLAGS = {
   chainBound: 1,
   devKey: 2,
-  seededDrill: 4, // planned (v2)
-  chainObserved: 8, // planned (v2)
+  seededDrill: 4, // certificate carries a commit-reveal drill record
+  chainObserved: 8, // a BABE author was decoded for an observed block
 } as const;
 
 export const CERTIFICATE_RECORDED_TOPIC = keccakAsHex(RESILIENCE_REGISTRY_SIGNATURES.certificateRecordedEvent, 256);
@@ -97,6 +97,17 @@ export function encodeRecordCall(i: RecordCallInput): string {
 }
 
 /** Record-call input for a certificate and its computed score. */
+/** evidenceFlags for a certificate, derived only from what it actually carries. */
+export function evidenceFlagsFor(cert: ResilienceCertificate): number {
+  const observed = cert.chain.observations.some((o) => o.best.author !== undefined || o.finalized.author !== undefined);
+  return (
+    EVIDENCE_FLAGS.chainBound |
+    (cert.signature.dev ? EVIDENCE_FLAGS.devKey : 0) |
+    (cert.drill ? EVIDENCE_FLAGS.seededDrill : 0) |
+    (observed ? EVIDENCE_FLAGS.chainObserved : 0)
+  );
+}
+
 export function recordInputFromCertificate(cert: ResilienceCertificate, score: number): RecordCallInput {
   return {
     validator: validatorKey(cert.validatorId),
@@ -107,7 +118,7 @@ export function recordInputFromCertificate(cert: ResilienceCertificate, score: n
     finalityGapBlocks: cert.chain.metrics.finalityGapBlocks,
     blocksMissed: cert.chain.metrics.blocksMissed,
     score,
-    evidenceFlags: EVIDENCE_FLAGS.chainBound | (cert.signature.dev ? EVIDENCE_FLAGS.devKey : 0),
+    evidenceFlags: evidenceFlagsFor(cert),
     signature: cert.signature.signature,
   };
 }

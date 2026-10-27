@@ -57,6 +57,7 @@ export {
   encodeRecordCall,
   encodeRecordedCall,
   recordInputFromCertificate,
+  evidenceFlagsFor,
   validatorKey,
 } from './registry-abi';
 export type { OnChainCertificate, RecordCallInput } from './registry-abi';
