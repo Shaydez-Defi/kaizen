@@ -17,7 +17,7 @@
  *   score      = round(100 · quality · confidence), clamped to [0, 100]
  */
 
-import { KaizenError } from '../errors';
+import { KaizenError } from "../errors";
 
 export const RESILIENCE_SCORE_VERSION = 1 as const;
 
@@ -64,7 +64,7 @@ export interface ResilienceScore {
   perRun: ScoredRun[];
 }
 
-const SURVIVING_STATES = new Set(['completed', 'completed-with-warnings']);
+const SURVIVING_STATES = new Set(["completed", "completed-with-warnings"]);
 const DAY_MS = 86_400_000;
 
 function inverse(value: number | null, ref: number): number {
@@ -75,15 +75,26 @@ function inverse(value: number | null, ref: number): number {
 export function scoreRun(run: ScoredRunInput, asOf: Date): ScoredRun {
   const p = RESILIENCE_SCORE_PARAMS;
   const t = Date.parse(run.certifiedAt);
-  if (Number.isNaN(t)) throw new KaizenError('INVALID_INPUT', `invalid certifiedAt for run ${run.runId}`);
+  if (Number.isNaN(t))
+    throw new KaizenError(
+      "INVALID_INPUT",
+      `invalid certifiedAt for run ${run.runId}`,
+    );
   const ageDays = Math.max(0, (asOf.getTime() - t) / DAY_MS);
   const survived = run.recovered && SURVIVING_STATES.has(run.runState);
   const quality = survived
     ? p.weights.recovery * inverse(run.timeToRecoverMs, p.recoveryRefMs) +
-      p.weights.finality * inverse(run.finalityGapBlocks, p.finalityGapRefBlocks) +
+      p.weights.finality *
+        inverse(run.finalityGapBlocks, p.finalityGapRefBlocks) +
       p.weights.liveness * inverse(run.blocksMissed, p.blocksMissedRefBlocks)
     : 0;
-  return { runId: run.runId, survived, quality, weight: Math.pow(0.5, ageDays / p.halfLifeDays), ageDays };
+  return {
+    runId: run.runId,
+    survived,
+    quality,
+    weight: Math.pow(0.5, ageDays / p.halfLifeDays),
+    ageDays,
+  };
 }
 
 export function computeResilienceScore(
@@ -93,11 +104,21 @@ export function computeResilienceScore(
 ): ResilienceScore {
   const perRun = runs.map((r) => scoreRun(r, asOf));
   const weightSum = perRun.reduce((s, r) => s + r.weight, 0);
-  const quality = weightSum > 0 ? perRun.reduce((s, r) => s + r.weight * r.quality, 0) / weightSum : 0;
-  const confidence = 1 - Math.exp(-weightSum / RESILIENCE_SCORE_PARAMS.confidenceScale);
-  const score = Math.min(100, Math.max(0, Math.round(100 * quality * confidence)));
+  const quality =
+    weightSum > 0
+      ? perRun.reduce((s, r) => s + r.weight * r.quality, 0) / weightSum
+      : 0;
+  const confidence =
+    1 - Math.exp(-weightSum / RESILIENCE_SCORE_PARAMS.confidenceScale);
+  const score = Math.min(
+    100,
+    Math.max(0, Math.round(100 * quality * confidence)),
+  );
   const latest = runs.reduce<string | null>(
-    (m, r) => (m === null || Date.parse(r.certifiedAt) > Date.parse(m) ? r.certifiedAt : m),
+    (m, r) =>
+      m === null || Date.parse(r.certifiedAt) > Date.parse(m)
+        ? r.certifiedAt
+        : m,
     null,
   );
   return {
@@ -113,4 +134,28 @@ export function computeResilienceScore(
     asOf: asOf.toISOString(),
     perRun,
   };
+}
+
+/**
+ * Evidence-class weighting for score v2 (T-9.7). A run whose certificate is
+ * signed and independently verifiable against public chain data counts fully;
+ * unsigned or self-reported evidence is discounted. Pure and opt-in: v1
+ * scoring is unchanged unless a caller applies this factor to a run's weight.
+ */
+export const EVIDENCE_CLASS_FACTORS = {
+  "signed-chain-verified": 1,
+  "signed-local": 0.7,
+  unsigned: 0.4,
+} as const;
+
+export type EvidenceClass = keyof typeof EVIDENCE_CLASS_FACTORS;
+
+export function evidenceClassFactor(cls: EvidenceClass): number {
+  const f = EVIDENCE_CLASS_FACTORS[cls];
+  if (f === undefined)
+    throw new KaizenError(
+      "INVALID_INPUT",
+      `unknown evidence class ${String(cls)}`,
+    );
+  return f;
 }
