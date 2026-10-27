@@ -1474,3 +1474,6 @@ K8s/Helm — untouched.
 ## 2026-10-26 20:30 WAT: ink! twin live on V3 (A5 done)
 - Deployed the 6,848-byte ink! registry at `5DZ2aWJK6gupeHNj9FhAuHWZjtTMirFes75uXeZEWa2ipkiw` (block 207418). Outlay 547.71 tPOT (includes refundable deposits). Anchored certificate 0x517b2ffb81ec... (block 207421, tx 0x512d4803...95d3), 1.416 tPOT per anchor vs 7.74 on the EVM lite registry. Read back (35, 207421, 1). Evidence `docs/evidence/v3-ink-registry.json`.
 - Next: A1 combined-evidence CI drill.
+
+## 2026-10-27 01:00 WAT
+- T-9.6 step 2: `DrillRecord` build/check (drill-record.ts, 5 tests). Next: embed in certificate fingerprint, then A1 CI drill.

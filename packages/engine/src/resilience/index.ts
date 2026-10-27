@@ -83,3 +83,4 @@ export {
   deriveDrill,
 } from './drill-seed';
 export type { DeriveDrillInput, DerivedDrill, DrillSeedBounds } from './drill-seed';
+export * from './drill-record';
