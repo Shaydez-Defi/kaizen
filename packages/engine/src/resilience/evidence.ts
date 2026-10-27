@@ -17,11 +17,15 @@
  *    finalizing chain has not recovered)
  */
 
-import { KaizenError } from '../errors';
+import { KaizenError } from "../errors";
 
 export const CHAIN_EVIDENCE_VERSION = 1 as const;
 
-export const CHAIN_EVIDENCE_PHASES = ['before-fault', 'during-fault', 'after-recovery'] as const;
+export const CHAIN_EVIDENCE_PHASES = [
+  "before-fault",
+  "during-fault",
+  "after-recovery",
+] as const;
 export type ChainEvidencePhase = (typeof CHAIN_EVIDENCE_PHASES)[number];
 
 /** Default slot duration used to derive `blocksMissed` (Portaldot: 6 s). */
@@ -31,6 +35,8 @@ export interface BlockRef {
   number: number;
   /** 0x-prefixed 32-byte block hash as returned by the node. */
   hash: string;
+  /** BABE authorship decoded from the block's header digest, when available. */
+  author?: { kind: string; authorityIndex: number; slot: string };
 }
 
 export interface ChainObservation {
@@ -79,20 +85,21 @@ export interface ChainEvidence {
 const HASH_RE = /^0x[0-9a-f]{64}$/;
 
 export function isBlockRef(value: unknown): value is BlockRef {
-  if (typeof value !== 'object' || value === null) return false;
+  if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.number === 'number' &&
+    typeof v.number === "number" &&
     Number.isInteger(v.number) &&
     v.number >= 0 &&
-    typeof v.hash === 'string' &&
+    typeof v.hash === "string" &&
     HASH_RE.test(v.hash)
   );
 }
 
 function ms(iso: string): number {
   const t = Date.parse(iso);
-  if (Number.isNaN(t)) throw new KaizenError('INVALID_INPUT', `invalid timestamp: ${iso}`);
+  if (Number.isNaN(t))
+    throw new KaizenError("INVALID_INPUT", `invalid timestamp: ${iso}`);
   return t;
 }
 
@@ -108,25 +115,39 @@ export function computeRecoveryMetrics(input: {
 }): RecoveryMetrics & { recoveredAt: string | null } {
   const blockTime = input.expectedBlockTimeMs ?? DEFAULT_EXPECTED_BLOCK_TIME_MS;
   if (!Number.isFinite(blockTime) || blockTime <= 0) {
-    throw new KaizenError('INVALID_INPUT', 'expectedBlockTimeMs must be a positive number');
+    throw new KaizenError(
+      "INVALID_INPUT",
+      "expectedBlockTimeMs must be a positive number",
+    );
   }
   const obs = [...input.observations].sort((a, b) => ms(a.at) - ms(b.at));
-  const pre = obs.filter((o) => o.phase === 'before-fault');
-  const during = obs.filter((o) => o.phase === 'during-fault');
-  const after = obs.filter((o) => o.phase === 'after-recovery');
+  const pre = obs.filter((o) => o.phase === "before-fault");
+  const during = obs.filter((o) => o.phase === "during-fault");
+  const after = obs.filter((o) => o.phase === "after-recovery");
 
   // Recovery: first after-recovery observation whose finalized number is
   // strictly above every finalized number seen before/during the fault.
-  const baseline = [...pre, ...during].reduce((m, o) => Math.max(m, o.finalized.number), -1);
-  const recoveredObs = baseline >= 0 ? after.find((o) => o.finalized.number > baseline) : undefined;
+  const baseline = [...pre, ...during].reduce(
+    (m, o) => Math.max(m, o.finalized.number),
+    -1,
+  );
+  const recoveredObs =
+    baseline >= 0
+      ? after.find((o) => o.finalized.number > baseline)
+      : undefined;
   const recoveredAt = recoveredObs?.at ?? null;
   const anchor = input.faultEndedAt ?? input.faultStartedAt;
   const timeToRecoverMs =
-    recoveredAt !== null && anchor !== null ? Math.max(0, ms(recoveredAt) - ms(anchor)) : null;
+    recoveredAt !== null && anchor !== null
+      ? Math.max(0, ms(recoveredAt) - ms(anchor))
+      : null;
 
   const gapSamples = [...during, ...after];
   const finalityGapBlocks = gapSamples.length
-    ? gapSamples.reduce((m, o) => Math.max(m, o.best.number - o.finalized.number), 0)
+    ? gapSamples.reduce(
+        (m, o) => Math.max(m, o.best.number - o.finalized.number),
+        0,
+      )
     : null;
 
   // Blocks missed over the fault window: last pre-fault observation → last
@@ -156,7 +177,11 @@ export function computeRecoveryMetrics(input: {
 
 /** One read of a node's heads. Throws when the node is unreachable. */
 export interface HeadReader {
-  readHeads(): Promise<{ best: BlockRef; finalized: BlockRef; genesisHash: string | null }>;
+  readHeads(): Promise<{
+    best: BlockRef;
+    finalized: BlockRef;
+    genesisHash: string | null;
+  }>;
 }
 
 export interface ChainEvidenceRecorderOptions {
@@ -192,21 +217,31 @@ export class ChainEvidenceRecorder {
   /** Read the heads once; a failed read becomes a gap (returns null). */
   async observe(phase: ChainEvidencePhase): Promise<ChainObservation | null> {
     try {
-      const { best, finalized, genesisHash } = await this.opts.reader.readHeads();
+      const { best, finalized, genesisHash } =
+        await this.opts.reader.readHeads();
       if (!isBlockRef(best) || !isBlockRef(finalized)) {
-        throw new Error('node returned a malformed header');
+        throw new Error("node returned a malformed header");
       }
       if (genesisHash !== null) {
         if (this.genesisHash !== null && this.genesisHash !== genesisHash) {
-          throw new Error('genesis hash changed between observations');
+          throw new Error("genesis hash changed between observations");
         }
         this.genesisHash = genesisHash;
       }
-      const o: ChainObservation = { phase, at: this.now().toISOString(), best, finalized };
+      const o: ChainObservation = {
+        phase,
+        at: this.now().toISOString(),
+        best,
+        finalized,
+      };
       this.observations.push(o);
       return o;
     } catch (e) {
-      this.gaps.push({ phase, at: this.now().toISOString(), reason: e instanceof Error ? e.message : String(e) });
+      this.gaps.push({
+        phase,
+        at: this.now().toISOString(),
+        reason: e instanceof Error ? e.message : String(e),
+      });
       return null;
     }
   }
@@ -223,11 +258,14 @@ export class ChainEvidenceRecorder {
    * Poll 'after-recovery' observations until finality advances past the
    * pre/during-fault maximum or the timeout elapses. Returns whether it did.
    */
-  async awaitRecovery(options: { timeoutMs: number; intervalMs?: number }): Promise<boolean> {
+  async awaitRecovery(options: {
+    timeoutMs: number;
+    intervalMs?: number;
+  }): Promise<boolean> {
     const interval = options.intervalMs ?? 2_000;
     const deadline = this.now().getTime() + options.timeoutMs;
     for (;;) {
-      await this.observe('after-recovery');
+      await this.observe("after-recovery");
       if (this.metrics().recovered) return true;
       if (this.now().getTime() + interval > deadline) return false;
       await this.sleep(interval);

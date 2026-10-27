@@ -1483,3 +1483,6 @@ K8s/Helm — untouched.
 
 ## 2026-10-27 07:00 WAT
 - feat(resilience): BABE pre-digest authorship decoder + 3 tests (A1 step). Next: wire author into ChainEvidence observations and CI drill.
+
+## 2026-10-27 10:00 WAT
+- BABE author now attached to observed block refs by the HTTP chain reader (+1 test). Next: CI drill combining drill + BABE + GRANDPA evidence (A1).

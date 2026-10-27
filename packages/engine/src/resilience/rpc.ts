@@ -7,12 +7,13 @@
  * offline" instead of mistaking an outage for a mismatch.
  */
 
-import type { BlockRef, HeadReader } from './evidence';
+import { babeAuthorshipFromLogs } from "./babe";
+import type { BlockRef, HeadReader } from "./evidence";
 
 export class ChainUnreachableError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'ChainUnreachableError';
+    this.name = "ChainUnreachableError";
   }
 }
 
@@ -32,45 +33,73 @@ export interface HttpChainReaderOptions {
 interface HeaderJson {
   number: string | number;
   parentHash?: string;
+  digest?: { logs?: string[] };
 }
 
-export function createHttpChainReader(url: string, options: HttpChainReaderOptions = {}): ChainReader {
+export function createHttpChainReader(
+  url: string,
+  options: HttpChainReaderOptions = {},
+): ChainReader {
   const timeoutMs = options.timeoutMs ?? 4_000;
   const doFetch: FetchLike = options.fetch ?? ((u, init) => fetch(u, init));
   let genesis: string | null | undefined;
 
-  async function call(method: string, params: unknown[] = []): Promise<unknown> {
+  async function call(
+    method: string,
+    params: unknown[] = [],
+  ): Promise<unknown> {
     let res: Response;
     try {
       res = await doFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
-      throw new ChainUnreachableError(`${method}: ${e instanceof Error ? e.message : String(e)}`);
+      throw new ChainUnreachableError(
+        `${method}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
-    if (!res.ok) throw new ChainUnreachableError(`${method}: HTTP ${res.status}`);
-    const body = (await res.json()) as { result?: unknown; error?: { message?: string } };
-    if (body.error) throw new Error(`${method}: ${body.error.message ?? 'RPC error'}`);
+    if (!res.ok)
+      throw new ChainUnreachableError(`${method}: HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      result?: unknown;
+      error?: { message?: string };
+    };
+    if (body.error)
+      throw new Error(`${method}: ${body.error.message ?? "RPC error"}`);
     return body.result;
   }
 
   async function hashAt(n: number): Promise<string | null> {
-    const r = await call('chain_getBlockHash', [n]);
-    return typeof r === 'string' ? r.toLowerCase() : null;
+    const r = await call("chain_getBlockHash", [n]);
+    return typeof r === "string" ? r.toLowerCase() : null;
   }
 
   async function headerOf(hash?: string): Promise<BlockRef> {
-    const header = (await call('chain_getHeader', hash ? [hash] : [])) as HeaderJson | null;
-    if (!header) throw new Error('chain_getHeader returned no header');
-    const number = typeof header.number === 'number' ? header.number : parseInt(header.number, 16);
+    const header = (await call(
+      "chain_getHeader",
+      hash ? [hash] : [],
+    )) as HeaderJson | null;
+    if (!header) throw new Error("chain_getHeader returned no header");
+    const number =
+      typeof header.number === "number"
+        ? header.number
+        : parseInt(header.number, 16);
     // A header does not carry its own hash; resolve it canonically by number
     // for the best block, and keep the caller-supplied hash otherwise.
     const resolved = hash ?? (await hashAt(number));
     if (!resolved) throw new Error(`no hash for block #${number}`);
-    return { number, hash: resolved.toLowerCase() };
+    const ref: BlockRef = { number, hash: resolved.toLowerCase() };
+    const a = babeAuthorshipFromLogs(header.digest?.logs ?? []);
+    if (a)
+      ref.author = {
+        kind: a.kind,
+        authorityIndex: a.authorityIndex,
+        slot: a.slot,
+      };
+    return ref;
   }
 
   const reader: ChainReader = {
@@ -80,8 +109,11 @@ export function createHttpChainReader(url: string, options: HttpChainReaderOptio
     },
     blockHashAt: hashAt,
     async readHeads() {
-      const finalizedHash = (await call('chain_getFinalizedHead')) as string;
-      const [best, finalized] = await Promise.all([headerOf(), headerOf(finalizedHash)]);
+      const finalizedHash = (await call("chain_getFinalizedHead")) as string;
+      const [best, finalized] = await Promise.all([
+        headerOf(),
+        headerOf(finalizedHash),
+      ]);
       return { best, finalized, genesisHash: await reader.genesisHash() };
     },
   };
