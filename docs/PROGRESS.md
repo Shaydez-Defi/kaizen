@@ -1486,3 +1486,6 @@ K8s/Helm — untouched.
 
 ## 2026-10-27 10:00 WAT
 - BABE author now attached to observed block refs by the HTTP chain reader (+1 test). Next: CI drill combining drill + BABE + GRANDPA evidence (A1).
+
+## 2026-10-27 13:00 WAT
+- 5f8aadc: certifyRun accepts a drill record; live CI drill test binds drill + BABE author. resilience-live run 40500819745 green on x64. Next: GRANDPA finality evidence in certificate, then A2.
