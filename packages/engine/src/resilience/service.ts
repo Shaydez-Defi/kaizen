@@ -20,6 +20,7 @@ import { KaizenError } from '../errors';
 import { httpUrlForPort } from '../process/args';
 import type { StateStore } from '../state/store';
 import type { NodeRecord } from '../types';
+import { buildCertificateBundle, type CertificateBundle } from './bundle';
 import { issueCertificate, checkCertificateSignature, type ResilienceCertificate } from './certificate';
 import { ChainEvidenceRecorder, type ChainEvidence } from './evidence';
 import { createHttpChainReader, type ChainReader } from './rpc';
@@ -280,6 +281,12 @@ export class ResilienceService {
     } catch {
       return null;
     }
+  }
+
+  /** Certificate + its run in one portable, offline-verifiable document. */
+  exportBundle(fingerprint: string): CertificateBundle {
+    const cert = this.getCertificate(fingerprint);
+    return buildCertificateBundle(cert, this.store.getScenarioRun(cert.runId));
   }
 
   async verify(fingerprint: string): Promise<CertificateVerification> {

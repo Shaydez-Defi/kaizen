@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import os from 'node:os';
+import http from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Command } from 'commander';
@@ -165,5 +166,69 @@ describe('kaizen certify / score', () => {
     expect(r.code).toBe(1);
     expect(r.stdout).toContain('UNVERIFIABLE');
     expect(r.stdout).toContain('network offline');
+  });
+
+  describe('portable bundle', () => {
+    let bundleFile = '';
+    let server: http.Server;
+    let rpcUrl = '';
+    let tamper = false;
+
+    beforeAll(async () => {
+      server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (c) => (body += String(c)));
+        req.on('end', () => {
+          const { params } = JSON.parse(body) as { params: number[] };
+          const n = params[0]!;
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: tamper ? h(n + 1000) : h(n) }));
+        });
+      });
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+      rpcUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      bundleFile = path.join(dir, 'bundle.json');
+    });
+
+    afterAll(async () => {
+      await new Promise((r) => server.close(r));
+    });
+
+    it('exports a bundle and verifies it from the file against an RPC endpoint', async () => {
+      const exp = await runCli(['--json', 'export-certificate', fingerprint, '--out', bundleFile]);
+      expect(exp.code).toBe(0);
+      const ok = await runCli(['--json', 'verify-certificate', '--bundle', bundleFile, '--rpc', rpcUrl]);
+      expect(ok.code, ok.stdout).toBe(0);
+      expect(json<{ verification: { status: string } }>(ok).verification.status).toBe('verified');
+    });
+
+    it('is unverifiable without --rpc and mismatches when the chain disagrees', async () => {
+      const offline = await runCli(['verify-certificate', '--bundle', bundleFile]);
+      expect(offline.code).toBe(1);
+      expect(offline.stdout).toContain('UNVERIFIABLE');
+      tamper = true;
+      const bad = await runCli(['verify-certificate', '--bundle', bundleFile, '--rpc', rpcUrl]);
+      tamper = false;
+      expect(bad.code).toBe(1);
+      expect(bad.stdout).toContain('MISMATCH');
+    });
+
+    it('detects an edited bundle and rejects malformed input', async () => {
+      const edited = JSON.parse(fs.readFileSync(bundleFile, 'utf8')) as { certificate: { chain: { metrics: { timeToRecoverMs: number } } } };
+      edited.certificate.chain.metrics.timeToRecoverMs = 1;
+      const editedFile = path.join(dir, 'edited.json');
+      fs.writeFileSync(editedFile, JSON.stringify(edited));
+      const r = await runCli(['verify-certificate', '--bundle', editedFile, '--rpc', rpcUrl]);
+      expect(r.code).toBe(1);
+      expect(r.stdout).toContain('MISMATCH');
+      expect(r.stdout).toContain('fingerprint does not match');
+      const junk = path.join(dir, 'junk.json');
+      fs.writeFileSync(junk, '{"hello":1}');
+      const bad = await runCli(['--json', 'verify-certificate', '--bundle', junk]);
+      expect(bad.code).toBe(1);
+      expect(json<{ error: { code: string } }>(bad).error.code).toBe('INVALID_INPUT');
+      const none = await runCli(['--json', 'verify-certificate']);
+      expect(none.code).toBe(1);
+    });
   });
 });

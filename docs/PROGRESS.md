@@ -1497,3 +1497,6 @@ K8s/Helm — untouched.
 - resilience-live (x64) green on d792e36: drill + BABE author + GRANDPA finality assertions pass in one live run (A1 test-level; a single exported certificate artifact for `kaizen verify` is still outstanding).
 - 74975be: `computeResilienceScore` applies the optional evidence-class factor (v1 inputs unchanged); `classifyEvidence` helper (+3 tests).
 - 1af610b: anchor path sets evidenceFlags bits 2 (seeded drill) and 3 (BABE author observed) only when the certificate carries them (+2 tests). Attestation spec and signed attestations are not built yet. Next: export certificate artifact from live drill + verify (A1), then A3.
+
+### 2026-10-27 22:00 WAT
+- A1: `kaizen export-certificate <fingerprint> --out file` writes a portable bundle (certificate + the run its fingerprint covers); `kaizen verify-certificate --bundle file [--rpc url]` verifies it with no local state: fingerprint, sr25519 signature, drill record, then block hashes re-fetched from the RPC (no `--rpc` → `unverifiable`, never upgraded). 3 CLI tests cover verified, unverifiable, chain mismatch, edited bundle, malformed input. Still outstanding for A1: have the x64 live drill write the bundle and run this verify against the live node in CI.

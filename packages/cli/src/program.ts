@@ -46,6 +46,10 @@ import {
   type ScenarioValidationResult,
   type SerializedOperationDefinition,
   probeV3Connectivity,
+  createHttpChainReader,
+  parseCertificateBundle,
+  verifyCertificateBundle,
+  type CertificateVerification,
   ResilienceRegistryService,
   type ResilienceCertificate,
   type ResilienceChainJournalEntry,
@@ -1289,14 +1293,44 @@ export function buildProgram(deps: CliDependencies = {}): Command {
     });
 
   program
-    .command('verify-certificate <fingerprint>')
-    .description('Recompute the fingerprint, check the sr25519 signature, and re-fetch the block hashes from the network (offline → unverifiable)')
-    .action(async (fingerprint: string) => {
+    .command('export-certificate <fingerprint>')
+    .description('Write a certificate and its run as one portable bundle that anyone can verify with verify-certificate --bundle')
+    .option('--out <file>', 'write the bundle to a file instead of stdout')
+    .action(async (fingerprint: string, cmdOpts: { out?: string }) => {
       await run(async (engine, opts) => {
-        const v = await engine.resilience.verify(fingerprint);
+        const bundle = engine.resilience.exportBundle(fingerprint);
+        const text = `${JSON.stringify(bundle, null, 2)}\n`;
+        if (cmdOpts.out !== undefined) {
+          fs.writeFileSync(path.resolve(cmdOpts.out), text);
+          if (opts.json) printJson({ ok: true, out: path.resolve(cmdOpts.out), fingerprint });
+          else console.log(`wrote bundle for ${fingerprint} to ${path.resolve(cmdOpts.out)}`);
+        } else process.stdout.write(text);
+      });
+    });
+
+  program
+    .command('verify-certificate [fingerprint]')
+    .description(
+      'Recompute the fingerprint, check the sr25519 signature and drill record, and re-fetch the block hashes from the network (offline → unverifiable). With --bundle, verify an exported file instead of the local store',
+    )
+    .option('--bundle <file>', 'verify an exported certificate bundle (no local state needed)')
+    .option('--rpc <url>', 'HTTP RPC endpoint to re-fetch block hashes from (bundle mode; omitted → chain binding unverifiable)')
+    .action(async (fingerprint: string | undefined, cmdOpts: { bundle?: string; rpc?: string }) => {
+      await run(async (engine, opts) => {
+        let label: string;
+        let v: CertificateVerification;
+        if (cmdOpts.bundle !== undefined) {
+          const bundle = parseCertificateBundle(fs.readFileSync(path.resolve(cmdOpts.bundle), 'utf8'));
+          label = bundle.certificate.fingerprint;
+          v = await verifyCertificateBundle(bundle, cmdOpts.rpc !== undefined ? createHttpChainReader(cmdOpts.rpc) : null);
+        } else {
+          if (fingerprint === undefined) throw new KaizenError('INVALID_INPUT', 'give a fingerprint, or --bundle <file>');
+          label = fingerprint;
+          v = await engine.resilience.verify(fingerprint);
+        }
         if (opts.json) printJson({ ok: v.status === 'verified', verification: v });
         else {
-          console.log(`certificate ${fingerprint} — ${v.status.toUpperCase()}`);
+          console.log(`certificate ${label} — ${v.status.toUpperCase()}`);
           for (const r of v.reasons) console.log(`  ${r}`);
         }
         if (v.status !== 'verified') process.exitCode = 1;

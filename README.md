@@ -33,6 +33,8 @@ KAIZEN_RESILIENCE_EVIDENCE=1 kaizen run execute <scenarioId> --network <net>   #
 kaizen certify <runId> --dev-key        # or KAIZEN_RESILIENCE_SIGNER_SURI / _FILE (key outside the repo)
 kaizen score <validator>                # 0–100 from certified runs
 kaizen verify-certificate <fingerprint> # verified | mismatch | unverifiable (network offline)
+kaizen export-certificate <fingerprint> --out cert.bundle.json   # certificate + run in one portable file
+kaizen verify-certificate --bundle cert.bundle.json --rpc <http-rpc-url>  # verify from the file alone
 ```
 
 `--dev-key` uses the public `//Alice` key and is accepted only for local
