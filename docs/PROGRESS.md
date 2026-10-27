@@ -1492,3 +1492,8 @@ K8s/Helm — untouched.
 
 ### 2026-10-27 16:15 WAT
 - test(resilience): live drill test now also asserts GRANDPA finality evidence (finalized head advances, finality gap measured) alongside drill + BABE author (A1). Next: A2.
+
+### 2026-10-27 20:30 WAT
+- resilience-live (x64) green on d792e36: drill + BABE author + GRANDPA finality assertions pass in one live run (A1 test-level; a single exported certificate artifact for `kaizen verify` is still outstanding).
+- 74975be: `computeResilienceScore` applies the optional evidence-class factor (v1 inputs unchanged); `classifyEvidence` helper (+3 tests).
+- 1af610b: anchor path sets evidenceFlags bits 2 (seeded drill) and 3 (BABE author observed) only when the certificate carries them (+2 tests). Attestation spec and signed attestations are not built yet. Next: export certificate artifact from live drill + verify (A1), then A3.
