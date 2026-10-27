@@ -1477,3 +1477,6 @@ K8s/Helm — untouched.
 
 ## 2026-10-27 01:00 WAT
 - T-9.6 step 2: `DrillRecord` build/check (drill-record.ts, 5 tests). Next: embed in certificate fingerprint, then A1 CI drill.
+
+## 2026-10-27 04:00 WAT
+- 7b2b37e: certificates optionally carry a drill record (in fingerprint); verifyCertificate checks it; 3 tests. Next: CI drill script combining drill+BABE+GRANDPA evidence (A1).
