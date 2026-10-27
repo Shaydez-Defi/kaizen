@@ -32,6 +32,7 @@ drill (pause / terminate) ──► chain evidence (heads + hashes, before/durin
 KAIZEN_RESILIENCE_EVIDENCE=1 kaizen run execute <scenarioId> --network <net>   # capture
 kaizen certify <runId> --dev-key        # or KAIZEN_RESILIENCE_SIGNER_SURI / _FILE (key outside the repo)
 kaizen score <validator>                # 0–100 from certified runs
+kaizen score <validator> --v2 [--verify-chain]  # v2: weight runs by evidence class (signed-local 0.7, chain-verified 1)
 kaizen verify-certificate <fingerprint> # verified | mismatch | unverifiable (network offline)
 kaizen export-certificate <fingerprint> --out cert.bundle.json   # certificate + run in one portable file
 kaizen verify-certificate --bundle cert.bundle.json --rpc <http-rpc-url>  # verify from the file alone

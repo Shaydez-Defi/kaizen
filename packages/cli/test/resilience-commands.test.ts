@@ -161,6 +161,18 @@ describe('kaizen certify / score', () => {
     expect(all.stdout).toMatch(/bob\s+\d+\/100/);
   });
 
+  it('score --v2 discounts signed-local evidence and never upgrades it when the network is offline', async () => {
+    type Scores = { scores: { confidence: number; effectiveRuns: number; score: number }[] };
+    const v1 = json<Scores>(await runCli(['--json', 'score', 'bob'])).scores[0]!;
+    const v2 = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2'])).scores[0]!;
+    expect(v2.effectiveRuns / v1.effectiveRuns).toBeCloseTo(0.7, 3);
+    expect(v2.confidence).toBeLessThan(v1.confidence);
+    const offline = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2', '--verify-chain'])).scores[0]!;
+    expect(offline.effectiveRuns).toBeCloseTo(v2.effectiveRuns, 4);
+    const misuse = await runCli(['--json', 'score', 'bob', '--verify-chain']);
+    expect(misuse.code).toBe(1);
+  });
+
   it('verify-certificate reports unverifiable (network offline) and exits 1', async () => {
     const r = await runCli(['verify-certificate', fingerprint]);
     expect(r.code).toBe(1);

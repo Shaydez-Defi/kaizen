@@ -24,9 +24,9 @@ import { buildCertificateBundle, type CertificateBundle } from './bundle';
 import { issueCertificate, checkCertificateSignature, type ResilienceCertificate } from './certificate';
 import { ChainEvidenceRecorder, type ChainEvidence } from './evidence';
 import { createHttpChainReader, type ChainReader } from './rpc';
-import { computeResilienceScore, type ResilienceScore } from './score';
+import { classifyEvidence, computeResilienceScore, type EvidenceClass, type ResilienceScore, type ScoredRunInput } from './score';
 import { loadResilienceSigner } from './signer';
-import { verifyCertificate, type CertificateVerification } from './verify';
+import { verifyCertificate, verifyChainEvidence, type CertificateVerification } from './verify';
 
 export const RESILIENCE_CAPTURE_ENV_KEY = 'KAIZEN_RESILIENCE_EVIDENCE';
 
@@ -245,7 +245,30 @@ export class ResilienceService {
 
   /** v1 score over certificates whose offline integrity check passes. */
   async score(validatorId: string, asOf: Date = new Date()): Promise<ResilienceScore & { excluded: string[] }> {
-    const inputs = [];
+    return this.scoreCertificates(validatorId, asOf, false);
+  }
+
+  /**
+   * Score v2 (T-9.7): like v1, but each run's weight is multiplied by its
+   * evidence-class factor. Every counted certificate is signed, so it is at
+   * least `signed-local`; with `verifyChain` each certificate's block hashes
+   * are re-fetched from its network and a full match earns
+   * `signed-chain-verified`. An unreachable network never upgrades a class.
+   */
+  async scoreV2(
+    validatorId: string,
+    options: { asOf?: Date; verifyChain?: boolean } = {},
+  ): Promise<ResilienceScore & { excluded: string[] }> {
+    return this.scoreCertificates(validatorId, options.asOf ?? new Date(), true, options.verifyChain === true);
+  }
+
+  private async scoreCertificates(
+    validatorId: string,
+    asOf: Date,
+    withEvidenceClass: boolean,
+    verifyChain = false,
+  ): Promise<ResilienceScore & { excluded: string[] }> {
+    const inputs: ScoredRunInput[] = [];
     const excluded: string[] = [];
     for (const cert of this.store.listResilienceCertificates({ validatorId })) {
       let run;
@@ -260,6 +283,12 @@ export class ResilienceService {
         excluded.push(cert.fingerprint);
         continue;
       }
+      let evidenceClass: EvidenceClass | undefined;
+      if (withEvidenceClass) {
+        const chainVerified =
+          verifyChain && (await verifyChainEvidence(cert.chain, this.readerForNetwork(cert.networkId))).status === 'verified';
+        evidenceClass = classifyEvidence({ signatureValid: true, chainVerified });
+      }
       inputs.push({
         runId: cert.runId,
         runState: run.state,
@@ -268,6 +297,7 @@ export class ResilienceService {
         finalityGapBlocks: cert.chain.metrics.finalityGapBlocks,
         blocksMissed: cert.chain.metrics.blocksMissed,
         certifiedAt: cert.signedAt,
+        ...(evidenceClass ? { evidenceClass } : {}),
       });
     }
     return { ...computeResilienceScore(validatorId, inputs, asOf), excluded };

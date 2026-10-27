@@ -1339,12 +1339,21 @@ export function buildProgram(deps: CliDependencies = {}): Command {
 
   program
     .command('score [validator]')
-    .description('Resilience score v1 (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted')
-    .action(async (validator: string | undefined) => {
+    .description('Resilience score (0-100) from certified runs (docs/RESILIENCE_SCORE.md); all validators when omitted. --v2 weights each run by its evidence class')
+    .option('--v2', 'score v2: weight runs by evidence class (signed-local 0.7; signed-chain-verified 1 with --verify-chain)')
+    .option('--verify-chain', 'with --v2: re-fetch each certificate\'s block hashes from its running network')
+    .action(async (validator: string | undefined, cmdOpts: { v2?: boolean; verifyChain?: boolean }) => {
       await run(async (engine, opts) => {
+        if (cmdOpts.verifyChain && !cmdOpts.v2) throw new KaizenError('INVALID_INPUT', '--verify-chain needs --v2');
         const ids = validator !== undefined ? [validator] : engine.resilience.listValidators();
         const scores = [];
-        for (const id of ids) scores.push(await engine.resilience.score(id));
+        for (const id of ids) {
+          scores.push(
+            cmdOpts.v2
+              ? await engine.resilience.scoreV2(id, { verifyChain: cmdOpts.verifyChain === true })
+              : await engine.resilience.score(id),
+          );
+        }
         if (opts.json) {
           printJson({ ok: true, scores });
           return;
