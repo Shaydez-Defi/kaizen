@@ -42,7 +42,7 @@ export {
 export type { LoadResilienceSignerOptions, ResilienceSigner, ResilienceSignerSource } from './signer';
 export { verifyCertificate, verifyChainEvidence } from './verify';
 export type { BlockCheck, CertificateVerification, ChainCheck, ChainCheckStatus } from './verify';
-export { EVIDENCE_CLASS_FACTORS, RESILIENCE_SCORE_PARAMS, RESILIENCE_SCORE_VERSION, computeResilienceScore, evidenceClassFactor, scoreRun } from './score';
+export { EVIDENCE_CLASS_FACTORS, RESILIENCE_SCORE_PARAMS, RESILIENCE_SCORE_VERSION, computeResilienceScore, classifyEvidence, evidenceClassFactor, scoreRun } from './score';
 export type { EvidenceClass, ResilienceScore, ScoredRun, ScoredRunInput } from './score';
 export {
   CERTIFICATE_RECORDED_TOPIC,

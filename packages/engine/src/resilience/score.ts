@@ -40,6 +40,12 @@ export interface ScoredRunInput {
   blocksMissed: number | null;
   /** When the evidence was certified (ISO-8601). */
   certifiedAt: string;
+  /**
+   * Optional evidence class (score v2, T-9.7). When set, the run's weight is
+   * multiplied by evidenceClassFactor(); when absent the run counts fully, so
+   * v1 inputs score exactly as before.
+   */
+  evidenceClass?: EvidenceClass;
 }
 
 export interface ScoredRun {
@@ -92,7 +98,11 @@ export function scoreRun(run: ScoredRunInput, asOf: Date): ScoredRun {
     runId: run.runId,
     survived,
     quality,
-    weight: Math.pow(0.5, ageDays / p.halfLifeDays),
+    weight:
+      Math.pow(0.5, ageDays / p.halfLifeDays) *
+      (run.evidenceClass === undefined
+        ? 1
+        : evidenceClassFactor(run.evidenceClass)),
     ageDays,
   };
 }
@@ -158,4 +168,17 @@ export function evidenceClassFactor(cls: EvidenceClass): number {
       `unknown evidence class ${String(cls)}`,
     );
   return f;
+}
+
+/**
+ * Classify a certificate's evidence from facts the verifier already knows:
+ * whether it carries a valid signature, and whether its chain evidence was
+ * re-checked against public chain data.
+ */
+export function classifyEvidence(facts: {
+  signatureValid: boolean;
+  chainVerified: boolean;
+}): EvidenceClass {
+  if (!facts.signatureValid) return "unsigned";
+  return facts.chainVerified ? "signed-chain-verified" : "signed-local";
 }
