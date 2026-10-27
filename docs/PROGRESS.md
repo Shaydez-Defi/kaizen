@@ -1489,3 +1489,6 @@ K8s/Helm — untouched.
 
 ## 2026-10-27 13:00 WAT
 - 5f8aadc: certifyRun accepts a drill record; live CI drill test binds drill + BABE author. resilience-live run 40500819745 green on x64. Next: GRANDPA finality evidence in certificate, then A2.
+
+### 2026-10-27 16:15 WAT
+- test(resilience): live drill test now also asserts GRANDPA finality evidence (finalized head advances, finality gap measured) alongside drill + BABE author (A1). Next: A2.

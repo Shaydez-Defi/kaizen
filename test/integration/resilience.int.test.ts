@@ -116,6 +116,10 @@ describe.runIf(LIVE)('Proof-of-Resilience (live, real network)', () => {
     const cert = await engine.resilience.certifyRun(run.id, { allowDevKey: true, drill });
     expect(cert.drill).toBeDefined();
     expect(ev!.observations.some((o) => o.finalized.author !== undefined || o.best.author !== undefined)).toBe(true);
+    // GRANDPA finality evidence: finalized head advanced past the start and the lag was measured.
+    expect(ev!.metrics.finalityGapBlocks).not.toBeNull();
+    const finals = ev!.observations.map((o) => o.finalized.number);
+    expect(finals[finals.length - 1]!).toBeGreaterThan(finals[0]!);
     expect(cert.signature.dev).toBe(true);
     const online = await engine.resilience.verify(cert.fingerprint);
     const score = await engine.resilience.score(cert.validatorId);
