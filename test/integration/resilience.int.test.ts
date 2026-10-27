@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createEngine, type KaizenEngine, type ScenarioInput } from '@kaizen/engine';
+import { buildDrillRecord, createEngine, type KaizenEngine, type ScenarioInput } from '@kaizen/engine';
 import { LIVE, SHARED_BIN_CACHE, ensureSharedBinary, httpRpc, testRoot, waitFor } from './testkit';
 
 interface Health {
@@ -104,7 +104,18 @@ describe.runIf(LIVE)('Proof-of-Resilience (live, real network)', () => {
       expect(await httpRpc<string>(observerPort, 'chain_getBlockHash', [o.finalized.number])).toBe(o.finalized.hash);
     }
 
-    const cert = await engine.resilience.certifyRun(run.id, { allowDevKey: true });
+    // Commit-reveal drill record bound to a real finalized block of this chain.
+    const seedNumber = ev!.observations[ev!.observations.length - 1]!.finalized.number;
+    const seedHash = await httpRpc<string>(observerPort, 'chain_getBlockHash', [seedNumber]);
+    const drill = buildDrillRecord({
+      validatorId: ev!.validatorId,
+      commitBlock: Math.max(0, seedNumber - 1),
+      seedBlockNumber: seedNumber,
+      seedBlockHash: seedHash,
+    });
+    const cert = await engine.resilience.certifyRun(run.id, { allowDevKey: true, drill });
+    expect(cert.drill).toBeDefined();
+    expect(ev!.observations.some((o) => o.finalized.author !== undefined || o.best.author !== undefined)).toBe(true);
     expect(cert.signature.dev).toBe(true);
     const online = await engine.resilience.verify(cert.fingerprint);
     const score = await engine.resilience.score(cert.validatorId);

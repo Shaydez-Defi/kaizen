@@ -14,6 +14,7 @@
  *    integrity failures) and the full verification (T-9.1).
  */
 
+import type { DrillRecord } from './drill-record';
 import type { EventBus, KaizenEventMap } from '../events/bus';
 import { KaizenError } from '../errors';
 import { httpUrlForPort } from '../process/args';
@@ -191,7 +192,7 @@ export class ResilienceService {
     return this.store.getResilienceEvidence(runId);
   }
 
-  async certifyRun(runId: string, options: { allowDevKey?: boolean } = {}): Promise<ResilienceCertificate> {
+  async certifyRun(runId: string, options: { allowDevKey?: boolean; drill?: DrillRecord } = {}): Promise<ResilienceCertificate> {
     const run = this.store.getScenarioRun(runId);
     const evidence = this.store.getResilienceEvidence(runId);
     if (!evidence) {
@@ -211,7 +212,7 @@ export class ResilienceService {
       allowDevKey: options.allowDevKey,
       localTestNetwork,
     });
-    const cert = await issueCertificate({ run, chain: evidence, signer });
+    const cert = await issueCertificate({ run, chain: evidence, signer, drill: options.drill });
     if (!this.store.insertResilienceCertificate(cert)) {
       return this.store.getResilienceCertificate(cert.fingerprint) ?? cert;
     }
