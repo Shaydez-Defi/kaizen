@@ -11,7 +11,10 @@ Story: **create a real Portaldot network → watch it live → break it on purpo
 - Start the API **with the signer in its environment** (never on screen):
   `set -a; . <path-to>/kaizen-v3-deployer.env; set +a; node apps/api/dist/index.js`
   then `npm run dev -w @kaizen/web` and open `http://127.0.0.1:5173/`.
-- **Funds**: the deployer holds ≈3.15 tPOT. A contract anchor reserves ≈4 tPOT
+- **Funds** (2026-10-24 update: the signer was topped up and now holds ≈90.6 tPOT
+  after deploying `KaizenResilienceRegistry`; a certificate `record()` reserves
+  ≈30.8 tPOT, a run-registry anchor ≈4 tPOT; the notes below date from the
+  ≈3.15 tPOT period). Originally: the deployer holds ≈3.15 tPOT. A contract anchor reserves ≈4 tPOT
   and will fail its dry run — **use Remark mode** for the live anchor (≈0.02
   tPOT), or only show the existing anchors. A run hash can be anchored once
   per method: pick a run that has no remark anchor yet (e.g. a run you

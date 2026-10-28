@@ -1,0 +1,222 @@
+{
+  "what": "KaizenResilienceRegistry deployed on the Portaldot V3 TEST network and one real signed resilience certificate (CI run 40042905143) recorded and read back (T-9.8)",
+  "network": {
+    "chainName": "PortaldotV3 Test",
+    "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+    "substrateWs": "wss://test-node-v3.portaldot.dev",
+    "evmRpc": "https://test-evm-rpc-v3.portaldot.dev",
+    "evmChainId": 420420777,
+    "evmChainIdHex": "0x190f1ca9",
+    "runtime": "portaldot-v3 (pallet-revive, EVM bytecode)"
+  },
+  "signer": {
+    "address": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+    "evmAddress": "0x315f2dd956cf60d2825c9a03d27dd1d8a4a7bfb3",
+    "note": "testnet-only burner key; secret read from KAIZEN_V3_SIGNER_SURI outside the repo, never logged or committed"
+  },
+  "deployment": {
+    "contract": "KaizenResilienceRegistry",
+    "address": "0x8ec2b52a5e407926309f983f6e7d019d66da764a",
+    "txHash": "0x88bdae46743bbf059150a16d705ebe955dd3b91a8b8b34eb91d7ecb9cc0dd9e9",
+    "blockNumber": 167466,
+    "blockHash": "0x78c5ca8715d548a0e1d9a31381d117645fa65ce6d7affddebfe00364a8c5b859",
+    "extrinsicIndex": 1,
+    "extrinsic": "revive.instantiateWithCode",
+    "finalized": true,
+    "blockTimestampMs": 1792801848000,
+    "explorer": "https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0x78c5ca8715d548a0e1d9a31381d117645fa65ce6d7affddebfe00364a8c5b859",
+    "initCodeKeccak": "0xae4476957b0988b36b48df5b81a6b089e29def071af1a827702848c8f7237e17",
+    "onChainCodeMatchesArtifact": true,
+    "onChainCodeCheck": "eth_getCode(address) == contracts/KaizenResilienceRegistry.artifact.json deployedBytecode (3183 bytes); artifact reproduced byte-for-byte by contracts/compile-resilience-registry.mjs with solc 0.8.28",
+    "events": [
+      "balances.Withdraw",
+      "system.NewAccount",
+      "balances.Endowed",
+      "balances.Minted",
+      "balances.TransferAndHold",
+      "revive.Instantiated",
+      "balances.TransferAndHold",
+      "balances.Deposit",
+      "balances.Deposit",
+      "transactionPayment.TransactionFeePaid",
+      "system.ExtrinsicSuccess"
+    ],
+    "cost": {
+      "balanceBefore": "383.1519 tPOT",
+      "balanceAfter": "121.4332 tPOT",
+      "spent": "261.7186 tPOT",
+      "breakdown": {
+        "codeUploadDepositHeld": "195.1800 tPOT",
+        "storageDepositHeld": "66.2040 tPOT",
+        "transactionFee": "0.3346 tPOT"
+      },
+      "note": "deposits are held (balances.TransferAndHold), not burned; the fee is the only consumed part"
+    }
+  },
+  "anchors": [
+    {
+      "certificate": "docs/evidence/resilience/certificate-517b2ffb81ec.json",
+      "source": "GitHub Actions resilience-live run 40042905143 (pause drill on a two-node portaldot_dev network on x86_64; DEV-key signed)",
+      "ciRun": "https://github.com/Shaydez-Defi/kaizen/actions/runs/40042905143",
+      "fingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+      "runHash": "0xc9069fec8518d3018998795969590e812e54eba20ee554408243a1e32c97b808",
+      "validatorId": "res-it-bob",
+      "validatorKey": "0xbf1486bb968700d321203e2480beb39c5a9e5a24bc3692c449fffa48a2b3e0f0",
+      "validatorKeyDerivation": "blake2_256('kaizen:validator:res-it-bob') (validator id is not an SS58 address)",
+      "score": 35,
+      "scoreSource": "docs/evidence/resilience/score.json (v1, operator-computed)",
+      "evidenceFlags": 3,
+      "evidenceFlagsMeaning": "1 chainBound | 2 devKey",
+      "txHash": "0x905f964cb7ca45c9d1ed630084595b7b8b934c0288216fdc5252436e0d86fee3",
+      "blockNumber": 167478,
+      "blockHash": "0xfbe64ed2d727a54c1cf6cee6b512b2cf99795afa74707397d1350cd7f4bc73f6",
+      "extrinsicIndex": 1,
+      "extrinsic": "revive.call -> record(...)",
+      "finalized": true,
+      "blockTimestampMs": 1792801920000,
+      "explorer": "https://node-console.portaldot.dev/?rpc=wss%3A%2F%2Ftest-node-v3.portaldot.dev#/explorer/query/0xfbe64ed2d727a54c1cf6cee6b512b2cf99795afa74707397d1350cd7f4bc73f6",
+      "certificateRecordedTopics": [
+        "0xd9eedfa1107ff26682ce8770b59da64ed08859b0cd480d6c8e71a71bed19992d",
+        "0xbf1486bb968700d321203e2480beb39c5a9e5a24bc3692c449fffa48a2b3e0f0",
+        "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+        "0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d"
+      ],
+      "events": [
+        "balances.Withdraw",
+        "revive.ContractEmitted",
+        "balances.TransferAndHold",
+        "balances.Deposit",
+        "balances.Deposit",
+        "transactionPayment.TransactionFeePaid",
+        "system.ExtrinsicSuccess"
+      ],
+      "cost": {
+        "balanceBefore": "121.4332 tPOT",
+        "balanceAfter": "90.6442 tPOT",
+        "spent": "30.7890 tPOT",
+        "breakdown": {
+          "storageDepositHeld": "30.7320 tPOT",
+          "transactionFee": "0.0570 tPOT"
+        }
+      }
+    }
+  ],
+  "readBack": {
+    "via": "kaizen v3 resilience-score res-it-bob --registry <address> --fingerprint <fp> (reviveApi.call dry run, free)",
+    "atBestBlock": 167489,
+    "getScore": {
+      "score": 35,
+      "certifiedAt": 1792801920,
+      "count": 1
+    },
+    "getLatest": {
+      "fingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+      "runHash": "0xc9069fec8518d3018998795969590e812e54eba20ee554408243a1e32c97b808",
+      "signer": "0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d",
+      "timeToRecoverMs": 2020,
+      "finalityGapBlocks": 3,
+      "blocksMissed": 2,
+      "score": 35,
+      "evidenceFlags": 3,
+      "certifiedAt": 1792801920,
+      "submitter": "0x315f2dd956cf60d2825c9a03d27dd1d8a4a7bfb3"
+    },
+    "recorded": true,
+    "independentEvmRead": {
+      "method": "eth_call getScore(bytes32) on https://test-evm-rpc-v3.portaldot.dev",
+      "result": "0x...23 (35) | 0x...6adbfc80 (1792801920 = block timestamp of 167478) | 0x...01 (count 1)"
+    },
+    "certifiedAtIsBlockTimestamp": true
+  },
+  "idempotency": {
+    "reanchorSameCertificate": "V3_ALREADY_ANCHORED",
+    "note": "refused by the free recorded(fingerprint) pre-check; nothing submitted, balance unchanged"
+  },
+  "totals": {
+    "spent": "292.5076 tPOT",
+    "ofWhichFees": "0.3916 tPOT",
+    "ofWhichHeldDeposits": "292.1160 tPOT",
+    "signerBalanceAfter": "90.6442 tPOT"
+  },
+  "persistFirstJournal": [
+    {
+      "action": "deploy",
+      "phase": "submitting",
+      "at": "2026-10-24T00:30:42.416Z",
+      "chainName": "PortaldotV3 Test",
+      "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+      "signerAddress": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+      "contract": null,
+      "fingerprint": null,
+      "validatorKey": null,
+      "txHash": null,
+      "blockHash": null,
+      "blockNumber": null,
+      "finalized": null,
+      "balanceBefore": "38315185714326370",
+      "balanceAfter": null,
+      "error": null
+    },
+    {
+      "action": "deploy",
+      "phase": "included",
+      "at": "2026-10-24T00:31:00.748Z",
+      "chainName": "PortaldotV3 Test",
+      "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+      "signerAddress": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+      "contract": "0x8ec2b52a5e407926309f983f6e7d019d66da764a",
+      "fingerprint": null,
+      "validatorKey": null,
+      "txHash": "0x88bdae46743bbf059150a16d705ebe955dd3b91a8b8b34eb91d7ecb9cc0dd9e9",
+      "blockHash": "0x78c5ca8715d548a0e1d9a31381d117645fa65ce6d7affddebfe00364a8c5b859",
+      "blockNumber": 167466,
+      "finalized": true,
+      "balanceBefore": "38315185714326370",
+      "balanceAfter": "12143324630749762",
+      "error": null
+    },
+    {
+      "action": "anchor",
+      "phase": "submitting",
+      "at": "2026-10-24T00:31:54.252Z",
+      "chainName": "PortaldotV3 Test",
+      "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+      "signerAddress": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+      "contract": "0x8ec2b52a5e407926309f983f6e7d019d66da764a",
+      "fingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+      "validatorKey": "0xbf1486bb968700d321203e2480beb39c5a9e5a24bc3692c449fffa48a2b3e0f0",
+      "txHash": null,
+      "blockHash": null,
+      "blockNumber": null,
+      "finalized": null,
+      "balanceBefore": "12143324630749762",
+      "balanceAfter": null,
+      "error": null
+    },
+    {
+      "action": "anchor",
+      "phase": "included",
+      "at": "2026-10-24T00:32:12.849Z",
+      "chainName": "PortaldotV3 Test",
+      "genesisHash": "0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd",
+      "signerAddress": "5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o",
+      "contract": "0x8ec2b52a5e407926309f983f6e7d019d66da764a",
+      "fingerprint": "0x517b2ffb81ec129c8efd61f234662ca492bf75829b3c3ce30575d912551e2e33",
+      "validatorKey": "0xbf1486bb968700d321203e2480beb39c5a9e5a24bc3692c449fffa48a2b3e0f0",
+      "txHash": "0x905f964cb7ca45c9d1ed630084595b7b8b934c0288216fdc5252436e0d86fee3",
+      "blockHash": "0xfbe64ed2d727a54c1cf6cee6b512b2cf99795afa74707397d1350cd7f4bc73f6",
+      "blockNumber": 167478,
+      "finalized": true,
+      "balanceBefore": "12143324630749762",
+      "balanceAfter": "9064422828924069",
+      "error": null
+    }
+  ],
+  "limits": [
+    "This anchors a certificate produced by a CI drill on a local two-node portaldot_dev network; the drill itself did not run on V3.",
+    "The certificate is signed with the public //Alice DEV key (evidenceFlags bit 2): it proves integrity, not operator identity.",
+    "The score (35) is the operator-computed v1 score; the contract stores it, it does not compute it. The EVM cannot verify sr25519, so the signature is emitted in CertificateRecorded and re-verified off chain.",
+    "V3 test network only, not mainnet.",
+    "Drills scheduled from future block hashes (T-9.6) and BABE-authorship evidence + score v2 (T-9.7) are still roadmap."
+  ]
+}

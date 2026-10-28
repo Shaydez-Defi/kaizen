@@ -811,4 +811,9 @@ Format: context → decision → alternatives → consequences. Newest entries a
   (rejected: README marks each pillar by what is verified).
 - **Consequences**: v1 certificates prove integrity and chain binding, not
   that the drill was unpredictable; the README headline states this per
-  pillar. `KaizenResilienceRegistry` is not deployed (deployer ≈3.15 tPOT).
+  pillar. `KaizenResilienceRegistry` was not deployed at first (deployer ≈3.15 tPOT).
+  Update 2026-10-24 (T-9.8): deployed on V3 at
+  `0x8ec2b52a5e407926309f983f6e7d019d66da764a` (block 167466) and holding one
+  DEV-key CI certificate (block 167478); the decision itself is unchanged: the
+  contract stores the operator-computed score next to its inputs, it does not
+  compute it.
