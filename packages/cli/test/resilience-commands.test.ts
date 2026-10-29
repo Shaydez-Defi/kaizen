@@ -288,6 +288,8 @@ describe('kaizen attest (A2)', () => {
   });
 
   it('attests with an independent key after a full chain match; verify-certificate lists it; score --v2 upgrades to 1.0', async () => {
+    const saved = { ...process.env };
+    process.env['KAIZEN_ATTESTER_SURI'] = '//Bob';
     type Scores = { scores: { effectiveRuns: number }[] };
     const before = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2'])).scores[0]!;
     const r = await runCli(['--json', 'attest', attestFingerprint, '--rpc', rpcUrl]);
@@ -307,6 +309,7 @@ describe('kaizen attest (A2)', () => {
     expect(after.effectiveRuns / before.effectiveRuns).toBeCloseTo(1 / 0.7, 3);
     const withNotes = json<{ scores: { notes: number }[] }>(await runCli(['--json', 'score', 'bob', '--v2']));
     expect(withNotes.scores[0]!.notes).toBe(0);
+    process.env = saved;
   });
 
   it('stores verdict=mismatch (exit 1) when the chain disagrees', async () => {
