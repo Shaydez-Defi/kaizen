@@ -160,7 +160,7 @@ Endpoints (overridable via `KAIZEN_V3_*`): `wss://test-node-v3.portaldot.dev`,
 
 Chain **PortaldotV3 Test**, EVM chain id **420420777**, genesis
 `0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd`.
-Signer (public): `5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o`.
+Signer (public): `5HBnAqniYhyupDT1ccsTSRkdy3EbCAaZC6ii9XFon8WQwEaR`.
 
 | What | Block | Transaction hash | Details |
 |---|---|---|---|
