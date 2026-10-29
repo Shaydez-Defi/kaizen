@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Btn, NoNet, Num, Planned, Stat } from '../components/ui';
 import { useConsole } from '../state/ConsoleContext';
+import { REPLAY } from '../lib/mode';
 
 export function Validators() {
   const { vnet, network, openNode } = useConsole();
@@ -28,6 +29,7 @@ export function Validators() {
         </div>
       </div>
       <div className="split">
+        {REPLAY && <div className="sub">Replay validator snapshot · recorded drill data, not live validator state</div>}
         <div>
           <div className="tbl" role="table" aria-label="Validators">
             <div className="tr th" role="row">
