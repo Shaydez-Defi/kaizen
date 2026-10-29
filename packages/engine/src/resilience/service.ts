@@ -356,7 +356,7 @@ export class ResilienceService {
   /** Certificate + its run in one portable, offline-verifiable document. */
   exportBundle(fingerprint: string): CertificateBundle {
     const cert = this.getCertificate(fingerprint);
-    return buildCertificateBundle(cert, this.store.getScenarioRun(cert.runId));
+    return buildCertificateBundle(cert, this.store.getScenarioRun(cert.runId), this.store.listResilienceAttestations(fingerprint));
   }
 
   async verify(fingerprint: string): Promise<CertificateVerification> {
