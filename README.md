@@ -1,32 +1,24 @@
 # Kaizen
 
-Kaizen is a Proof-of-Resilience platform for Portaldot validators. It combines node operations, controlled resilience drills, signed run certificates, and chain-bound evidence in a shared engine used by a web console and command-line interface.
+Kaizen is a proof-of-resilience platform for Portaldot validators. It runs controlled drills against disposable test networks, records the observed operations and evidence, and supports independently verifiable certificates anchored to the Portaldot V3 test network.
 
-The project is built for reproducible validator development and testing. It provides operators with tools to create local networks, observe their state, run guarded scenarios, recover from faults, and verify evidence against the chain. Kaizen is not a hosted validator service, a block explorer, or a production key-custody system.
+[![Resilience](https://kaizen-live.vercel.app/api/badge)](https://kaizen-live.vercel.app)
 
 ## The problem
 
-Validator readiness is often described through availability metrics and operator reports. Those signals can show that a node is running, but they do not by themselves establish how it behaves during a failure or whether it recovers in a way that is visible on-chain. Reproducing drills and reviewing their evidence can also require separate scripts, process logs, and chain queries.
-
-Kaizen brings these steps together. It records operations against real node processes, applies explicit safety gates to failure experiments, and associates run results with chain observations. Claims are limited to the evidence the software actually captures and verifies.
+Validator operators need a way to demonstrate that their infrastructure can withstand operational failures. A dashboard or an unverified claim cannot establish that a fault occurred, that recovery was observed, or that the resulting evidence is authentic. Kaizen is designed to make these operations explicit, gated, recorded, and independently checkable.
 
 ## How it works
 
-Kaizen uses a modular TypeScript engine shared by its CLI and web console. The CLI calls engine services directly. The web console uses a typed HTTP API and WebSocket event stream. The engine manages node processes and network configuration, samples node RPC and process state, executes scenario steps through guarded adapters, and persists operational records in SQLite.
+Kaizen uses a shared TypeScript engine for network and node operations, monitoring, fault injection, scenarios, evidence, and certificates. The CLI and HTTP API call that engine rather than maintaining separate operational logic. The React web console reads through the API and renders engine-produced data.
 
-A typical workflow creates a designated test network, monitors its nodes, executes a supported failure scenario, observes recovery, and inspects the resulting run record. The current implemented failure mechanisms include pause and terminate. Peer-disconnect and partition operations remain blocked and are not represented as working capabilities.
-
-## Proof-of-Resilience and evidence
-
-Kaizen captures best and finalized chain heads, including their hashes, around a drill. Certificate fingerprints are computed from canonical JSON containing the run and chain evidence, and are signed with sr25519. Certificate verification checks the fingerprint and signature and re-fetches the referenced block hashes. Recovery is reported only when the observed finality advances past the highest pre-fault or during-fault value.
-
-The current v1 score is an open, documented formula. It includes measured recovery time as its largest weight. The score is computed by Kaizen and is not calculated by the registry contract. The v1 evidence model establishes integrity and chain binding; it does not establish that drills were unpredictable. Future-block-hash-seeded drills, BABE authorship evidence, and evidence-class weighting are roadmap items.
-
-Kaizen also supports explicit run anchoring on the Portaldot V3 test network. The `drill-live` CI workflow anchors evidence every three hours. Anchoring is operator-signed, and the configured signer address is `5HBnAqniYhyupDT1ccsTSRkdy3EbCAaZC6ii9XFon8WQwEaR`. The live console is available at https://kaizen-live.vercel.app. Each anchor type and transaction outcome should be interpreted according to its recorded chain evidence; an attempted write alone is not proof of a successful anchor.
+The engine manages disposable Portaldot networks, samples node RPC and process state, and can run supported, explicitly requested failure scenarios. Safety gates restrict destructive operations to designated local or development test networks. Run records preserve the selected scenario, observed steps, and verification evidence. The certificate flow can verify and anchor evidence on-chain; the system does not substitute simulated results for missing observations.
 
 ## Quickstart
 
-The commands below assume a clean clone, Node.js 24, npm, and a supported Portaldot development binary environment. Consult the repository's package scripts and current CLI help if a command differs in a local checkout.
+Requirements: Node.js 24 or later, npm 11 or later, and a Linux x86_64 or macOS host for which the upstream Portaldot binary artifact is available. The first setup requires network access to the Portaldot node release repository. Each running node requires approximately 1 GiB of free RAM.
+
+From a clean clone, run:
 
 ```bash
 git clone https://github.com/Shaydez-Defi/kaizen.git
@@ -36,22 +28,30 @@ npm run build
 npm test
 ```
 
-To launch the development console, use the repository development script:
+The workspace scripts and runtime packages are specified in `package.json` and the package manifests. `npm install` installs the workspace dependencies, `npm run build` builds the engine, CLI, API, and web application, and `npm test` runs the unit suite. A real-node integration suite is separate and opt-in; it requires `portaldot_dev` and `KAIZEN_TEST_LIVE=1` as described in [Testing](docs/TESTING.md). The hosted console provides the public live view at https://kaizen-live.vercel.app.
 
-```bash
-npm run dev
-```
+## Evidence and on-chain anchoring
 
-The application manages local Portaldot node processes. Before running a network or failure scenario, review the CLI help and ensure the target is a disposable, designated test network. Do not use production validator keys or mainnet targets for failure drills.
+The drill-live workflow runs real resilience drills in CI every three hours. It records evidence for each run and anchors the resulting evidence through the configured Portaldot V3 test-network flow. The published live console at https://kaizen-live.vercel.app exposes the available live evidence. The configured drill signer is `5HBnAqniYhyupDT1ccsTSRkdy3EbCAaZC6ii9XFon8WQwEaR`.
+
+An anchor or drill is reported only when its corresponding operation and evidence support that claim. See [the architecture](docs/ARCHITECTURE.md), [the technical research record](docs/TECHNICAL_RESEARCH.md), and [the testing evidence](docs/TESTING.md) for scope and verification boundaries.
 
 ## Roadmap
 
-The roadmap includes unpredictable drill scheduling from future block hashes, BABE authorship evidence, and evidence-class weighting. Further planned areas include incident detection and correlation, validator staking and session-key operations, and Docker or Kubernetes deployment. These items are not described as implemented capabilities.
-
-## License
-
-Kaizen is distributed under the MIT License. See the repository's `LICENSE` file for the full license text.
+The implementation plan and progress log describe the current state and remaining work. Planned areas include deployment adapters for Docker and Kubernetes/Helm, additional validator operations, and broader end-to-end verification. Planned capabilities are not represented as completed features. See [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) and [Progress](docs/PROGRESS.md).
 
 ## Documentation
 
-The `docs/` directory contains the project specification, architecture, implementation plan, technical research, risk register, decision records, progress evidence, testing guidance, and attestation specification. Status labels and reported evidence in those documents reflect the state recorded in the repository and should not be interpreted as claims beyond their stated scope.
+- [Project specification](docs/PROJECT_SPEC.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [Technical research](docs/TECHNICAL_RESEARCH.md)
+- [Risk register](docs/RISKS.md)
+- [Decision records](docs/DECISIONS.md)
+- [Progress log](docs/PROGRESS.md)
+- [Testing strategy and evidence](docs/TESTING.md)
+- [Phase reports](docs/PHASE_REPORT.md)
+
+## License
+
+Kaizen is released under the MIT License. See [LICENSE](LICENSE) for the complete terms.
