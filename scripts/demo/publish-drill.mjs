@@ -135,7 +135,13 @@ index.drills.unshift({
   timeToRecoverMs: certificate.chain?.metrics?.timeToRecoverMs ?? null,
   finalityGapBlocks: certificate.chain?.metrics?.finalityGapBlocks ?? null,
   score: bundle.score?.score ?? null,
-  anchor: { status: anchor.status, blockNumber: anchor.blockNumber ?? null },
+  anchor: {
+    status: anchor.status,
+    txHash: anchor.txHash ?? null,
+    blockNumber: anchor.blockNumber ?? null,
+    finality: anchor.status === 'finalized' ? 'finalized' : anchor.status === 'in-block' ? 'in-block' : null,
+    signerAddress: anchor.signer ?? null,
+  },
   workflowUrl: workflow?.url ?? null,
 });
 index.drills = index.drills.slice(0, 200);
