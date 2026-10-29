@@ -18,6 +18,7 @@ import { apiClient } from './api/client';
 import { ACTIVE_FAULT_STATES } from './lib/model';
 import { REPLAY } from './lib/mode';
 import { ReplayBanner } from './components/ReplayBanner';
+import { ConsoleDataNotice } from './components/ConsoleDataNotice';
 import { Networks } from './pages/Networks';
 import { Landing } from './pages/Landing';
 import { Create } from './pages/Create';
@@ -196,6 +197,7 @@ function Shell(): JSX.Element {
             <NetChip />
           </header>
           {REPLAY && <ReplayBanner />}
+          <ConsoleDataNotice path={loc.pathname} />
           <AnimatePresence mode="wait">
             <motion.div
               key={section}

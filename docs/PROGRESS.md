@@ -6,6 +6,16 @@ work, exact next step.
 
 ---
 
+## 2026-10-29 — A3/A4: live-first web console and honest data labels
+
+**Files modified**: `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/Overview.tsx`, `apps/web/src/pages/Validators.tsx`, `apps/web/src/components/ConsoleDataNotice.tsx`, `apps/web/src/components/ConsoleDataNotice.test.ts`, `apps/web/src/App.tsx`, `docs/PROGRESS.md`.
+**Work done**: Added a 15-second public Portaldot V3 monitor card using `chain_getHeader` and `chain_getFinalizedHead`; rendered published demo bundle anchor fields (`txHash`, `blockNumber`, `finality`, `signerAddress`) on Live and identify the selected anchor as live bundle data. Overview, Validators, Networks, Lab, Scenarios, Incidents, Deployments, Settings, and Create are marked REPLAY, with published drill data primary where relevant and committed fixtures identified as fallback. Live and V3 identify their live endpoints separately from recorded drill evidence. Added explicit not-implemented notices for hosted replay actions not backed by the live control plane. Added focused Vitest tests for monitor source fetches and the route source map.
+**Verification**: `git diff --check` passed on Node v20.20.2. `node_modules`, Vitest, and TypeScript executables are absent, so Vitest, TypeScript checks, and builds could not be run locally. Per repository policy, CI on GitHub Actions must cover Vitest, typecheck, and builds. No Vercel deployment was performed.
+**Problems / decisions / remaining work**: No published live-chain values were fabricated. Local test/build verification is pending CI. A3/A4 changes have not yet been committed or reviewed by CI.
+**Next step**: Run `git diff --check` on the complete change, set the requested git identity, commit additively, push `feat/a3-a4-live-console`, and open a PR that records CI requirements and route labels.
+
+---
+
 ## 2026-10-29 — demo-publisher: publish independently checkable anchor evidence
 
 **Files modified**: `scripts/demo/publish-drill.mjs`, `docs/PROGRESS.md`.

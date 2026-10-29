@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { Btn } from '../components/ui';
 import { useConsole } from '../state/ConsoleContext';
 import { consoleBlockUrl } from './Landing';
+import { PublicMonitorCard } from './publicMonitor';
 
 const OWNER = 'Shaydez-Defi';
 const NAME = 'kaizen';
@@ -59,7 +60,7 @@ interface Bundle {
   run: unknown;
   verificationOnline: { status: string; reasons: string[] } | null;
   score: { score: number } | null;
-  anchor: { status: string; reason?: string; blockHash?: string; blockNumber?: number };
+  anchor: { status: string; reason?: string; blockHash?: string; blockNumber?: number | null; txHash?: string | null; finality?: string | null; signerAddress?: string | null };
   workflow: { url: string } | null;
 }
 interface WfRun {
@@ -161,6 +162,7 @@ export function Live(): JSX.Element {
   const { select } = useConsole();
   const [items, setItems] = useState<IndexItem[] | null>(null);
   const [bundle, setBundle] = useState<Bundle | null>(null);
+  const [anchorSource, setAnchorSource] = useState<'live bundle' | 'replay evidence' | null>(null);
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [runs, setRuns] = useState<WfRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -201,11 +203,13 @@ export function Live(): JSX.Element {
   useEffect(() => {
     if (!selected) return;
     setBundle(null);
+    setAnchorSource(null);
     setChecks(null);
     void (async () => {
       try {
         const b = (await (await fetch(`${DATA}/drills/${selected}.json`)).json()) as Bundle;
         setBundle(b);
+        setAnchorSource('live bundle');
         setChecks(await verify(b));
       } catch (e) {
         setError((e as Error).message);
@@ -251,6 +255,8 @@ export function Live(): JSX.Element {
           {req.text && <span className={`sub ${req.state === 'ok' ? 'ok' : ''}`}>{req.text}</span>}
         </div>
       </div>
+
+      <PublicMonitorCard />
 
       <div className="glass card" aria-label="Runner status" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
         {active ? (
@@ -301,6 +307,16 @@ export function Live(): JSX.Element {
             </div>
             <div className="mono-s" style={{ marginTop: 14 }}>
               fingerprint {bundle.certificate.fingerprint}
+            </div>
+            <div className="lab" style={{ marginTop: 14 }}>Published chain anchor <span className="chip ok">{anchorSource === 'live bundle' ? 'LIVE BUNDLE' : 'REPLAY EVIDENCE'}</span></div>
+            <div className="sub mono-s">
+              {bundle.anchor.status === 'in-block' || bundle.anchor.status === 'finalized' ? (
+                <>
+                  {bundle.anchor.txHash ? <>tx {short(bundle.anchor.txHash)} · </> : 'transaction hash not published · '}
+                  {bundle.anchor.blockNumber != null ? <>block #{bundle.anchor.blockNumber.toLocaleString('en-US')} · </> : 'block not published · '}
+                  finality {bundle.anchor.finality ?? bundle.anchor.status} · signer {bundle.anchor.signerAddress ?? 'not published'}
+                </>
+              ) : `Not anchored: ${bundle.anchor.reason ?? bundle.anchor.status}`}
             </div>
             <div style={footnote}>
               The score grows with repeated certified drills; one drill caps confidence. Signed with{' '}

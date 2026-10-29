@@ -102,6 +102,7 @@ export function Overview() {
         </AnimatePresence>
       </aside>
       <div className="ov-stage">
+        {REPLAY && <div className="sub">Replay topology · recorded drill data, not a live network</div>}
         <Topology net={vnet} onSelect={openNode} />
         <div className="topo-note">
           Select a node to inspect it · solid links observed by monitoring ({observed} via peer ids) · dashed red: not observed
