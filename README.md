@@ -16,14 +16,14 @@ The engine manages disposable Portaldot networks, samples node RPC and process s
 
 ## Quickstart
 
-Requirements: Node.js 24 or later, npm 11 or later, and a Linux x86_64 or macOS host for which the upstream Portaldot binary artifact is available. The first setup requires network access to the Portaldot node release repository. Each running node requires approximately 1 GiB of free RAM.
+Requirements: Node.js 24 or later, npm, and a supported Linux x86_64 or macOS host. The first setup requires network access to download the upstream Portaldot node binary. Each running node requires approximately 1 GiB of free RAM.
 
 From a clean clone, run:
 
 ```bash
 git clone https://github.com/Shaydez-Defi/kaizen.git
 cd kaizen
-npm install
+npm ci
 npm run build
 npm test
 ```
