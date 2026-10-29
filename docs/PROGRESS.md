@@ -1403,7 +1403,7 @@ K8s/Helm — untouched.
 - Unit (chunked, 120 s cap): web 61/61, CLI 50/50 (47 + 3 new), API 41/41 (37 + 4 new) → 152; engine 220 + 34 + 41 = 295 (includes 50 new resilience tests; store schema 25).
 - `node contracts/test-resilience-registry.mjs` (optional `@ethereumjs/evm@10` + `solc@0.8.28`, `--no-save`): 6/6.
 - **LIVE on x86_64 GitHub Actions** — run [40042905143](https://github.com/Shaydez-Defi/kaizen/actions/runs/40042905143) (commit 05984e4): real two-node `portaldot_dev` 2.0.0, 15 s pause of `bob`; evidence 5 observations / 0 gaps (finalized stalled at #2 during the fault, advanced to #3 after); metrics recovered, ttr 2 020 ms, finality gap 3, blocks missed 2; dev-key certificate `0x517b2ffb…2e33`; verify online `verified` (11 hashes match), after stop `unverifiable: network offline`; score 35 (one run, confidence 0.39). Artifacts copied to `docs/evidence/resilience/`. First CI run (40042658799) failed honestly on scenario validation (missing `process-state` precondition) — fixed in the test.
-- V3 deployer `5HSwNUrjU8VqBfdjJdmGdEYig96V1uR6qySiKTZF6eoBd32o`: **3.1519 tPOT** free at block #167144 (read-only query, 2026-10-24 ~00:58 WAT).
+- V3 deployer `5HBnAqniYhyupDT1ccsTSRkdy3EbCAaZC6ii9XFon8WQwEaR`: **3.1519 tPOT** free at block #167144 (read-only query, 2026-10-24 ~00:58 WAT).
 
 **Not done / decisions**: `KaizenResilienceRegistry` NOT deployed (≈3.15 tPOT vs ≈85 tPOT for the last deploy, RSK-30). Pillar 1 (seeded drills) and BABE authorship / evidence-class weighting are roadmap (T-9.6, T-9.7). The v1 score still weights the operator-measured recovery time most.
 
