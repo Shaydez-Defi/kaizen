@@ -6,6 +6,15 @@ work, exact next step.
 
 ---
 
+## 2026-10-29 — demo-publisher: publish independently checkable anchor evidence
+
+**Files modified**: `scripts/demo/publish-drill.mjs`, `docs/PROGRESS.md`.
+**Work done**: Extended each published index drill's `anchor` object with the anchor transaction hash, block number, finalized/in-block status, and signer address from the keyring-backed anchor result. Missing fields remain null, so skipped and failed anchors stay honestly marked by their original status. The full drill bundle already includes the anchor result. Anchoring behavior was not changed.
+**Verification**: `node --check scripts/demo/publish-drill.mjs` and `git diff --check` both passed. No live-chain anchor was run, so no on-chain values were added.
+**Problems / decisions / remaining work**: No on-chain values were fabricated; skipped anchors retain `status: "skipped"` with null evidence fields.
+**Next step**: Commit this feature branch and open a pull request.
+
+---
 ## 2026-10-09: PHASE 0: Foundation, Technical Discovery & Build Governance
 
 **Phase/Task IDs**: Phase 0 (discovery); feeds tasks T-1.x planning.
