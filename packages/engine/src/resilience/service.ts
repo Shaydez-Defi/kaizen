@@ -359,9 +359,10 @@ export class ResilienceService {
     return buildCertificateBundle(cert, this.store.getScenarioRun(cert.runId), this.store.listResilienceAttestations(fingerprint));
   }
 
-  async verify(fingerprint: string): Promise<CertificateVerification> {
+  async verify(fingerprint: string, options: { rpc?: string } = {}): Promise<CertificateVerification> {
     const cert = this.getCertificate(fingerprint);
     const run = this.store.getScenarioRun(cert.runId);
-    return verifyCertificate(cert, run, this.readerForNetwork(cert.networkId));
+    const reader = options.rpc !== undefined ? createHttpChainReader(options.rpc) : this.readerForNetwork(cert.networkId);
+    return verifyCertificate(cert, run, reader);
   }
 }

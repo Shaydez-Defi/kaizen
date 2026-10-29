@@ -1328,7 +1328,7 @@ export function buildProgram(deps: CliDependencies = {}): Command {
         } else {
           if (fingerprint === undefined) throw new KaizenError('INVALID_INPUT', 'give a fingerprint, or --bundle <file>');
           label = fingerprint;
-          v = await engine.resilience.verify(fingerprint);
+          v = await engine.resilience.verify(fingerprint, cmdOpts.rpc !== undefined ? { rpc: cmdOpts.rpc } : {});
         }
         let attestations: KaizenAttestation[] = [];
         if (cmdOpts.bundle !== undefined) {

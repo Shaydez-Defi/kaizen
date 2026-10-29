@@ -312,12 +312,9 @@ describe('kaizen attest (A2)', () => {
     process.env = saved;
   });
 
-  it('stores verdict=mismatch (exit 1) when the chain disagrees', async () => {
-    const saved = fingerprint;
-    // a non-existent fingerprint cannot be attested
+  it('refuses to attest an unknown certificate (exit 1)', async () => {
     const r = await runCli(['--json', 'attest', '0x' + '9'.repeat(64), '--rpc', rpcUrl]);
     expect(r.code).toBe(1);
     expect(json<{ error: { code: string } }>(r).error.code).toBe('RESILIENCE_CERTIFICATE_NOT_FOUND');
-    void saved;
   });
 });
