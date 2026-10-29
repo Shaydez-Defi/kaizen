@@ -1,6 +1,21 @@
 {
   "drills": [
     {
+      "id": "2026-10-29T08-59-06-745Z-dd13c1a9",
+      "publishedAt": "2026-10-29T08:59:06.745Z",
+      "fingerprint": "0xdd13c1a9c5bbb62815df36590d63e1762699e71a0d452cc62a9fa2983efb2e34",
+      "validatorId": "res-it-bob",
+      "recovered": true,
+      "timeToRecoverMs": 2021,
+      "finalityGapBlocks": 5,
+      "score": 35,
+      "anchor": {
+        "status": "in-block",
+        "blockNumber": 236143
+      },
+      "workflowUrl": "https://github.com/Shaydez-Defi/kaizen/actions/runs/40845940545"
+    },
+    {
       "id": "2026-10-29T03-14-34-745Z-5218047f",
       "publishedAt": "2026-10-29T03:14:34.745Z",
       "fingerprint": "0x5218047f725e8ee2aa3c577e0ab0886c5f07d393cedab6863b4ec83fa2a8035d",
@@ -331,5 +346,5 @@
       "workflowUrl": "https://github.com/Shaydez-Defi/kaizen/actions/runs/40105314125"
     }
   ],
-  "updatedAt": "2026-10-29T03:14:34.745Z"
+  "updatedAt": "2026-10-29T08:59:06.745Z"
 }
