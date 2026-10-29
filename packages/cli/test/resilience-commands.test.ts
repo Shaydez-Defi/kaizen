@@ -244,3 +244,71 @@ describe('kaizen certify / score', () => {
     });
   });
 });
+
+describe('kaizen attest (A2)', () => {
+  let server: http.Server;
+  let rpcUrl = '';
+
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += String(c)));
+      req.on('end', () => {
+        const { params } = JSON.parse(body) as { params: number[] };
+        const n = params[0]!;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: h(n) }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    rpcUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => server.close(r));
+  });
+
+  it('refuses to attest without KAIZEN_ATTESTER_SURI', async () => {
+    const saved = { ...process.env };
+    delete process.env['KAIZEN_ATTESTER_SURI'];
+    delete process.env['KAIZEN_ATTESTER_SURI_FILE'];
+    try {
+      const r = await runCli(['--json', 'attest', fingerprint, '--rpc', rpcUrl]);
+      expect(r.code).toBe(1);
+      expect(json<{ error: { code: string } }>(r).error.code).toBe('ATTESTATION_SIGNER_NOT_CONFIGURED');
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it('attests with an independent key after a full chain match; verify-certificate lists it; score --v2 upgrades to 1.0', async () => {
+    type Scores = { scores: { effectiveRuns: number }[] };
+    const before = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2'])).scores[0]!;
+    const r = await runCli(['--json', 'attest', fingerprint, '--rpc', rpcUrl]);
+    expect(r.code, r.stdout).toBe(0);
+    const att = json<{ attestation: { verdict: string; certificateFingerprint: string; attester: { address: string } } }>(r).attestation;
+    expect(att.verdict).toBe('verified');
+    expect(att.certificateFingerprint).toBe(fingerprint);
+    // the certificate is signed by the dev //Alice key; the attester must differ
+    expect(att.attester.address).not.toBe('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
+
+    const v = await runCli(['verify-certificate', fingerprint, '--rpc', rpcUrl]);
+    expect(v.code, v.stdout).toBe(0);
+    expect(v.stdout).toContain('attestations: 1');
+    expect(v.stdout).toContain('verified');
+
+    const after = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2'])).scores[0]!;
+    expect(after.effectiveRuns / before.effectiveRuns).toBeCloseTo(1 / 0.7, 3);
+    const withNotes = json<{ scores: { notes: number }[] }>(await runCli(['--json', 'score', 'bob', '--v2']));
+    expect(withNotes.scores[0]!.notes).toBe(0);
+  });
+
+  it('stores verdict=mismatch (exit 1) when the chain disagrees', async () => {
+    const saved = fingerprint;
+    // a non-existent fingerprint cannot be attested
+    const r = await runCli(['--json', 'attest', '0x' + '9'.repeat(64), '--rpc', rpcUrl]);
+    expect(r.code).toBe(1);
+    expect(json<{ error: { code: string } }>(r).error.code).toBe('RESILIENCE_CERTIFICATE_NOT_FOUND');
+    void saved;
+  });
+});
