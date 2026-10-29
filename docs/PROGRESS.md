@@ -1,3 +1,13 @@
+## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
+
+**Files modified**: `.github/workflows/drill-live.yml`, `apps/web/api/drill.js`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/V3.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/drillWorkflow.ts`, `apps/web/src/pages/drillWorkflow.test.ts`, `docs/PROGRESS.md`.
+**Work done**: Changed the drill workflow cron to `17,47 * * * *`. The Live page dispatches `drill-live.yml` on `main` through the existing Vercel serverless route; `KAIZEN_DISPATCH_TOKEN` stays server-side. The route checks GitHub Actions and returns actual queued, in-progress, or completed run data. The page polls status every 5 seconds and links to the returned workflow run. The UI states the exact mechanism and required Vercel environment variable. Live drill history refreshes every 30 seconds; the public V3 JSON-RPC head monitor and V3 console RPC-backed probe/status/anchor/run reads refresh every 30 seconds. Added focused Vitest coverage for the workflow client and public monitor polling interval. No dependencies added.
+**Verification**: Local Node version: `v20.20.2`. `git diff --check` passed. `node --check apps/web/api/drill.js` passed. `npm test -- --run` could not run because `vitest` is not installed (`vitest: not found`). `npm run typecheck` could not run because `tsc` is not installed (`tsc: not found`). No `node_modules` is present; root `package.json` requires Node `>=24`, but the environment is Node 20.20.2. CI must verify `npm ci`, Vitest (`npm test`), strict TypeScript (`npm run typecheck`), ESLint (`npm run lint`), and production build (`npm run build`) on supported Node 24. No live drill dispatched and no Vercel deployment performed.
+**Problems / decisions / remaining work**: `KAIZEN_DISPATCH_TOKEN` must be configured in Vercel as a repository-scoped GitHub token with Actions read/write access before button dispatch works. The token is never returned to the browser. Local app tests/builds remain unverified pending CI; no live workflow status or chain data was fabricated.
+**Next step**: PR #16 is open at `https://github.com/Shaydez-Defi/kaizen/pull/16`. CI is required to run `npm ci`, `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` on supported Node 24; all PR checks are currently unreported. Configure `KAIZEN_DISPATCH_TOKEN` in Vercel for on-demand dispatch.
+
+---
+
 # Engineering Progress Log
 
 Chronological, append-only. Every entry: date, phase/task IDs, files touched,

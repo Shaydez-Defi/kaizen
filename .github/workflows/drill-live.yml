@@ -14,7 +14,7 @@ on:
         required: false
         default: 'manual'
   schedule:
-    - cron: '17 */3 * * *'
+    - cron: '17,47 * * * *'
 
 concurrency:
   group: drill-live

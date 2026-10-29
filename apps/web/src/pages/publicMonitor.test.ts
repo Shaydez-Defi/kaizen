@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchPublicMonitor, fetchPublishedAnchor, V3_MONITOR, DEMO_DATA } from './publicMonitor';
+import { fetchPublicMonitor, fetchPublishedAnchor, V3_MONITOR, DEMO_DATA, PUBLIC_MONITOR_POLL_MS } from './publicMonitor';
 
 describe('live public sources', () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -25,5 +25,9 @@ describe('live public sources', () => {
     expect(result.finalizedNumber).toBe(40);
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(fetch).mock.calls.every(([url]) => url === V3_MONITOR)).toBe(true);
+  });
+
+  it('polls the chain monitor every 30 seconds', () => {
+    expect(PUBLIC_MONITOR_POLL_MS).toBe(30_000);
   });
 });

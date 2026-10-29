@@ -20,6 +20,7 @@ import { Btn } from '../components/ui';
 import { useConsole } from '../state/ConsoleContext';
 import { consoleBlockUrl } from './Landing';
 import { PublicMonitorCard } from './publicMonitor';
+import { getDispatchedRun, requestDrill, type DrillRun } from './drillWorkflow';
 
 const OWNER = 'Shaydez-Defi';
 const NAME = 'kaizen';
@@ -147,11 +148,17 @@ const short = (h: string) => `${h.slice(0, 10)}…${h.slice(-6)}`;
 const mark = (ok: boolean | null) => (ok === true ? <span className="ok">✓</span> : ok === false ? <span className="bad">✗</span> : <span className="warn">–</span>);
 const secs = (ms: number | null) => (ms == null ? '—' : `${(ms / 1000).toFixed(1)} s`);
 
-/** Next run of the workflow schedule: minute 17 of every third UTC hour. */
+/** Next run of the workflow schedule: minutes 17 and 47 of every UTC hour. */
 function nextScheduled(): Date {
   const now = new Date();
-  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), 17));
-  while (t <= now || t.getUTCHours() % 3 !== 0) t.setUTCHours(t.getUTCHours() + 1);
+  const t = new Date(now);
+  t.setUTCSeconds(0, 0);
+  if (t.getUTCMinutes() < 17) t.setUTCMinutes(17);
+  else if (t.getUTCMinutes() < 47) t.setUTCMinutes(47);
+  else {
+    t.setUTCHours(t.getUTCHours() + 1);
+    t.setUTCMinutes(17);
+  }
   return t;
 }
 
@@ -167,7 +174,9 @@ export function Live(): JSX.Element {
   const [runs, setRuns] = useState<WfRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [req, setReq] = useState<{ state: 'idle' | 'busy' | 'ok' | 'no'; text?: string }>({ state: 'idle' });
+  const [req, setReq] = useState<{ state: 'idle' | 'busy' | 'accepted' | 'queued' | 'running' | 'completed' | 'no'; text?: string }>({ state: 'idle' });
+  const [dispatchSince, setDispatchSince] = useState<string | null>(null);
+  const [drillRun, setDrillRun] = useState<DrillRun | null>(null);
 
   const loadIndex = useCallback(async () => {
     try {
@@ -182,7 +191,7 @@ export function Live(): JSX.Element {
   }, []);
   const loadRuns = useCallback(async () => {
     try {
-      const r = await fetch(RUNS);
+      const r = await fetch(`${RUNS}&t=${Date.now()}`, { cache: 'no-store' });
       if (r.ok) setRuns(((await r.json()) as { workflow_runs: WfRun[] }).workflow_runs);
     } catch {
       /* runner status is optional */
@@ -195,10 +204,39 @@ export function Live(): JSX.Element {
     void loadRuns();
     const t = setInterval(() => {
       void loadRuns();
-      if (active) void loadIndex();
+      void loadIndex();
     }, 30_000);
     return () => clearInterval(t);
   }, [loadIndex, loadRuns, active]);
+
+  useEffect(() => {
+    if (!dispatchSince) return undefined;
+    let alive = true;
+    let finished = false;
+    const poll = async () => {
+      if (finished) return;
+      try {
+        const run = await getDispatchedRun(dispatchSince);
+        if (!alive || !run) return;
+        setDrillRun(run);
+        if (run.status === 'completed') {
+          finished = true;
+          setReq({ state: 'completed', text: `Workflow completed: ${run.conclusion ?? 'completed'}.` });
+          void loadRuns();
+          void loadIndex();
+        } else if (run.status === 'in_progress') {
+          setReq({ state: 'running', text: 'GitHub Actions is running the drill.' });
+        } else {
+          setReq({ state: 'queued', text: 'GitHub Actions queued the drill.' });
+        }
+      } catch (e) {
+        if (alive) setReq({ state: 'accepted', text: `Dispatch accepted; workflow status check failed: ${(e as Error).message}` });
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 5_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [dispatchSince, loadIndex, loadRuns]);
 
   useEffect(() => {
     if (!selected) return;
@@ -219,13 +257,21 @@ export function Live(): JSX.Element {
 
   const runNow = async () => {
     setReq({ state: 'busy' });
+    setDrillRun(null);
     try {
-      const r = await fetch(DRILL_API, { method: 'POST' });
-      const body = (await r.json().catch(() => ({}))) as { message?: string };
-      setReq({ state: r.ok ? 'ok' : 'no', text: body.message ?? (r.ok ? 'Drill requested.' : `Not available (HTTP ${r.status})`) });
-      setTimeout(() => void loadRuns(), 4000);
-    } catch {
-      setReq({ state: 'no', text: 'On-demand drills are not enabled on this deployment.' });
+      const result = await requestDrill(DRILL_API);
+      setDispatchSince(result.since);
+      if (result.run) {
+        setDrillRun(result.run);
+        if (result.run.status === 'completed') setReq({ state: 'completed', text: `Workflow completed: ${result.run.conclusion ?? 'completed'}.` });
+        else if (result.run.status === 'in_progress') setReq({ state: 'running', text: 'GitHub Actions is running the drill.' });
+        else setReq({ state: 'queued', text: 'GitHub Actions queued the drill.' });
+      } else {
+        setReq({ state: 'accepted', text: result.message });
+      }
+      void loadRuns();
+    } catch (e) {
+      setReq({ state: 'no', text: (e as Error).message });
     }
   };
 
@@ -244,15 +290,17 @@ export function Live(): JSX.Element {
             Live <span className="g">drills</span>
           </h1>
           <p style={{ maxWidth: 760 }}>
-            Every three hours a fresh GitHub runner boots a real two-node Portaldot network, pauses a validator, and reads recovery from GRANDPA finality. The run is
+            Every 30 minutes a fresh GitHub runner boots a real two-node Portaldot network, pauses a validator, and reads recovery from GRANDPA finality. The run is
             certified and its fingerprint can be written to the Portaldot V3 test network. This page re-checks each drill in your browser. Nothing here is mocked.
           </p>
+          <p className="sub">Run drill now dispatches drill-live.yml on main through this server-side endpoint. It needs KAIZEN_DISPATCH_TOKEN in the Vercel project environment; the token is never sent to the browser.</p>
         </div>
         <div className="actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
           <Btn tone="pri" arrow disabled={req.state === 'busy' || Boolean(active)} onClick={() => void runNow()}>
-            {req.state === 'busy' ? 'Requesting…' : 'Run a drill now'}
+            {req.state === 'busy' ? 'Requesting…' : 'Run drill now'}
           </Btn>
-          {req.text && <span className={`sub ${req.state === 'ok' ? 'ok' : ''}`}>{req.text}</span>}
+          {req.text && <span className={`sub ${req.state === 'completed' ? 'ok' : req.state === 'no' ? 'bad' : ''}`} role="status">{req.text}</span>}
+          {drillRun && <a className="ext" href={drillRun.html_url} target="_blank" rel="noreferrer">Open this workflow run ↗</a>}
         </div>
       </div>
 
@@ -272,7 +320,7 @@ export function Live(): JSX.Element {
         ) : (
           <span>
             <span className="chip ok">Idle</span>{' '}
-            <span className="sub">next scheduled drill {nextScheduled().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="sub">next scheduled drill {nextScheduled().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short' })}</span>
           </span>
         )}
       </div>
