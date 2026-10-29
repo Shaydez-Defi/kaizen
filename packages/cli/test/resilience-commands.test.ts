@@ -248,6 +248,7 @@ describe('kaizen certify / score', () => {
 describe('kaizen attest (A2)', () => {
   let server: http.Server;
   let rpcUrl = '';
+  let attestFingerprint = '';
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
@@ -262,6 +263,11 @@ describe('kaizen attest (A2)', () => {
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     rpcUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const certs = json<{ certificates: { fingerprint: string }[] }>(
+      await runCli(['--json', 'certificates', '--validator', 'bob']),
+    );
+    expect(certs.certificates.length).toBeGreaterThan(0);
+    attestFingerprint = certs.certificates[0]!.fingerprint;
   });
 
   afterAll(async () => {
@@ -273,7 +279,7 @@ describe('kaizen attest (A2)', () => {
     delete process.env['KAIZEN_ATTESTER_SURI'];
     delete process.env['KAIZEN_ATTESTER_SURI_FILE'];
     try {
-      const r = await runCli(['--json', 'attest', fingerprint, '--rpc', rpcUrl]);
+      const r = await runCli(['--json', 'attest', attestFingerprint, '--rpc', rpcUrl]);
       expect(r.code).toBe(1);
       expect(json<{ error: { code: string } }>(r).error.code).toBe('ATTESTATION_SIGNER_NOT_CONFIGURED');
     } finally {
@@ -284,15 +290,15 @@ describe('kaizen attest (A2)', () => {
   it('attests with an independent key after a full chain match; verify-certificate lists it; score --v2 upgrades to 1.0', async () => {
     type Scores = { scores: { effectiveRuns: number }[] };
     const before = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2'])).scores[0]!;
-    const r = await runCli(['--json', 'attest', fingerprint, '--rpc', rpcUrl]);
+    const r = await runCli(['--json', 'attest', attestFingerprint, '--rpc', rpcUrl]);
     expect(r.code, r.stdout).toBe(0);
     const att = json<{ attestation: { verdict: string; certificateFingerprint: string; attester: { address: string } } }>(r).attestation;
     expect(att.verdict).toBe('verified');
-    expect(att.certificateFingerprint).toBe(fingerprint);
+    expect(att.certificateFingerprint).toBe(attestFingerprint);
     // the certificate is signed by the dev //Alice key; the attester must differ
     expect(att.attester.address).not.toBe('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
 
-    const v = await runCli(['verify-certificate', fingerprint, '--rpc', rpcUrl]);
+    const v = await runCli(['verify-certificate', attestFingerprint, '--rpc', rpcUrl]);
     expect(v.code, v.stdout).toBe(0);
     expect(v.stdout).toContain('attestations: 1');
     expect(v.stdout).toContain('verified');
