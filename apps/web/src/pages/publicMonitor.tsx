@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 
 export const DEMO_DATA = 'https://raw.githubusercontent.com/Shaydez-Defi/kaizen/demo-data';
 export const V3_MONITOR = 'https://test-node-v3.portaldot.dev';
+export const PUBLIC_MONITOR_POLL_MS = 30_000;
 
 export interface PublishedAnchor {
   status: string;
@@ -48,7 +49,7 @@ export function usePublicMonitor() {
   const [monitor, setMonitor] = useState<PublicMonitor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const refresh = useCallback(() => { void fetchPublicMonitor().then((value) => { setMonitor(value); setError(null); }).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e))); }, []);
-  useEffect(() => { refresh(); const timer = setInterval(refresh, 15_000); return () => clearInterval(timer); }, [refresh]);
+  useEffect(() => { refresh(); const timer = setInterval(refresh, PUBLIC_MONITOR_POLL_MS); return () => clearInterval(timer); }, [refresh]);
   return { monitor, error, refresh };
 }
 export function PublicMonitorCard(): JSX.Element {

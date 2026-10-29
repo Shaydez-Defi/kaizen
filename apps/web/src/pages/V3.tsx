@@ -15,7 +15,7 @@ import { Btn, ErrorBox, Seg, ease } from '../components/ui';
 import { formatTs, shortId } from '../components/fmt';
 import { blockUrl, formatTokens } from '../lib/model';
 import { useEventsContext } from '../state/EventsContext';
-import { useAsync } from '../state/useAsync';
+import { useAsync, useInterval } from '../state/useAsync';
 import { REPLAY } from '../lib/mode';
 
 /** Observed V3 costs (T-8.2 live run, see docs/RISKS.md RSK-30). */
@@ -85,6 +85,15 @@ export function V3() {
     if (!runId && completed[0]) setRunId(completed[0].id);
   }, [completed, runId]);
   const hash = useAsync(() => (runId ? apiClient.runHash(runId) : Promise.resolve(null)), [runId]);
+
+  // Refresh the existing backend RPC/monitor reads so head, endpoint health,
+  // signer balance, anchors, and run history do not wait for manual probing.
+  useInterval(() => {
+    probe.reload();
+    status.reload();
+    anchors.reload();
+    runs.reload();
+  }, 30_000);
 
   // Live anchor lifecycle (v3.anchor events) → refresh the evidence list.
   useEffect(() => {
