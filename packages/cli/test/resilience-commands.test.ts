@@ -308,7 +308,7 @@ describe('kaizen attest (A2)', () => {
     const after = json<Scores>(await runCli(['--json', 'score', 'bob', '--v2'])).scores[0]!;
     expect(after.effectiveRuns / before.effectiveRuns).toBeCloseTo(1 / 0.7, 3);
     const withNotes = json<{ scores: { notes: number }[] }>(await runCli(['--json', 'score', 'bob', '--v2']));
-    expect(withNotes.scores[0]!.notes).toBe(0);
+    expect(withNotes.scores[0]!.notes).toEqual([]);
     process.env = saved;
   });
 
