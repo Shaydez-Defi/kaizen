@@ -1502,3 +1502,16 @@ K8s/Helm — untouched.
 - A1: `kaizen export-certificate <fingerprint> --out file` writes a portable bundle (certificate + the run its fingerprint covers); `kaizen verify-certificate --bundle file [--rpc url]` verifies it with no local state: fingerprint, sr25519 signature, drill record, then block hashes re-fetched from the RPC (no `--rpc` → `unverifiable`, never upgraded). 3 CLI tests cover verified, unverifiable, chain mismatch, edited bundle, malformed input. Still outstanding for A1: have the x64 live drill write the bundle and run this verify against the live node in CI.
 - A1 verified: resilience-live run 40584394253 (x64, cf01ae6) is green and uploads `certificate.bundle.json`: one certificate with the drill record, BABE author on 5 observations, GRANDPA finality gap (4 blocks) and 11 block hashes re-fetched from the live node → `verified`.
 - A2 (partial): `engine.resilience.scoreV2` and `kaizen score --v2 [--verify-chain]` weight each certified run by its evidence class (the signed certificate is the attestation; chain re-verification lifts signed-local 0.7 to signed-chain-verified 1.0; an unreachable network never upgrades). Not built yet: third-party attestations signed by someone other than the certificate signer, and the attestation spec document.
+
+## 2026-10-29 — A2: signed third-party attestations (PR #11, feat/attestations)
+
+- feat(resilience) 96cc4af: sr25519 attestation module (`packages/engine/src/resilience/attestation.ts`): `issueAttestation`, `checkAttestation`, `loadAttestationSigner` (`KAIZEN_ATTESTER_SURI`/`_FILE`, no dev fallback). Statement `kaizen:attestation:v1:<fingerprint>:<verdict>:<checkedAtISO>`; verdicts verified|mismatch; replay/expiry 30d; same-key refused.
+- feat(state) 9f33fbc: `resilience_attestations` table, migration v26 (append-only, backward compatible), idempotent per (fingerprint, attester).
+- feat(resilience) a4fbf8d: score v2 — a valid different-key verdict=verified attestation weighs 1.0 (same as signed-chain-verified); invalid/same-key listed in excluded `notes`. evidenceFlags bit 4 `0x10` independentlyAttested; no contract ABI change (bitfield already u8).
+- feat(resilience) b336069: bundles carry optional `attestations`; `exportBundle` includes stored ones.
+- feat(cli) 0b87b53: `kaizen attest <fingerprint> [--rpc url]`; `verify-certificate` lists attestations (local store honors `--rpc` now, 9f33…fix commit).
+- test 16815f7 + 57b62c2 + CI fixes: sign/verify/tamper/same-key/expiry, weighting, CLI mock-RPC; migration-count test updated to 26.
+- docs 87bd540: `docs/ATTESTATION_SPEC.md`; RESILIENCE_SCORE §7.4 documents bit 0x10.
+- ci: `.github/workflows/unit.yml` (Node 24 x64): tsc engine+cli, `npm test`, `npm run build`.
+
+Verified: unit workflow run 40796334674 GREEN on ubuntu x64 (502+ tests incl. the new attestation suites). tsc/eslint clean. NOT yet verified on-chain: anchoring a certificate WITH the 0x10 flag (needs a real drill + anchor run, next: resilience-live on this branch). Next: A3 live-first web app (`git checkout -b feat/live-web feat/ink-registry && git merge origin/main`), then A4 honest labels.
