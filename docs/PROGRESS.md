@@ -1,3 +1,23 @@
+## 2026-10-30 — T-DOC-POS: consistent Kaizen positioning
+
+**Files modified**: `README.md`, `apps/web/index.html`, `apps/web/src/pages/Landing.tsx`, `docs/PROJECT_SPEC.md`, `docs/DECISIONS.md`, `docs/IMPLEMENTATION_PLAN.md`, `docs/PROGRESS.md`.
+**Work done**: Applied the approved line once beneath the README heading and once in the PROJECT_SPEC product-positioning introduction. Replaced the landing hero tagline and footer descriptor, and used the same line for the HTML title and meta description. Copy only; no application behavior changed.
+**Verification**: `git diff --check` passed. `npm run build --workspace @kaizen/web` passed; Vite emitted existing `use client` directive and large-chunk warnings. Exact tagline placement was checked in source. No app logic changed.
+**Problems / decisions / remaining work**: Added decision DEC-030 because PROJECT_SPEC is locked; added task T-DOC-POS. A pre-existing untracked `docs/BUSINESS.md` was left untouched and excluded. One PR against `main` is pending.
+**Next step**: Commit T-DOC-POS on `docs/kaizen-positioning-line`, push, and open one PR against `main` with the requested title.
+
+---
+
+## 2026-10-30 — T-DOC-BIZ: business case documentation
+
+**Files modified**: `docs/BUSINESS.md`, `docs/PROGRESS.md`.
+**Work done**: Added a concise business case describing the validator reliability problem, the three requested user/customer groups, open-source CLI adoption, registry-backed certificate history, and a badge served by the live page. Clearly scoped current drills to local test networks and the registry's supported certificate anchors to Portaldot V3 testnet; explicitly states local-network results are not claims about mainnet behavior or guaranteed uptime. Hosted scheduled drills and chain-wide pre-upgrade drills are labeled planned, not current offerings. No prices, revenue, user counts, or partnerships added.
+**Verification**: `git diff --check` passed; reviewed against `docs/PROJECT_SPEC.md`, `docs/RESILIENCE_SCORE.md`, and `docs/ARCHITECTURE.md`. Documentation-only change; no test suite run.
+**Problems / decisions / remaining work**: Pull request review and CI remain pending.
+**Next step**: Commit task T-DOC-BIZ on this feature branch and open one PR titled `docs: add business plan`.
+
+---
+
 # Engineering Progress Log
 
 Chronological, append-only. Every entry records the date, task IDs, files touched,

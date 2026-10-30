@@ -1,4 +1,5 @@
 # Kaizen
+Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.
 
 Kaizen is a disaster-simulation engine that breaks Portaldot validators on purpose and proves on-chain that they recover.
 
