@@ -97,9 +97,14 @@ export async function verifyCertificate(
   const chain = await verifyChainEvidence(cert.chain, reader);
   const reasons: string[] = [];
   if (!integrity.fingerprintMatches) reasons.push('fingerprint does not match the stored run + evidence');
+  if (!integrity.metadataMatches) reasons.push('certificate metadata does not match the signed run + evidence');
   if (!integrity.signatureValid) reasons.push('sr25519 signature is invalid');
   if (!integrity.addressMatchesKey) reasons.push('signer address does not match the public key');
-  const integrityOk = integrity.fingerprintMatches && integrity.signatureValid && integrity.addressMatchesKey;
+  const integrityOk =
+    integrity.fingerprintMatches &&
+    integrity.signatureValid &&
+    integrity.addressMatchesKey &&
+    integrity.metadataMatches;
   reasons.push(`chain: ${chain.reason}`);
   if (cert.signature.dev) reasons.push('DEV KEY: signed with a public test key — proves integrity, not operator identity');
   const status: ChainCheckStatus = !integrityOk || chain.status === 'mismatch' ? 'mismatch' : chain.status;

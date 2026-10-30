@@ -122,6 +122,8 @@ export interface SignatureCheck {
   signatureValid: boolean;
   /** Address ↔ public key consistency (the address is display-only). */
   addressMatchesKey: boolean;
+  /** Top-level metadata agrees with the supplied run and chain evidence. */
+  metadataMatches: boolean;
   dev: boolean;
 }
 
@@ -136,6 +138,12 @@ export async function checkCertificateSignature(
 ): Promise<SignatureCheck> {
   await cryptoWaitReady();
   const recomputed = computeCertificateFingerprint(run, cert.chain);
+  const metadataMatches =
+    cert.runId === run.id &&
+    cert.runHash === computeRunHash(run) &&
+    cert.validatorId === cert.chain.validatorId &&
+    cert.networkId === run.networkId &&
+    cert.networkId === cert.chain.networkId;
   let signatureValid = false;
   try {
     signatureValid = signatureVerify(
@@ -153,10 +161,11 @@ export async function checkCertificateSignature(
     addressMatchesKey = false;
   }
   return {
-    fingerprintMatches: recomputed === cert.fingerprint && cert.runId === run.id,
+    fingerprintMatches: recomputed === cert.fingerprint && metadataMatches,
     recomputedFingerprint: recomputed,
     signatureValid,
     addressMatchesKey,
+    metadataMatches,
     dev: cert.signature.dev,
   };
 }

@@ -1,3 +1,13 @@
+## 2026-10-30 — P1 certificate metadata integrity
+
+**Files modified**: `packages/engine/src/resilience/certificate.ts`, `packages/engine/src/resilience/service.ts`, `packages/engine/src/resilience/verify.ts`, `packages/engine/test/resilience-certificate.test.ts`, `packages/engine/test/resilience-service.test.ts`, `docs/PROGRESS.md`.
+**Work done**: Certificate integrity now checks the top-level run ID, run hash, validator ID, and network ID against the supplied run and chain evidence. Scoring excludes certificates failing any metadata check, and full verification reports metadata mismatches as integrity failures. Added individual tampering regressions for validatorId, networkId, runHash, and run ID, including score exclusion assertions.
+**Verification**: `git diff --check` and `npm run build -w @kaizen/engine` passed. `npm ci` completed with engine warnings under Node v20.20.2. Focused Vitest tests could not execute: Node 20 lacks the required built-in `node:sqlite` module (zero tests ran). `npm run typecheck` also failed in downstream CLI checks because `@kaizen/engine` declarations were not found and existing implicit-any/unknown errors surfaced; engine package typecheck/build itself passed. Project requires Node >=24; CI should rerun the focused tests and full typecheck on supported Node.
+**Problems / decisions / remaining work**: Full acceptance tests and full repository typecheck remain unverified due unsupported Node version in this environment.
+**Next step**: Push the feature branch and open the requested PR into `main`.
+
+---
+
 ## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
 
 **Files modified**: `.github/workflows/drill-live.yml`, `apps/web/api/drill.js`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/V3.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/drillWorkflow.ts`, `apps/web/src/pages/drillWorkflow.test.ts`, `docs/PROGRESS.md`.
