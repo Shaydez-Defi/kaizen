@@ -84,6 +84,7 @@ export function Settings() {
         <div>
           <div className="lab">Settings</div>
           <h1>Environment</h1>
+          <p className="sub">Check API, node binary, event stream, and local configuration.</p>
         </div>
         <div className="actions">
           <Btn onClick={rerun}>Run checks</Btn>
