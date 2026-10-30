@@ -1,18 +1,26 @@
-## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
+# Engineering Progress Log
 
-**Files modified**: `.github/workflows/drill-live.yml`, `apps/web/api/drill.js`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/V3.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/drillWorkflow.ts`, `apps/web/src/pages/drillWorkflow.test.ts`, `docs/PROGRESS.md`.
-**Work done**: Changed the drill workflow cron to `17,47 * * * *`. The Live page dispatches `drill-live.yml` on `main` through the existing Vercel serverless route; `KAIZEN_DISPATCH_TOKEN` stays server-side. The route checks GitHub Actions and returns actual queued, in-progress, or completed run data. The page polls status every 5 seconds and links to the returned workflow run. The UI states the exact mechanism and required Vercel environment variable. Live drill history refreshes every 30 seconds; the public V3 JSON-RPC head monitor and V3 console RPC-backed probe/status/anchor/run reads refresh every 30 seconds. Added focused Vitest coverage for the workflow client and public monitor polling interval. No dependencies added.
-**Verification**: Local Node version: `v20.20.2`. `git diff --check` passed. `node --check apps/web/api/drill.js` passed. `npm test -- --run` could not run because `vitest` is not installed (`vitest: not found`). `npm run typecheck` could not run because `tsc` is not installed (`tsc: not found`). No `node_modules` is present; root `package.json` requires Node `>=24`, but the environment is Node 20.20.2. CI must verify `npm ci`, Vitest (`npm test`), strict TypeScript (`npm run typecheck`), ESLint (`npm run lint`), and production build (`npm run build`) on supported Node 24. No live drill dispatched and no Vercel deployment performed.
-**Problems / decisions / remaining work**: `KAIZEN_DISPATCH_TOKEN` must be configured in Vercel as a repository-scoped GitHub token with Actions read/write access before button dispatch works. The token is never returned to the browser. Local app tests/builds remain unverified pending CI; no live workflow status or chain data was fabricated.
-**Next step**: PR #16 is open at `https://github.com/Shaydez-Defi/kaizen/pull/16`. CI is required to run `npm ci`, `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` on supported Node 24; all PR checks are currently unreported. Configure `KAIZEN_DISPATCH_TOKEN` in Vercel for on-demand dispatch.
+Chronological, append-only. Every entry records the date, task IDs, files touched,
+work done, actual verification results, problems, decisions, remaining work, and
+an exact next step.
 
 ---
 
-# Engineering Progress Log
+## 2026-10-30 — documentation synchronization (T-3.6C, T-9.1 to T-9.5)
 
-Chronological, append-only. Every entry: date, phase/task IDs, files touched,
-work done, commands executed, actual results, problems, decisions, remaining
-work, exact next step.
+**Files modified**: `docs/ARCHITECTURE.md`, `docs/PHASE_REPORT.md`, `docs/PHASE_REPORT_v1.md` (verbatim archive), `docs/PROGRESS.md`.
+**Work done**: Replaced the stale Phase 0 architecture status with an explicit implemented/partially implemented/planned matrix and 2026-10-30 revision date. Documented resilience evidence capture/verification, certificates, score v1 and the partially implemented but undeployed `KaizenResilienceRegistry.sol`. Kept IncidentMonitor and Docker/Kubernetes adapters visibly planned. Replaced the current phase report with T-3.6C and T-9.1 through T-9.5 status, separating unit tests, real local-network integration tests, public Portaldot V3 transactions, browser tests with mock data, and full live-browser verification. Added the localhost-only, unauthenticated API warning and the planned Host/Origin and WebSocket cross-origin controls before remote deployment; noted the registry duplicate-fingerprint design blocker.
+**Verification (actual results)**: Documentation content was reconciled against the dated records in `docs/PROGRESS.md`, including T-3.6C screenshot rendering with fixture API data and the T-9.1 local-network workflow. The previous `PHASE_REPORT.md` from `main` was copied byte-for-byte to `PHASE_REPORT_v1.md`. `git diff --check` is pending. No application tests or runtime verification were run for this documentation-only change. The separate certificate metadata integrity source/test changes are excluded from the docs-only PR.
+**Problems / decisions / remaining work**: Full live-browser verification remains unverified; API origin validation and authentication remain planned. IncidentMonitor and Docker/Kubernetes adapters remain unimplemented. Registry stays undeployed pending duplicate-fingerprint design resolution.
+**Next step**: Run `git diff --check`, commit only `docs/ARCHITECTURE.md`, `docs/PHASE_REPORT.md`, `docs/PHASE_REPORT_v1.md`, and `docs/PROGRESS.md` on the dedicated documentation branch, then open one PR into `main`.
+
+---
+
+## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
+
+Chronological, append-only. Every entry records the date, task IDs, files touched,
+work done, actual verification results, problems, decisions, remaining work, and
+an exact next step.
 
 ---
 
