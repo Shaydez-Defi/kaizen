@@ -70,6 +70,7 @@ export function Overview() {
         <h1 aria-label={headline}>
           Network <span className={ok || !running ? 'g' : 'gc'}>{word}</span>
         </h1>
+        <p className="sub">Live network health, validator status, topology, and recent incidents.</p>
         <div className="actions">
           {running ? (
             <Btn tone="pri" arrow onClick={() => nav('/lab')}>

@@ -79,7 +79,7 @@ export function Incidents() {
   if (!network) return <NoNet />;
   const banner = (
     <div className="sub" style={{ marginTop: 18 }}>
-      Incidents here are recorded Failure Lab faults. Automatic detection, correlation and root-cause hints <Planned phase="Phase 4" />
+      Recorded Failure Lab faults and recovery evidence; automatic detection is not implemented (Phase 4).
     </div>
   );
   if (!f)

@@ -140,7 +140,7 @@ remains **undefined and not started**.
 | T-9.5 | Engine `ResilienceService` (opt-in capture, certify, score, verify), CLI `certify/certificates/score/verify-certificate`, read-only `/api/resilience/*`, live test + x86_64 workflow | T-9.1–T-9.3 | P0 | thin surfaces over the engine; no HTTP signing | `resilience-service.test.ts` (6), CLI `resilience-commands.test.ts` (3), API `resilience.test.ts` (4) | IMPLEMENTED |
 | T-9.6 | Trust model v2: future-block-hash-seeded drills (commit-reveal) | T-9.5 | P0 | RESILIENCE_SCORE.md §7.1 | - | NOT STARTED |
 | T-9.7 | Trust model v2: BABE authorship + GRANDPA finality evidence from public RPC; evidence-class score weighting (score v2) | T-9.5 | P0 | §7.2–7.3 | - | NOT STARTED |
-
+| T-DOC-POS | Apply the approved Kaizen positioning line to README, web landing metadata/footer, and PROJECT_SPEC | - | P1 | One exact tagline per requested slot, no logic changes; record locked-spec exception in DECISIONS and progress in PROGRESS | `git diff --check`; exact-string/source review | IMPLEMENTED |
 ---
 
 ## Milestone Gates
