@@ -1,3 +1,13 @@
+## 2026-10-30 — UI polish: benchmark-driven screens and reduced-motion interactions
+
+**Files modified**: `apps/web/src/App.tsx`, `apps/web/src/components/ui.tsx`, `apps/web/src/components/ProofChecklist.tsx`, `apps/web/src/pages/Landing.tsx`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/Networks.tsx`, `apps/web/src/styles.css`, `docs/PROGRESS.md`.
+**Work done**: Landing hero now pairs the risk and response in one sentence and gives the visitor one clear “Run Drill Now” CTA. Sidebar groups existing routes into Actions and Inspect without removing routes. Live run/certificate results show a plain-language checklist from the evidence already fetched, including explorer links when existing evidence provides them; no additional fetches. Networks deduplicates display rows by network id and uses a compact name, preset, status and node-count layout without changing selection or network logic. Added purposeful 150–200ms ease-out page, sidebar, landing-section and checklist entrances, button hover/tap feedback, and small landing-card hover/tap feedback, honoring the reduced-motion preference. Reused existing framer-motion; no dependency added. Existing honest replay/live, test-network and evidence-status labels remain intact.
+**Verification**: `git diff --check` passed. Environment is Node v20.20.2, below repository-required Node >=24. `npm run typecheck -- --pretty false` could not start because `tsc` is not installed. `npm run build --workspace @kaizen/web` could not start because `vite` is not installed. CI on Node 24 must verify typecheck and build. Full test suite not run, as requested.
+**Problems / decisions / remaining work**: Local rendering/build/typecheck could not be verified because dependencies are absent and Node 20 is unsupported. No new data fetching or dependencies introduced.
+**Next step**: CI on Node 24 should verify typecheck/build after this branch is pushed and a PR is opened.
+
+---
+
 ## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
 
 **Files modified**: `.github/workflows/drill-live.yml`, `apps/web/api/drill.js`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/V3.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/drillWorkflow.ts`, `apps/web/src/pages/drillWorkflow.test.ts`, `docs/PROGRESS.md`.

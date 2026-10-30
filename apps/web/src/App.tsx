@@ -5,7 +5,7 @@
  */
 
 import type { JSX } from 'react';
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'framer-motion';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Live } from './pages/Live';
 import { Backdrop } from './components/Backdrop';
@@ -41,17 +41,20 @@ interface NavItem {
 }
 
 export const NAV: NavItem[] = [
+  { path: '/create', label: 'Create network', needsNet: false },
   { path: '/live', label: 'Live drills', needsNet: false },
+  { path: '/lab', label: 'Failure Lab', needsNet: true },
+  { path: '/scenarios', label: 'Scenarios', needsNet: false },
   { path: '/overview', label: 'Overview', needsNet: false },
   { path: '/networks', label: 'Networks', needsNet: false },
   { path: '/validators', label: 'Validators', needsNet: true },
-  { path: '/lab', label: 'Failure Lab', needsNet: true },
-  { path: '/scenarios', label: 'Scenarios', needsNet: false },
   { path: '/incidents', label: 'Incidents', needsNet: true },
   { path: '/deployments', label: 'Deployments', needsNet: true },
-  { path: '/settings', label: 'Settings', needsNet: false },
   { path: '/v3', label: 'Portaldot V3', needsNet: false },
+  { path: '/settings', label: 'Settings', needsNet: false },
 ];
+
+const ACTION_PATHS = new Set(['/create', '/live', '/lab', '/scenarios']);
 
 /** Where each lifecycle pill navigates. */
 const STEP_PATHS = ['/create', '/overview', '/lab', '/incidents', '/lab', '/deployments'];
@@ -140,6 +143,7 @@ function LivePlane(): JSX.Element {
 function Shell(): JSX.Element {
   const loc = useLocation();
   const nav = useNavigate();
+  const reduceMotion = useReducedMotion();
   const { network, faults } = useConsole();
   const ph = stepFor(loc.pathname);
   const section = '/' + (loc.pathname.split('/')[1] ?? '');
@@ -153,26 +157,36 @@ function Shell(): JSX.Element {
             KAIZEN
           </Link>
           <LayoutGroup id="nav">
-            <nav aria-label="Console">
-              {NAV.map((n) => {
-                const off = n.needsNet && !network;
-                const on = n.path === section;
-                return (
-                  <button
-                    type="button"
-                    key={n.path}
-                    className={`nav ${on ? 'on' : ''}`}
-                    disabled={off}
-                    aria-current={on ? 'page' : undefined}
-                    title={off ? 'Create or select a network first' : undefined}
-                    onClick={() => nav(n.path)}
-                  >
-                    {on && <motion.span layoutId="navpill" className="pill" transition={{ duration: 0.3, ease }} />}
-                    <span>{n.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
+            <motion.nav
+              aria-label="Console"
+              initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 0.2, ease }}
+            >
+            {(['Actions', 'Inspect'] as const).map((group) => (
+              <div className="nav-group" key={group}>
+                <div className="nav-group-title">{group}</div>
+                {NAV.filter((n) => ACTION_PATHS.has(n.path) === (group === 'Actions')).map((n) => {
+                  const off = n.needsNet && !network;
+                  const on = n.path === section;
+                  return (
+                    <button
+                      type="button"
+                      key={n.path}
+                      className={`nav ${on ? 'on' : ''}`}
+                      disabled={off}
+                      aria-current={on ? 'page' : undefined}
+                      title={off ? 'Create or select a network first' : undefined}
+                      onClick={() => nav(n.path)}
+                    >
+                      {on && <motion.span layoutId="navpill" className="pill" transition={{ duration: reduceMotion ? 0 : 0.2, ease }} />}
+                      <span>{n.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            </motion.nav>
           </LayoutGroup>
           <ControlPlane />
         </aside>
@@ -202,10 +216,10 @@ function Shell(): JSX.Element {
             <motion.div
               key={section}
               className="page"
-              initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
+              initial={reduceMotion ? false : { opacity: 0, y: 10, filter: 'blur(6px)' }}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -6, filter: 'blur(4px)' }}
-              transition={{ duration: 0.3, ease }}
+              exit={reduceMotion ? undefined : { opacity: 0, y: -6, filter: 'blur(4px)' }}
+              transition={{ duration: reduceMotion ? 0 : 0.2, ease }}
             >
               <Routes location={loc}>
                 <Route path="/create" element={<Create />} />
