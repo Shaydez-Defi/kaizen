@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Btn } from '../components/ui';
+import { ProofChecklist } from '../components/ProofChecklist';
 import { useConsole } from '../state/ConsoleContext';
 import { consoleBlockUrl } from './Landing';
 import { PublicMonitorCard } from './publicMonitor';
@@ -145,7 +146,8 @@ const ago = (iso: string) => {
   return s < 90 ? `${Math.round(s)}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
 };
 const short = (h: string) => `${h.slice(0, 10)}…${h.slice(-6)}`;
-const mark = (ok: boolean | null) => (ok === true ? <span className="ok">✓</span> : ok === false ? <span className="bad">✗</span> : <span className="warn">–</span>);
+const mark = (ok: boolean | null) => (ok === true ? <span className="ok">✓</span> : ok === false ? <span className="bad">✗</span> : <span className="warn">—</span>);
+const check = (checks: Check[], prefix: string) => checks.find((item) => item.label.startsWith(prefix));
 const secs = (ms: number | null) => (ms == null ? '—' : `${(ms / 1000).toFixed(1)} s`);
 
 /** Next run of the workflow schedule: minutes 17 and 47 of every UTC hour. */
@@ -289,11 +291,8 @@ export function Live(): JSX.Element {
           <h1>
             Live <span className="g">drills</span>
           </h1>
-          <p style={{ maxWidth: 760 }}>
-            Every 30 minutes a fresh GitHub runner boots a real two-node Portaldot network, pauses a validator, and reads recovery from GRANDPA finality. The run is
-            certified and its fingerprint can be written to the Portaldot V3 test network. This page re-checks each drill in your browser. Nothing here is mocked.
-          </p>
-          <p className="sub">Run drill now dispatches drill-live.yml on main through this server-side endpoint. It needs KAIZEN_DISPATCH_TOKEN in the Vercel project environment; the token is never sent to the browser.</p>
+          <p style={{ maxWidth: 760 }}>Real two-node drills run every 30 minutes or on demand. Recovery is checked against GRANDPA finality, and each result is browser-verified.</p>
+          <p className="sub">Run drill now dispatches the GitHub workflow through the server; its token stays off the browser.</p>
         </div>
         <div className="actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
           <Btn tone="pri" arrow disabled={req.state === 'busy' || Boolean(active)} onClick={() => void runNow()}>
@@ -349,7 +348,7 @@ export function Live(): JSX.Element {
                 <b>{m.blocksMissed ?? '—'}</b>
               </div>
               <div>
-                <div className="lab">Resilience score</div>
+                <div className="lab" title="Evidence score from repeated certified recovery drills. One successful drill can still have a low score.">Resilience score ⓘ</div>
                 <b>{bundle.score?.score ?? '—'}/100</b>
               </div>
             </div>
@@ -367,42 +366,38 @@ export function Live(): JSX.Element {
               ) : `Not anchored: ${bundle.anchor.reason ?? bundle.anchor.status}`}
             </div>
             <div style={footnote}>
-              The score grows with repeated certified drills; one drill caps confidence. Signed with{' '}
+              Score reflects repeated certified recovery evidence, not this drill alone. Signed with{' '}
               {bundle.certificate.signature.dev ? 'the public dev key (integrity, not operator identity).' : bundle.certificate.signature.address}
             </div>
           </div>
 
-          <div className="glass card">
-            <div className="lab">Verified in your browser</div>
-            {!checks && <div className="sub">checking…</div>}
-            {checks?.map((c) => (
-              <div key={c.label} style={{ display: 'flex', gap: 10, margin: '10px 0' }}>
-                <b style={{ width: 18, flex: 'none', fontSize: 16 }}>{mark(c.ok)}</b>
-                <div style={{ minWidth: 0 }}>
-                  <div>{c.label}</div>
-                  <div className="mono-s">{c.detail}</div>
-                </div>
-              </div>
-            ))}
-            <div className="actions" style={{ marginTop: 12 }}>
-              {bundle.anchor.blockHash && (
-                <a className="btn sm pri" href={consoleBlockUrl(bundle.anchor.blockHash)} target="_blank" rel="noreferrer">
-                  V3 block #{bundle.anchor.blockNumber}
-                </a>
-              )}
-              {bundle.workflow && (
-                <a className="btn sm line" href={bundle.workflow.url} target="_blank" rel="noreferrer">
-                  Runner log
-                </a>
-              )}
-              <a className="btn sm line" href={`${DATA}/drills/${bundle.id}.json`} target="_blank" rel="noreferrer">
-                Raw bundle
-              </a>
-              <Btn small tone="line" onClick={() => openInConsole(bundle)}>
-                Open in console
-              </Btn>
-            </div>
-          </div>
+                  <div className="glass card">
+                    <ProofChecklist items={[
+                      { label: 'Run files match their recorded hash', ok: check(checks ?? [], 'Run hash recomputed')?.ok ?? null, detail: check(checks ?? [], 'Run hash recomputed')?.detail, href: `${DATA}/drills/${bundle.id}.json`, linkLabel: 'Open run files' },
+                      { label: 'Certificate fingerprint matches', ok: check(checks ?? [], 'Certificate fingerprint recomputed')?.ok ?? null, detail: check(checks ?? [], 'Certificate fingerprint recomputed')?.detail, href: `${DATA}/drills/${bundle.id}.json`, linkLabel: 'Open certificate' },
+                      { label: 'Run block hashes checked against dev chain', ok: check(checks ?? [], 'Block hashes matched')?.ok ?? null, detail: check(checks ?? [], 'Block hashes matched')?.detail, href: bundle.certificate.chain.observations[0]?.finalized.hash ? consoleBlockUrl(bundle.certificate.chain.observations[0].finalized.hash) : null, linkLabel: 'Open checked block' },
+                      { label: 'Certificate fingerprint recorded on Portaldot V3', ok: check(checks ?? [], 'Fingerprint found on Portaldot V3')?.ok ?? check(checks ?? [], 'Anchored on Portaldot V3')?.ok ?? null, detail: check(checks ?? [], 'Fingerprint found on Portaldot V3')?.detail ?? check(checks ?? [], 'Anchored on Portaldot V3')?.detail, href: bundle.anchor.blockHash ? consoleBlockUrl(bundle.anchor.blockHash) : null, linkLabel: 'Open V3 block' },
+                    ]} />
+                    {!checks && <div className="sub">checking…</div>}
+                    <div className="actions" style={{ marginTop: 12 }}>
+                      {bundle.anchor.blockHash && (
+                        <a className="btn sm pri" href={consoleBlockUrl(bundle.anchor.blockHash)} target="_blank" rel="noreferrer">
+                          V3 block #{bundle.anchor.blockNumber}
+                        </a>
+                      )}
+                      {bundle.workflow && (
+                        <a className="btn sm line" href={bundle.workflow.url} target="_blank" rel="noreferrer">
+                          Runner log
+                        </a>
+                      )}
+                      <a className="btn sm line" href={`${DATA}/drills/${bundle.id}.json`} target="_blank" rel="noreferrer">
+                        Raw bundle
+                      </a>
+                      <Btn small tone="line" onClick={() => openInConsole(bundle)}>
+                        Open in console
+                      </Btn>
+                    </div>
+                  </div>
 
           <div className="glass card">
             <div className="lab">What the chain recorded</div>

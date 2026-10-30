@@ -2,6 +2,10 @@
 
 Status: LOCKED (Phase 0, 2026-10-09). Changes require an explicit decision entry in `docs/DECISIONS.md`.
 
+### Product positioning statement
+
+Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.
+
 ## 1. Problem Statement
 
 Operating a Substrate-based blockchain network (Portaldot) requires juggling node
