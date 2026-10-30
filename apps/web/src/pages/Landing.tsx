@@ -287,7 +287,8 @@ export function Landing() {
               <br />
               in one <span className="g">command.</span>
             </motion.h1>
-            <p>Validators, topology, failure injection and diagnostics. One command brings up a real local network; the console and CLI drive it through one engine.</p>
+            <p>Launch a real Portaldot network, inject failures, verify recovery, and anchor proof on V3.</p>
+            <p>Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.</p>
             <CopyCmd cmd={UP_COMMAND} />
             <div className="targets">
               LOCAL · <s>DOCKER</s>
@@ -544,7 +545,7 @@ export function Landing() {
           <div className="fcols">
             <div>
               <span className="brand">KAIZEN</span>
-              <p>Portaldot node operations and infrastructure platform.</p>
+              <p>Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.</p>
               <CopyCmd cmd={UP_COMMAND} small />
             </div>
             <div>

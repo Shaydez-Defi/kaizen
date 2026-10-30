@@ -1,6 +1,23 @@
 # Kaizen: Architecture
 
-Status: PROPOSED (Phase 0): to be revisited at each phase gate in `docs/PROGRESS.md`.
+**Status: IMPLEMENTED BASELINE, with explicitly partial and planned components.**
+**Revision date: 2026-10-30.** Current state is summarized below; the chronological evidence and limitations are recorded in `docs/PROGRESS.md` and `docs/PHASE_REPORT.md`.
+
+Status legend: **IMPLEMENTED** means the component exists in the repository; **PARTIALLY IMPLEMENTED** means only the described slice exists or verification is incomplete; **PLANNED** means not implemented. Implementation status is not a claim of end-to-end verification.
+
+| Component | Status | Current scope / evidence |
+|---|---|---|
+| Shared engine, local process/network lifecycle, API and CLI | IMPLEMENTED | Local Portaldot process management, REST/WebSocket API, and shared-engine CLI surfaces. API security scope is localhost-only; see §8. |
+| Web console and Failure Lab | PARTIALLY IMPLEMENTED | Console surfaces exist; some controls/features are disabled or replay-labelled. T-3.6C design pass is implemented, not a substitute for live-browser verification. |
+| Portaldot V3 probe and run anchoring | IMPLEMENTED | Read-only public V3 probe and explicit signed `KaizenRunRegistry` or remark anchoring paths; historical public transactions are recorded in the phase report. |
+| Resilience evidence capture and verification | IMPLEMENTED | Opt-in chain-bound evidence, observer-node heads/hashes, gap detection and online re-fetch verification. Offline evidence may be `unverifiable`. |
+| Resilience certificates | IMPLEMENTED | Canonical run/evidence certificate with sr25519 signature and integrity verification. Additional validator/network metadata cross-check hardening is pending separate validation. |
+| Resilience scoring v1 | IMPLEMENTED | Deterministic score from eligible certificates; integrity-failing certificates are excluded. Advanced trust model and evidence-class weighting remain planned. |
+| `KaizenResilienceRegistry.sol` | PARTIALLY IMPLEMENTED, UNDEPLOYED | Contract/build/codec and in-memory EVM tests exist. It is not deployed; do not describe it as a live registry. Deployment remains blocked until duplicate-fingerprint submission design is resolved. |
+| Incident monitor | PLANNED | The UI may show incident/evidence surfaces, but a full incident-monitoring component is not implemented. |
+| Docker and Kubernetes/Helm adapters | PLANNED | Adapter interface/local-process path exists; Docker and Kubernetes adapters and deployments are not implemented. |
+
+---
 
 ## 1. Design Principles
 
@@ -63,11 +80,7 @@ flowchart TB
     V3S <-->|"probe (read) / anchor + verify (write, explicit)"| V3NET
 ```
 
-Status (2026-10-21): built: API, engine services for networks, processes,
-RPC/monitoring, FailureInjector, ScenarioEngine (+ replay), StateStore, V3
-probe + anchoring, LocalProcessAdapter-equivalent lifecycle, web console and
-CLI. Not built yet: IncidentMonitor (Phase 4), Docker/K8s adapters
-(Phase 6); the console shows those features disabled and labelled (DEC-028).
+Status (2026-10-30): see the component status matrix at the top of this document. The diagram below shows the intended system shape and is not an implementation checklist; IncidentMonitor and Docker/Kubernetes adapters remain PLANNED, and the resilience registry remains undeployed.
 
 ## 3. Component Responsibilities
 
@@ -440,9 +453,13 @@ flowchart LR
   no user-controlled flags passthrough without allowlist validation.
 - **Input validation**: all API/CLI inputs validated with Zod schemas at the
   boundary; unknown fields rejected.
-- **Network exposure**: node RPC stays on loopback; Kaizen binds API to
-  localhost by default. Nodes run with `--rpc-methods Auto` (unsafe methods
-  only on loopback): never `--unsafe-rpc-external` in generated configs.
+- **Network exposure**: node RPC stays on loopback; `apps/api/src/server.ts`
+  binds to `127.0.0.1` by default. The localhost API is unauthenticated by
+  design because it is intended for local-only use. It is not suitable for
+  remote deployment as-is. Before any remote deployment, implement and verify
+  origin validation (Host/Origin checks and WebSocket cross-origin protection)
+  plus an appropriate authentication boundary. Keep this warning visible until
+  those controls are implemented and tested.
 - **Secrets**: node keys/keystore material live in per-network dirs outside
   git (`.kaizen/` in `.gitignore`); never logged, never returned via API.
 - **Blast-radius gate**: failure injection and any destructive op require the
@@ -459,9 +476,9 @@ flowchart LR
 
 | Adapter | Mechanism | Phase |
 |---|---|---|
-| LocalProcess | child_process argv spawn (same as dev engine) | 1 |
-| Docker | image with `portaldot_dev`; compose-style multi-node; volume per node | 6 |
-| K8s/Helm | Helm chart: StatefulSet per node role, PVCs, Services, headless service for peering, readiness probes from RPC health | 6 (wow-factor) |
+| LocalProcess | child_process argv spawn (same as dev engine) | 1, IMPLEMENTED |
+| Docker | image with `portaldot_dev`; compose-style multi-node; volume per node | 6, PLANNED |
+| K8s/Helm | Helm chart: StatefulSet per node role, PVCs, Services, headless service for peering, readiness probes from RPC health | 6, PLANNED |
 
 All adapters implement:
 ```ts

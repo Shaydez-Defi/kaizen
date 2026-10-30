@@ -289,11 +289,8 @@ export function Live(): JSX.Element {
           <h1>
             Live <span className="g">drills</span>
           </h1>
-          <p style={{ maxWidth: 760 }}>
-            Every 30 minutes a fresh GitHub runner boots a real two-node Portaldot network, pauses a validator, and reads recovery from GRANDPA finality. The run is
-            certified and its fingerprint can be written to the Portaldot V3 test network. This page re-checks each drill in your browser. Nothing here is mocked.
-          </p>
-          <p className="sub">Run drill now dispatches drill-live.yml on main through this server-side endpoint. It needs KAIZEN_DISPATCH_TOKEN in the Vercel project environment; the token is never sent to the browser.</p>
+          <p style={{ maxWidth: 760 }}>Real two-node drills run every 30 minutes or on demand. Recovery is checked against GRANDPA finality, and each result is browser-verified.</p>
+          <p className="sub">Run drill now dispatches the GitHub workflow through the server; its token stays off the browser.</p>
         </div>
         <div className="actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
           <Btn tone="pri" arrow disabled={req.state === 'busy' || Boolean(active)} onClick={() => void runNow()}>
@@ -349,7 +346,7 @@ export function Live(): JSX.Element {
                 <b>{m.blocksMissed ?? '—'}</b>
               </div>
               <div>
-                <div className="lab">Resilience score</div>
+                <div className="lab" title="Evidence score from repeated certified recovery drills. One successful drill can still have a low score.">Resilience score ⓘ</div>
                 <b>{bundle.score?.score ?? '—'}/100</b>
               </div>
             </div>
@@ -367,7 +364,7 @@ export function Live(): JSX.Element {
               ) : `Not anchored: ${bundle.anchor.reason ?? bundle.anchor.status}`}
             </div>
             <div style={footnote}>
-              The score grows with repeated certified drills; one drill caps confidence. Signed with{' '}
+              Score reflects repeated certified recovery evidence, not this drill alone. Signed with{' '}
               {bundle.certificate.signature.dev ? 'the public dev key (integrity, not operator identity).' : bundle.certificate.signature.address}
             </div>
           </div>

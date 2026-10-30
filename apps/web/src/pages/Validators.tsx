@@ -26,6 +26,7 @@ export function Validators() {
             {network.name} · {vals.length} validator{vals.length === 1 ? '' : 's'} (dev authority keys)
           </div>
           <h1>Validators</h1>
+          <p className="sub">Inspect validator health, chain head, peers, and dev keys.</p>
         </div>
       </div>
       <div className="split">

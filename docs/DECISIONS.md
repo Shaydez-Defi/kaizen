@@ -812,3 +812,11 @@ Format: context → decision → alternatives → consequences. Newest entries a
 - **Consequences**: v1 certificates prove integrity and chain binding, not
   that the drill was unpredictable; the README headline states this per
   pillar. `KaizenResilienceRegistry` is not deployed (deployer ≈3.15 tPOT).
+
+## DEC-030: Approved Kaizen positioning line in project copy
+
+- **Date**: 2026-10-30
+- **Context**: A single consistent positioning statement is needed across the README, web landing experience and project specification. `docs/PROJECT_SPEC.md` is marked LOCKED and requires an explicit decision for any modification.
+- **Decision**: Use this exact line as Kaizen's positioning statement: "Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake." Place it once in each requested copy slot, replacing similar landing copy where applicable. This is a copy-only change and does not change product behavior or scope.
+- **Alternatives considered**: Add a separate new pitch without replacing existing UI text (rejected: it would stack messaging and violate the one-line-per-screen constraint).
+- **Consequences**: The approved wording appears in the README, landing page, HTML title and meta description, footer, and PROJECT_SPEC introduction. These are positioning claims, not changes to implementation status.
