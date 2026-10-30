@@ -37,6 +37,7 @@ export function Deployments() {
             <br />
             nodes up
           </h1>
+          <p className="sub">View local node processes. Docker and Kubernetes targets are not implemented yet.</p>
           {REPLAY ? (
             <p>
               Recorded as local processes on a fresh GitHub Actions runner (state at the end of the drill; the runner and its processes are gone). Chain{' '}

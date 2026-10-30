@@ -33,6 +33,7 @@ export function Networks() {
       <h1>
         Your <span className="g">networks</span>
       </h1>
+      <p className="sub">Select a network to inspect it, or create one from a preset.</p>
       <div className="tbl" role="table" aria-label="Networks" style={{ marginTop: 18, maxWidth: 1000 }}>
         <div className="tr th" role="row">
           <span>Name</span>
