@@ -1,3 +1,13 @@
+## 2026-10-30 — T-DOC-BIZ: business case documentation
+
+**Files modified**: `docs/BUSINESS.md`, `docs/PROGRESS.md`.
+**Work done**: Added a business case covering validator resilience, target users, an open-source CLI adoption path, and certificate-backed evidence. Scoped drills to disposable local test networks and certificate anchors to the Portaldot V3 testnet; clarified that test results do not establish mainnet performance or guarantee uptime. Labeled roadmap items as planned. No pricing, revenue, user counts, partnerships, or delivery dates were invented.
+**Verification**: `git diff --check` passed. Reviewed the claims against the project README and locked project specification. Documentation-only change; no tests run.
+**Problems / decisions / remaining work**: Pull request review and CI remain pending.
+**Next step**: Review the single PR titled `docs: add business plan`.
+
+---
+
 ## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
 
 **Files modified**: `.github/workflows/drill-live.yml`, `apps/web/api/drill.js`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/V3.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/drillWorkflow.ts`, `apps/web/src/pages/drillWorkflow.test.ts`, `docs/PROGRESS.md`.
