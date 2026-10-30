@@ -30,6 +30,20 @@ npm test
 
 The workspace scripts and runtime packages are specified in `package.json` and the package manifests. `npm install` installs the workspace dependencies, `npm run build` builds the engine, CLI, API, and web application, and `npm test` runs the unit suite. A real-node integration suite is separate and opt-in; it requires `portaldot_dev` and `KAIZEN_TEST_LIVE=1` as described in [Testing](docs/TESTING.md). The hosted console provides the public live view at https://kaizen-live.vercel.app.
 
+## Run locally
+
+1. **Prerequisites:** Node.js 24 or later, npm 11 or later, Linux x86_64 or macOS, and about 1 GiB of RAM per node.
+2. **Clone and install:**
+   ```bash
+   git clone https://github.com/Shaydez-Defi/kaizen.git
+   cd kaizen
+   npm ci
+   ```
+3. **Build:** `npm run build`
+4. **Start the API** in a terminal: `npm start -w @kaizen/api`. It listens on port 4310.
+5. **Start the web console** in another terminal: `npm run dev -w @kaizen/web`, then open http://localhost:5173.
+6. **Launch a demo network** with `npx kaizen up`. On first use, it fetches and verifies `portaldot_dev` if the binary is missing. To download it explicitly first, run `npx kaizen setup`.
+
 ## Evidence and on-chain anchoring
 
 The drill-live workflow runs real resilience drills in CI every three hours. It records evidence for each run and anchors the resulting evidence through the configured Portaldot V3 test-network flow. The published live console at https://kaizen-live.vercel.app exposes the available live evidence. The configured drill signer is `5HBnAqniYhyupDT1ccsTSRkdy3EbCAaZC6ii9XFon8WQwEaR`.

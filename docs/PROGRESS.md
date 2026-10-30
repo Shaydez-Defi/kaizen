@@ -1,3 +1,10 @@
+## 2026-10-30 — local run instructions
+
+**Files modified**: `README.md`, `docs/PROGRESS.md`.
+**Work done**: Added clean-clone startup steps for Node.js 24+, npm 11+, Linux x86_64 or macOS; `npm ci`, `npm run build`, `npm start -w @kaizen/api`, `npm run dev -w @kaizen/web`, `npx kaizen up`, and `npx kaizen setup`. Documented that `kaizen up` fetches and verifies `portaldot_dev` if missing, while `npx kaizen setup` downloads it explicitly.
+**Verification**: `git diff --check` passed.
+**Remaining**: Commit and open one PR titled `docs: add run locally instructions`.
+
 ## 2026-10-29 — on-demand live drills and 30-minute refresh cadence
 
 **Files modified**: `.github/workflows/drill-live.yml`, `apps/web/api/drill.js`, `apps/web/src/pages/Live.tsx`, `apps/web/src/pages/V3.tsx`, `apps/web/src/pages/publicMonitor.tsx`, `apps/web/src/pages/publicMonitor.test.ts`, `apps/web/src/pages/drillWorkflow.ts`, `apps/web/src/pages/drillWorkflow.test.ts`, `docs/PROGRESS.md`.
