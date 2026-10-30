@@ -287,6 +287,7 @@ export function Landing() {
               <br />
               in one <span className="g">command.</span>
             </motion.h1>
+            <p>Launch a real Portaldot network, inject failures, verify recovery, and anchor proof on V3.</p>
             <p>Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.</p>
             <CopyCmd cmd={UP_COMMAND} />
             <div className="targets">

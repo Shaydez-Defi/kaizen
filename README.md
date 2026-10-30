@@ -1,6 +1,8 @@
 # Kaizen
 Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.
 
+Kaizen is a disaster-simulation engine that breaks Portaldot validators on purpose and proves on-chain that they recover.
+
 Kaizen is a proof-of-resilience platform for Portaldot validators. It runs controlled drills against disposable test networks, records the observed operations and evidence, and supports independently verifiable certificates anchored to the Portaldot V3 test network.
 
 [![Resilience](https://kaizen-live.vercel.app/api/badge)](https://kaizen-live.vercel.app)

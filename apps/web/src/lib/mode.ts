@@ -8,4 +8,4 @@
 export const REPLAY: boolean = import.meta.env?.['VITE_KAIZEN_PUBLIC'] === '1';
 
 export const REPLAY_REFUSAL =
-  'Replay mode: drills run on a fresh GitHub runner. Use “Run a drill” on the Live page (or it runs automatically every 3 hours).';
+  'Replay mode: drills run on fresh GitHub runners every 30 minutes or on demand from Live.';

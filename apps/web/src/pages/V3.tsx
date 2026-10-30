@@ -145,7 +145,7 @@ export function V3() {
             Portaldot V3 test network{st?.chainName ? ` · ${st.chainName}` : ''}
           </div>
           <h1>Proof on chain</h1>
-          <p>Finished Failure Lab runs are fingerprinted (SHA-256 of the canonical run record) and anchored on the V3 test network.</p>
+          <p>Anchor completed drill evidence on Portaldot V3, then verify each record against the chain.</p>
         </div>
         <div className="actions">
           <Btn onClick={probe.reload} disabled={probe.loading}>
