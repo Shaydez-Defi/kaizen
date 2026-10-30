@@ -1,4 +1,5 @@
 # Kaizen
+Monitoring tells you a node is down. Kaizen proves it comes back, and makes that proof worth stake.
 
 Kaizen is a proof-of-resilience platform for Portaldot validators. It runs controlled drills against disposable test networks, records the observed operations and evidence, and supports independently verifiable certificates anchored to the Portaldot V3 test network.
 
