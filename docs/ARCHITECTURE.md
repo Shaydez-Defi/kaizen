@@ -1,21 +1,23 @@
 # Kaizen: Architecture
 
-Status: PROPOSED (Phase 0): to be revisited at each phase gate in `docs/PROGRESS.md`.
+Status: PROPOSED (Phase 0): this is the current plan for how the parts fit together. It will be checked again at each phase review in `docs/PROGRESS.md`.
 
 ## 1. Design Principles
 
-1. **The backend owns operations.** The web UI never spawns processes, never
-   executes shell commands, and never talks to node RPC directly.
-2. **One engine, two frontends.** CLI and Web UI call the same application
-   services (`packages/engine`). No duplicated network/node/scenario logic.
-3. **Adapters at the edges.** Everything external (Portaldot binary, RPC, Docker,
-   Kubernetes) sits behind a typed adapter interface, so core logic stays
-   testable without live infrastructure.
-4. **No fabricated data.** Every number rendered by UI/CLI originates from real
-   RPC, real process state, or real recorded history. Unimplemented operations
-   are hidden, not faked.
-5. **Boring, testable stack.** One language (TypeScript) across engine, API,
-   CLI, UI. Modular monolith: no microservices.
+1. **The backend (the program behind the website) does the work.** The website
+   never starts computer programs, runs shell commands, or talks straight to a
+   node's RPC (the way other programs ask it for information).
+2. **One engine, two ways to use it.** The CLI (where you type commands) and the
+   web UI (the website) use the same services in `packages/engine`. Their
+   network, node, and scenario actions are not built twice.
+3. **Adapters at the edges.** Adapters (small bridges to other programs) handle
+   Portaldot, RPC, Docker, and Kubernetes, keeping the main work easy to test
+   without a live network.
+4. **No made-up data.** Every number in the website or CLI comes from real RPC
+   replies, real program status, or saved history. Unbuilt actions are hidden,
+   not faked.
+5. **One language, easy to test.** Kaizen uses TypeScript for its engine, API,
+   CLI, and website. It is one program with clear parts, not many separate services.
 
 ## 2. Component Overview
 

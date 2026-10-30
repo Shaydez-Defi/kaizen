@@ -1,7 +1,6 @@
 # Kaizen — Week 2 demo video (≤ 3:00)
 
-Story: **create a real Portaldot network → watch it live → break it on purpose
-→ prove the experiment on the Portaldot V3 test network.**
+Story: **make a real Portaldot network → watch it work → safely test what happens when a computer has a problem → publish proof on the Portaldot V3 test network.**
 
 ## Before recording
 

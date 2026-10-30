@@ -3,10 +3,7 @@
 Status: v1 IMPLEMENTED (T-9.3); v2 trust model PLANNED (§7) — `packages/engine/src/resilience/score.ts`,
 pinned by `packages/engine/test/resilience-score.test.ts`. Decision: DEC-029.
 
-The resilience score is a **0–100 number per validator** computed from the
-validator's **certified** Failure Lab runs. It is a pure, deterministic
-function: anyone holding the certificates can recompute it. Kaizen never
-shows a score it did not compute from certificates.
+The resilience score is a **0–100 number for each validator**. It is worked out from that validator's **certified** Failure Lab runs (tests with saved proof). Anyone with the certificates can do the same calculation and check the result. Kaizen only shows scores it worked out from certificates.
 
 ## 1. Inputs: certified runs
 

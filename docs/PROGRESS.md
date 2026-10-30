@@ -8,13 +8,16 @@
 
 ---
 
-# Engineering Progress Log
+## 2026-10-30 — plain-language project overview
 
-Chronological, append-only. Every entry: date, phase/task IDs, files touched,
-work done, commands executed, actual results, problems, decisions, remaining
-work, exact next step.
+**Files modified**: `README.md`, `docs/PROJECT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/RESILIENCE_SCORE.md`, `docs/DEMO.md`, `docs/PROGRESS.md`.
+**Work done**: Rewrote the README overview, problem, how-it-works, quickstart explanations, and live-drill description in plain language, keeping technical names with short explanations. Simplified the project-spec introduction and goal descriptions, architecture overview status wording, resilience-score introduction, and demo story. Kept links, badge, and section structure.
+**Verification**: `git diff --check` passed. Documentation-only changes; no application tests run.
+**Problems / decisions / remaining work**: None. No application behavior changed.
+**Next step**: Review and merge the pull request if approved.
 
 ---
+
 
 ## 2026-10-29 — A3/A4: live-first web console and honest data labels
 

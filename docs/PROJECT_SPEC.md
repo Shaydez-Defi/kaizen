@@ -1,27 +1,21 @@
 # Kaizen: Project Specification
 
-Status: LOCKED (Phase 0, 2026-10-09). Changes require an explicit decision entry in `docs/DECISIONS.md`.
+Status: LOCKED (Phase 0, 2026-10-09). This plan is the agreed guide for what Kaizen should do. Changes need a recorded decision in `docs/DECISIONS.md`.
 
 ## 1. Problem Statement
 
-Operating a Substrate-based blockchain network (Portaldot) requires juggling node
-processes, chain specs, peer wiring, keys, and failure recovery: usually through
-raw CLI flags and log-scraping. There is no tool in the Portaldot ecosystem that
-lets a developer **create, monitor, deliberately break, diagnose, recover, and
-deploy** a Portaldot network as one coherent, observable workflow.
+Operating a Portaldot blockchain (a shared record kept by many computers) means managing node programs, network settings, connections between computers, secret keys, and recovery from problems. Today, people often do this with command-line flags (extra words typed after a command) and by searching through logs (the computer's written activity record). Portaldot has no single tool that lets a developer make, watch, test, understand, fix, and deploy a network in one place.
 
-Kaizen fills that gap: a node-operations and infrastructure-management platform
-for Portaldot, with a web UI and a CLI that drive **real infrastructure
-operations** through a shared backend engine.
+Kaizen fills that gap: it is a tool for running Portaldot computers and their networks. Its website and command-line tool (CLI, where you type commands) both ask the same backend engine (the program that does the work) to perform real operations.
 
 ## 2. Product Goals
 
-- Make local Portaldot multi-node networks reproducible with one command / one click.
-- Make failure a first-class, *controlled* experiment (Failure Lab), not an accident.
-- Make every operation observable: status, logs, timelines, results, errors.
-- Make validator operations accessible where the official runtime exposes them.
-- Make deployment to Docker and Kubernetes/Helm a genuine, verified capability.
-- Keep the web UI and CLI on one shared operations engine: no divergent logic.
+- Make local Portaldot networks with several computers easy to set up again with one command or click.
+- Make controlled failure tests (the Failure Lab) a planned experiment, not an accident.
+- Make every action easy to follow with its status, logs (written activity), timeline, result, and any error.
+- Make validator actions available when Portaldot's official software allows them.
+- Make Docker and Kubernetes/Helm (tools for running programs in containers and groups of computers) work for real, with proof they work.
+- Keep the website and command-line tool using the same engine (the program that does the work).
 
 ## 3. Non-Goals
 
@@ -34,9 +28,7 @@ operations** through a shared backend engine.
 
 ## 4. Target Users
 
-1. **Portaldot developers**: need a local multi-node network to test dApps.
-2. **Node operators / SREs**: need monitoring, failure drills, recovery runbooks.
-3. **Hackathon/demo audience**: need a visually impressive, real end-to-end workflow.
+Kaizen is for people who build Portaldot apps, people who run validator computers, and people who want to see a real test from start to finish.
 
 ## 5. Core Lifecycle
 
