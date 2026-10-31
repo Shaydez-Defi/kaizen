@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { xxhashAsU8a } from '@polkadot/util-crypto';
 import {
   ChainEvidenceRecorder,
   ChainUnreachableError,
@@ -16,6 +17,8 @@ import {
 
 const h = (n: number, fork = 0): string => `0x${(n * 16 + fork).toString(16).padStart(64, '0')}`;
 const ref = (n: number): BlockRef => ({ number: n, hash: h(n) });
+const storageKey = (pallet: string, item: string): string =>
+  `0x${Buffer.from(xxhashAsU8a(Buffer.from(pallet), 128)).toString('hex')}${Buffer.from(xxhashAsU8a(Buffer.from(item), 128)).toString('hex')}`;
 const at = (s: number): string => new Date(Date.UTC(2026, 9, 24, 0, 0, s)).toISOString();
 const obs = (phase: ChainObservation['phase'], s: number, best: number, fin: number): ChainObservation => ({
   phase,
@@ -253,6 +256,11 @@ describe('createHttpChainReader', () => {
       let result: unknown = null;
       if (method === 'chain_getBlockHash') result = chain[params[0] as number] ?? null;
       if (method === 'chain_getFinalizedHead') result = chain[finalized];
+      if (method === 'state_getStorage') {
+        const key = params[0] as string;
+        if (key === storageKey('Grandpa', 'CurrentSetId')) result = `0x${'01'}${'00'.repeat(7)}`;
+        if (key === storageKey('Grandpa', 'Authorities')) result = `0x04${'44'.repeat(32)}${'0100000000000000'}`;
+      }
       if (method === 'chain_getHeader') {
         const hash = params[0] as string | undefined;
         const num = hash ? Number(Object.entries(chain).find(([, v]) => v === hash)?.[0]) : best;
