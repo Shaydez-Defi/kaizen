@@ -58,6 +58,51 @@ describe('computeRecoveryMetrics', () => {
     expect(m.finalityGapBlocks).toBe(22);
   });
 
+  it('does not report a cross-set best/finalized height gap as validator lag', () => {
+    const m = computeRecoveryMetrics({
+      observations: [{
+        ...obs('during-fault', 30, 120, 98),
+        bestGrandpaSetId: '9',
+        bestGrandpaAuthoritiesHash: 'new-set',
+        finalizedGrandpaSetId: '8',
+        finalizedGrandpaAuthoritiesHash: 'old-set',
+      }],
+      faultStartedAt: at(1),
+      faultEndedAt: at(30),
+    });
+    expect(m.finalityGapBlocks).toBeNull();
+  });
+
+  it('measures finality lag when both heads share the same GRANDPA context', () => {
+    const m = computeRecoveryMetrics({
+      observations: [{
+        ...obs('during-fault', 30, 120, 98),
+        bestGrandpaSetId: '9',
+        bestGrandpaAuthoritiesHash: 'set-nine',
+        finalizedGrandpaSetId: '9',
+        finalizedGrandpaAuthoritiesHash: 'set-nine',
+      }],
+      faultStartedAt: at(1),
+      faultEndedAt: at(30),
+    });
+    expect(m.finalityGapBlocks).toBe(22);
+  });
+
+  it('excludes best/finalized gaps spanning a GRANDPA set or authority change', () => {
+    const transition = computeRecoveryMetrics({
+      observations: [{
+        ...obs('during-fault', 30, 120, 98),
+        bestGrandpaSetId: '9',
+        bestGrandpaAuthoritiesHash: 'same-set-id-new-authorities',
+        finalizedGrandpaSetId: '9',
+        finalizedGrandpaAuthoritiesHash: 'old-authorities',
+      }],
+      faultStartedAt: at(1),
+      faultEndedAt: at(30),
+    });
+    expect(transition.finalityGapBlocks).toBeNull();
+  });
+
   it('returns null metrics when the observations needed are missing', () => {
     const m = computeRecoveryMetrics({ observations: [], faultStartedAt: null, faultEndedAt: null });
     expect(m).toMatchObject({ recovered: false, timeToRecoverMs: null, finalityGapBlocks: null, blocksMissed: null });
