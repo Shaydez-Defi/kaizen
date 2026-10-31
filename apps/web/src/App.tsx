@@ -4,7 +4,7 @@
  * ConsoleProvider (REST state + WS invalidation). Nothing is simulated.
  */
 
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'framer-motion';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Live } from './pages/Live';
@@ -148,11 +148,15 @@ function Shell(): JSX.Element {
   const ph = stepFor(loc.pathname);
   const section = '/' + (loc.pathname.split('/')[1] ?? '');
   const faultActive = faults.some((f) => f.mode === 'execute' && ACTIVE_FAULT_STATES.has(f.state));
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <>
       <Backdrop word={watermarkFor(loc.pathname, faultActive)} />
       <div className="app">
-        <aside className="side">
+        <aside className={`side ${menuOpen ? 'open' : ''}`}>
+          <button type="button" className="menu-btn" aria-label="Toggle menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
+            <span /><span /><span />
+          </button>
           <Link to="/" className="brand" aria-label="Kaizen home">
             KAIZEN
           </Link>
@@ -177,7 +181,7 @@ function Shell(): JSX.Element {
                       disabled={off}
                       aria-current={on ? 'page' : undefined}
                       title={off ? 'Create or select a network first' : undefined}
-                      onClick={() => nav(n.path)}
+                      onClick={() => { setMenuOpen(false); nav(n.path); }}
                     >
                       {on && <motion.span layoutId="navpill" className="pill" transition={{ duration: reduceMotion ? 0 : 0.2, ease }} />}
                       <span>{n.label}</span>
