@@ -1,0 +1,26 @@
+name: verify-main-build-test
+on:
+  workflow_dispatch:
+    inputs:
+      requested_commit:
+        description: 'Main commit being verified'
+        required: true
+        default: 'cfe4d1949431d0ca6de7c7e272722fe04c25a73e'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify source base
+        run: |
+          echo "workflow checkout: $(git rev-parse HEAD)"
+          echo "main base: $(git merge-base HEAD main)"
+          test "$(git merge-base HEAD main)" = "${{ inputs.requested_commit }}"
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
