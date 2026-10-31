@@ -147,12 +147,15 @@ export function createHttpChainReader(
     const bytes = await storageAt(storageKey("Babe", "Authorities"), hash, "babe.authorities");
     const { count, offset: start } = vectorCount(bytes, "babe.authorities");
     if (count > 10_000) throw new Error("babe.authorities: unreasonable authority count");
-    if (start + count * 41 !== bytes.length)
+    // Babe.Authorities stores Vec<(AuthorityId, BabeAuthorityWeight)> where
+    // AuthorityId is 32 bytes and BabeAuthorityWeight is a SCALE u64 (8 bytes).
+    const authoritySize = 40;
+    if (start + count * authoritySize !== bytes.length)
       throw new Error("babe.authorities: malformed SCALE vector");
     const authorities: string[] = [];
     let offset = start;
     for (let i = 0; i < count; i++) {
-      if (offset + 41 > bytes.length) throw new Error("babe.authorities: truncated authority");
+      if (offset + authoritySize > bytes.length) throw new Error("babe.authorities: truncated authority");
       authorities.push(`0x${Buffer.from(bytes.subarray(offset, offset + 32)).toString("hex")}`);
       offset += 32;
       offset += 8;
