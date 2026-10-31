@@ -155,9 +155,7 @@ export function createHttpChainReader(
       if (offset + 41 > bytes.length) throw new Error("babe.authorities: truncated authority");
       authorities.push(`0x${Buffer.from(bytes.subarray(offset, offset + 32)).toString("hex")}`);
       offset += 32;
-      const first = bytes[offset++]!;
-      const mode = first & 3;
-      offset += mode === 0 ? 0 : mode === 1 ? 1 : mode === 2 ? 3 : 4;
+      offset += 8;
       if (offset > bytes.length) throw new Error("babe.authorities: truncated weight");
     }
     return authorities;

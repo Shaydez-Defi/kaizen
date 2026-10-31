@@ -8,7 +8,7 @@ const log = "0x06" + "42414245" + "34" + payload;
 const authorities = ["11", "22", "33"].map((byte) => `0x${byte.repeat(32)}`);
 const storageKey = (pallet: string, item: string) =>
   `0x${Buffer.from(xxhashAsU8a(Buffer.from(pallet), 128)).toString("hex")}${Buffer.from(xxhashAsU8a(Buffer.from(item), 128)).toString("hex")}`;
-const babeBytes = `0x0c${authorities.map((key) => `${key.slice(2)}04`).join("")}`;
+const babeBytes = `0x0c${authorities.map((key) => `${key.slice(2)}${"04".repeat(8)}`).join("")}`;
 const grandpaAuthorities = `0x04${"44".repeat(32)}${"0100000000000000"}`;
 
  describe("HTTP chain reader BABE author evidence", () => {

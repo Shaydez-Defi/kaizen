@@ -273,7 +273,7 @@ describe('createHttpChainReader', () => {
   it('reads best/finalized heads and block hashes by number', async () => {
     const chain = { 0: h(0), 7: h(7), 9: h(9) };
     const r = createHttpChainReader('http://127.0.0.1:1', { fetch: fakeFetch(chain, 9, 7) });
-    await expect(r.readHeads()).resolves.toEqual({ best: ref(9), finalized: ref(7), genesisHash: h(0) });
+    await expect(r.readHeads()).resolves.toMatchObject({ best: { ...ref(9), grandpaSetId: "1", grandpaAuthoritiesHash: expect.any(String) }, finalized: { ...ref(7), grandpaSetId: "1", grandpaAuthoritiesHash: expect.any(String) }, genesisHash: h(0) });
     await expect(r.blockHashAt(7)).resolves.toBe(h(7));
     await expect(r.blockHashAt(8)).resolves.toBeNull();
   });
