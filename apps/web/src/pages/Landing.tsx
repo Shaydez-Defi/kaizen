@@ -343,7 +343,7 @@ export function Landing() {
             <div className="num">1</div>
             <div className="sub">Same for CLI and console</div>
           </div>
-        </section>
+        </motion.section>
 
         <motion.section className="lsec" id="product" {...rise}>
           <h2>What Kaizen is, and isn’t</h2>

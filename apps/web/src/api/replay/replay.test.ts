@@ -93,7 +93,7 @@ describe('replay fetch adapter', () => {
   it('refuses every mutation through the real client with REPLAY_MODE', async () => {
     const client = new KaizenApiClient({ fetchImpl: createReplayFetch(noLive) });
     await expect(client.startNetwork('net_9fce9536')).rejects.toMatchObject({ code: 'REPLAY_MODE', status: 409 });
-    await expect(client.executeFault('net_9fce9536', { nodeId: 'net_9fce9536-b', type: 'pause' })).rejects.toThrow(/Replay mode: drills run on a fresh GitHub runner/);
+    await expect(client.executeFault('net_9fce9536', { nodeId: 'net_9fce9536-b', type: 'pause' })).rejects.toThrow(/Replay mode: drills run on fresh GitHub runners/);
     await expect(client.anchorRun('run-mvmj66v4-42cd9817')).rejects.toMatchObject({ code: 'REPLAY_MODE' });
   });
 
