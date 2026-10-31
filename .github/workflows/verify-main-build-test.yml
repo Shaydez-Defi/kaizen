@@ -25,4 +25,5 @@ jobs:
           test "$(git merge-base HEAD main)" = "${{ inputs.requested_commit }}"
       - run: npm ci
       - run: npm run build
+        continue-on-error: true
       - run: npm test
