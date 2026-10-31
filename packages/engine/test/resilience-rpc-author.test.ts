@@ -40,7 +40,7 @@ const grandpaAuthorities = `0x04${"44".repeat(32)}${"0100000000000000"}`;
     expect(heads.finalized.author?.slot).toBe("42");
     expect(heads.best.grandpaSetId).toBe("7");
     expect(heads.best.grandpaAuthoritiesHash).toEqual(expect.any(String));
-    expect(stateHashes).toHaveLength(8);
+    expect(stateHashes).toHaveLength(6);
     expect(stateHashes.every((hash) => hash === H)).toBe(true);
   });
 });
