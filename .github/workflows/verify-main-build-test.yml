@@ -1,5 +1,7 @@
 name: verify-main-build-test
 on:
+  push:
+    branches: [ci/verify-main-cfe4d19]
   workflow_dispatch:
     inputs:
       requested_commit:
