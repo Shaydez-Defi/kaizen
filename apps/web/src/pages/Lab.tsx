@@ -271,6 +271,7 @@ export function Lab() {
         <div>
           <div className={`eyebrow ${done ? (result.ok ? 'ok' : 'bad') : ''}`}>{done ? (result.ok ? 'Recovered' : `Outcome: ${result.outcome}`) : `Failure Lab · ${network.name}`}</div>
           <p className="sub">Run controlled failures on the selected test network; compare live impact with verified recovery.</p>
+          {done ? (
             <h1 aria-label={result.ok ? 'Recovery verified' : 'Fault did not verify'}>
               {result.ok ? (
                 <>

@@ -34,6 +34,6 @@ export function ProofChecklist({ items }: { items: ProofCheckItem[] }): JSX.Elem
           </div>
         </div>
       ))}
-    </section>
+    </motion.section>
   );
 }
